@@ -81,7 +81,7 @@ def _log(msg: str, level: str = "INFO"):
 
 
 def print_proxy_overview():
-    _log("====Printing Proxy Overview  ===========", "INFO")
+    _log("0====Printing Proxy Overview  ===========0", "INFO")
     pm = servermanager.ProxyManager()
     _log("Available 'sources' proxies:", "INFO")
     for (proxy_name, _), proxy_id in pm.GetProxiesInGroup("sources").items():
@@ -94,7 +94,7 @@ def print_proxy_overview():
         _log(f"   - Properties:", "INFO")
         for prop_name in proxy.ListProperties():
             _log(f"     - {prop_name}", "INFO")
-    _log("===Printing Proxy Overview==============DONE", "INFO")
+    _log("1===Printing Proxy Overview==============1", "INFO")
 
 # print_proxy_overview()
 

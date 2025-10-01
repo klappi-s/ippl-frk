@@ -10,8 +10,11 @@ from paraview.simple import *
 paraview.simple._DisableFirstRenderCameraReset()
 
 # ----------------------------------------------------------------
-# setup views used in the visualization
-# ----------------------------------------------------------------
+# print start marker
+print("====================================>")
+print("===EXECUTING CATALYSt VFIELD EXTRACTOR======>")
+print("====================================>")
+
 
 # get the material library
 materialLibrary1 = GetMaterialLibrary()
@@ -174,7 +177,7 @@ pNG3 = CreateExtractor('PNG', renderView1, registrationName='PNG3')
 pNG3.Trigger = 'Time Step'
 
 # init the 'Time Step' selected for 'Trigger'
-pNG3.Trigger.Frequency = 5
+pNG3.Trigger.Frequency = 1
 
 # init the 'PNG' selected for 'Writer'
 pNG3.Writer.FileName = 'PTrap_vField_RenderView1_{timestep:06d}{camera}.png'
@@ -191,8 +194,11 @@ SetActiveSource(glyph1)
 from paraview import catalyst
 options = catalyst.Options()
 options.GlobalTrigger = 'Time Step'
+
+options.EnableCatalystLive = 1
 options.CatalystLiveTrigger = 'Time Step'
 
+options.ExtractsOutputDirectory = 'data_png_extracts'
 # ------------------------------------------------------------------------------
 if __name__ == '__main__':
     from paraview.simple import SaveExtractsUsingCatalystOptions

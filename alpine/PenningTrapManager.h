@@ -38,7 +38,9 @@ public:
 
     PenningTrapManager(size_type totalP_, int nt_, Vector_t<int, Dim> &nr_, double lbt_,
                          std::string& solver_, std::string& stepMethod_)
-        : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_),scaleFactor(30){}
+        : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_),scaleFactor(30){
+            // std::cout << "constrcutor call "<< scaleFactor << std::endl;
+        }
 
     // PenningTrapManager(size_type totalP_, int nt_, Vector_t<int, Dim>& nr_, double lbt_,
     //                    std::string& solver_, std::string& stepMethod_)
@@ -47,7 +49,9 @@ public:
     PenningTrapManager(size_type totalP_, int nt_, Vector_t<int, Dim>& nr_, double lbt_,
                        std::string& solver_, std::string& stepMethod_,
                        std::vector<std::string> preconditioner_params_)
-        : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_, preconditioner_params_) {}
+        : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_, preconditioner_params_),scaleFactor(33) {
+            // std::cout << "constrcutor call "<< scaleFactor << std::endl;
+        }
 
     ~PenningTrapManager(){}
 
@@ -147,6 +151,8 @@ public:
     void initializeParticles() {
         Inform m("Initialize Particles");
 
+        m << "scalefactor is initialized with:" << scaleFactor << endl;
+
         auto* mesh = &this->fcontainer_m->getMesh();
         auto* FL   = &this->fcontainer_m->getFL();
         Vector_t<double, Dim> mu, sd;
@@ -244,6 +250,8 @@ public:
     }
 
     void LeapFrogStep() {
+
+        Inform m("LeapFrogStep");
         // LeapFrog time stepping https://en.wikipedia.org/wiki/Leapfrog_integration
         // Here, we assume a constant charge-to-mass ratio of -1 for
         // all the particles hence eliminating the need to store mass as
@@ -254,10 +262,11 @@ public:
         static IpplTimings::TimerRef domainDecomposition = IpplTimings::getTimer("loadBalance");
         static IpplTimings::TimerRef SolveTimer          = IpplTimings::getTimer("solve");
 
+        m << "currently scaleFactor set as:" << scaleFactor << endl;
         double alpha                            = this->alpha_m;
         double Bext                             = this->Bext_m;
         double DrInv                            = this->DrInv_m;
-        double V0                               = 30 * this->length_m[2];
+        double V0                               = scaleFactor * this->length_m[2];
         Vector_t<double, Dim> length            = this->length_m;
         Vector_t<double, Dim> origin            = this->origin_m;
         double dt                               = this->dt_m;

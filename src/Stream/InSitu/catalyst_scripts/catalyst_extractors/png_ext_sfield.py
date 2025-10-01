@@ -9,9 +9,10 @@ from paraview.simple import *
 #### disable automatic camera reset on 'Show'
 paraview.simple._DisableFirstRenderCameraReset()
 
-# ----------------------------------------------------------------
-# setup views used in the visualization
-# ----------------------------------------------------------------
+# print start marker
+print("====================================>")
+print("===EXECUTING CATALYST SFIELD EXTRACTOR======>")
+print("====================================>")
 
 # get the material library
 materialLibrary1 = GetMaterialLibrary()
@@ -172,7 +173,7 @@ pNG2 = CreateExtractor('PNG', renderView1, registrationName='PNG2')
 pNG2.Trigger = 'Time Step'
 
 # init the 'Time Step' selected for 'Trigger'
-pNG2.Trigger.Frequency = 5
+pNG2.Trigger.Frequency = 1
 
 # init the 'PNG' selected for 'Writer'
 pNG2.Writer.FileName = 'PTrap_sField_RenderView1_{timestep:06d}{camera}.png'
@@ -188,10 +189,12 @@ SetActiveSource(pNG2)
 # Catalyst options
 from paraview import catalyst
 options = catalyst.Options()
-options.ExtractsOutputDirectory = 'datasets_test'
 options.GlobalTrigger = 'Time Step'
+
+options.EnableCatalystLive = 1
 options.CatalystLiveTrigger = 'Time Step'
 
+options.ExtractsOutputDirectory = 'data_png_extracts'
 # ------------------------------------------------------------------------------
 if __name__ == '__main__':
     from paraview.simple import SaveExtractsUsingCatalystOptions

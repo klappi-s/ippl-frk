@@ -90,11 +90,33 @@ namespace CatalystAdaptor {
        } else {
            proxy_file_path = source_dir / "catalyst_scripts" / "proxy_default.xml";
            std::cout << "No valid CATALYST_PROXY_PATH. Using default: " << proxy_file_path << std::endl;
-       }
+        }
+        
+        
+        // Apply resolved paths to Catalyst node
+        node["catalyst/scripts/script/filename"].set(pipeline_file_path.string());
+        node["catalyst/proxies/proxy"].set(proxy_file_path.string());
 
-       // Apply resolved paths to Catalyst node
-       node["catalyst/scripts/script/filename"].set(pipeline_file_path.string());
-       node["catalyst/proxies/proxy"].set(proxy_file_path.string());
+
+
+
+
+
+       node["catalyst/scripts/extract_fs/filename"].set(
+            (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_sfield.py").string()
+        );
+
+       node["catalyst/scripts/extract_fv/filename"].set(
+            (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_vfield.py").string()
+        );
+
+       node["catalyst/scripts/extract_pa/filename"].set(
+            (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_particle.py").string()
+        );
+
+
+
+
        
 
         std::cout << "ippl: catalyst_initialize() call" << std::endl;
@@ -320,7 +342,7 @@ namespace CatalystAdaptor {
         }
         else
         {
-            std::cout << "Result Node dump:" << std::endl;
+            // std::cout << "Result Node dump:" << std::endl;
             const std::string value_path = "catalyst/steerable/fields/scalefactor/values";
             scaleFactor = results[value_path].to_double();
         }   
@@ -407,6 +429,7 @@ namespace CatalystAdaptor {
                 Execute_Field(field, fieldName, vector_host_views[fieldName], node);     
             }
         }
+
 
         AddSteerableChannel(node, scaleFactor);
 

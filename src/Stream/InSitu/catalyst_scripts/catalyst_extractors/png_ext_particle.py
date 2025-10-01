@@ -10,6 +10,11 @@ paraview.simple._DisableFirstRenderCameraReset()
 
 
 
+# print start marker
+print("====================================>")
+print("===EXECUTING CATALYSt PARTICLES EXTRACTOR======>")
+print("====================================>")
+
 
 # ----------------------------------------------------------------
 # setup views used in the visualization
@@ -147,9 +152,9 @@ pNG1 = CreateExtractor('PNG', renderView1, registrationName='PNG1')
 # trace defaults for the extractor.
 pNG1.Trigger = 'Time Step'
 # init the 'Time Step' selected for 'Trigger'
-pNG1.Trigger.Frequency = 5
+pNG1.Trigger.Frequency = 1
 # init the 'PNG' selected for 'Writer'
-pNG1.Writer.FileName = 'PTrap_Part_RenderView1_{timestep:06d}{camera}.png'
+pNG1.Writer.FileName = 'PTrap_eParticles_RenderView1_{timestep:06d}{camera}.png'
 pNG1.Writer.ImageResolution = [1500, 1000]
 pNG1.Writer.OverrideColorPalette = 'GradientBackground'
 pNG1.Writer.Format = 'PNG'
@@ -161,7 +166,7 @@ SetActiveSource(pNG1)
 # Catalyst options
 from paraview import catalyst
 options = catalyst.Options()
-options.ExtractsOutputDirectory = 'datasets_png'
+options.ExtractsOutputDirectory = 'data_png_extracts'
 options.GlobalTrigger = 'Time Step'
 options.EnableCatalystLive = 1
 options.CatalystLiveTrigger = 'Time Step'
