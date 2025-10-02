@@ -65,55 +65,108 @@ namespace CatalystAdaptor {
 
 
 
-    void Initialize() {
-        conduit_cpp::Node node;
+/*  sets a file path to a certain node, first tries to fetch from environment, afterwards uses the dafault path passed  */
+    void set_node_script(
+        conduit_cpp::Node node_path,
+        const char* env_var,
+        const std::filesystem::path default_file_path){
+            
+        const char* file_path_env = std::getenv(env_var);
+        std::filesystem::path file_path;
+
         
-
-       const char* catalyst_pipeline_path_env = std::getenv("CATALYST_PIPELINE_PATH");
-       const char* catalyst_proxy_path_env    = std::getenv("CATALYST_PROXY_PATH");
-
-       std::filesystem::path source_dir = std::filesystem::path(__FILE__).parent_path();
-
-       std::filesystem::path pipeline_file_path;
-       if (catalyst_pipeline_path_env && std::filesystem::exists(catalyst_pipeline_path_env)) {
-           pipeline_file_path = catalyst_pipeline_path_env;
-           std::cout << "Using CATALYST_PIPELINE_PATH from environment: " << pipeline_file_path << std::endl;
+       if (file_path_env && std::filesystem::exists(file_path_env)) {
+           std::cout << "Using " << env_var << " from environment: " << file_path_env << std::endl;
+           file_path = file_path_env;
        } else {
-           pipeline_file_path = source_dir / "catalyst_scripts" / "pipeline_default.py";
-           std::cout << "No valid CATALYST_PIPELINE_PATH. Using default: " << pipeline_file_path << std::endl;
+           std::cout << "No valid " << env_var <<" set. Using default: " << default_file_path << std::endl;
+           file_path = default_file_path;
        }
 
-       std::filesystem::path proxy_file_path;
-       if (catalyst_proxy_path_env && std::filesystem::exists(catalyst_proxy_path_env)) {
-           proxy_file_path = catalyst_proxy_path_env;
-           std::cout << "Using CATALYST_PROXY_PATH from environment: " << proxy_file_path << std::endl;
-       } else {
-           proxy_file_path = source_dir / "catalyst_scripts" / "proxy_default.xml";
-           std::cout << "No valid CATALYST_PROXY_PATH. Using default: " << proxy_file_path << std::endl;
-        }
+       node_path.set(file_path.string());
+    }
+
+
+
+    void Initialize() {
+        conduit_cpp::Node node;
+        std::filesystem::path source_dir = std::filesystem::path(__FILE__).parent_path();
+        
+
+    //    const char* catalyst_pipeline_path_env = std::getenv("CATALYST_PIPELINE_PATH");
+    //    const char* catalyst_proxy_path_env    = std::getenv("CATALYST_PROXY_PATH");
+
+
+
+
+    //    std::filesystem::path pipeline_file_path;
+    //    if (catalyst_pipeline_path_env && std::filesystem::exists(catalyst_pipeline_path_env)) {
+    //        pipeline_file_path = catalyst_pipeline_path_env;
+    //        std::cout << "Using CATALYST_PIPELINE_PATH from environment: " << pipeline_file_path << std::endl;
+    //    } else {
+    //        pipeline_file_path = source_dir / "catalyst_scripts" / "pipeline_default.py";
+    //        std::cout << "No valid CATALYST_PIPELINE_PATH. Using default: " << pipeline_file_path << std::endl;
+    //    }
+
+    //    std::filesystem::path proxy_file_path;
+    //    if (catalyst_proxy_path_env && std::filesystem::exists(catalyst_proxy_path_env)) {
+    //        proxy_file_path = catalyst_proxy_path_env;
+    //        std::cout << "Using CATALYST_PROXY_PATH from environment: " << proxy_file_path << std::endl;
+    //    } else {
+    //        proxy_file_path = source_dir / "catalyst_scripts" / "proxy_default.xml";
+    //        std::cout << "No valid CATALYST_PROXY_PATH. Using default: " << proxy_file_path << std::endl;
+    //     }
         
         
-        // Apply resolved paths to Catalyst node
-        node["catalyst/scripts/script/filename"].set(pipeline_file_path.string());
-        node["catalyst/proxies/proxy"].set(proxy_file_path.string());
+    //     // Apply resolved paths to Catalyst node
+    //     node["catalyst/scripts/script/filename"].set(pipeline_file_path.string());
+    //     node["catalyst/proxies/proxy"].set(proxy_file_path.string());
 
 
 
 
 
 
-       node["catalyst/scripts/extract_fs/filename"].set(
-            (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_sfield.py").string()
+    //    node["catalyst/scripts/extract_fs/filename"].set(
+    //         (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_sfield.py").string()
+    //     );
+
+    //    node["catalyst/scripts/extract_fv/filename"].set(
+    //         (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_vfield.py").string()
+    //     );
+
+    //    node["catalyst/scripts/extract_pa/filename"].set(
+    //         (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_particle.py").string()
+    //     );
+
+        
+        set_node_script( node["catalyst/proxies/proxy_e/filename"],
+                        "CATALYST_PROXYS_PATH",
+                        source_dir / "catalyst_scripts" / "proxy_default.xml"
         );
 
-       node["catalyst/scripts/extract_fv/filename"].set(
-            (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_vfield.py").string()
-        );
+        
+        
+        set_node_script( node["catalyst/scripts/script/filename"],
+                        "CATALYST_PIPELINE_PATH",
+                        source_dir / "catalyst_scripts" / "pipeline_default.py"
+                    );
 
-       node["catalyst/scripts/extract_pa/filename"].set(
-            (source_dir / "catalyst_scripts" / "catalyst_extractors" / "png_ext_particle.py").string()
-        );
 
+        set_node_script( node["catalyst/scripts/extract0/filename"],
+                        "CATALYST_EXTRACTOR_SCRIPT_0",
+                        source_dir /"catalyst_scripts" / "catalyst_extractors" /"png_ext_particle.py"
+                    );
+
+        set_node_script( node["catalyst/scripts/extract1/filename"],
+                        "CATALYST_EXTRACTOR_SCRIPT_1",
+                        source_dir /"catalyst_scripts" / "catalyst_extractors" /"png_ext_sfield.py"
+                    );
+
+        set_node_script( node["catalyst/scripts/extract2/filename"],
+                        "CATALYST_EXTRACTOR_SCRIPT_2",
+                        source_dir /"catalyst_scripts" / "catalyst_extractors" /"png_ext_vfield.py"
+                    );
 
 
 

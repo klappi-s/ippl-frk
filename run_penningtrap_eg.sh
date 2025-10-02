@@ -1,7 +1,8 @@
 #!/bin/bash
-
-export PV_PREFIX=/.../ParaView-5.12.0-MPI-Linux-Python3.10-x86_64
-export IPPL_DIR=/.../ippl
+PV_PREFIX="/home/klappi/AddApp/paraview_versions/ParaView-5.12.0-MPI-Linux-Python3.10-x86_64"
+export IPPL_DIR=/home/klappi/Documents/Msc/IPPL/ippl-frk
+# export PV_PREFIX=/.../ParaView-5.12.0-MPI-Linux-Python3.10-x86_64
+# export IPPL_DIR=/.../ippl
 
 
 export CATALYST_IMPLEMENTATION_PATHS="${PV_PREFIX}/lib/catalyst"
@@ -15,6 +16,12 @@ export PENNINGTRAP_BINDIR=${IPPL_DIR}/build/alpine
 export CATALYST_PIPELINE_PATH=${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/pipeline_default.py
 export CATALYST_PROXY_PATH=${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/proxy_default.xml
 # Add default catalyst extractors...
+
+
+# dont set will take default path
+# export  CATALYST_EXTRACTOR_SCRIPT_0=${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/catalyst_extractors/png_ext_empty.py
+# export  CATALYST_EXTRACTOR_SCRIPT_1=${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/catalyst_extractors/png_ext_empty.py
+# export  CATALYST_EXTRACTOR_SCRIPT_2=${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/catalyst_extractors/png_ext_empty.py
 
 
 
