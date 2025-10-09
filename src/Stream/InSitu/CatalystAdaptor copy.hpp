@@ -679,10 +679,6 @@ void CatalystAdaptor::Execute(
             );
         }
 
-
-
-
-
         // registry_vis.for_each(
         //     [&node, &vr](std::string_view label, const auto& entry){
         //         // std::cout << "  Entry ID: " << label << "\n";
@@ -700,24 +696,14 @@ void CatalystAdaptor::Execute(
 
 
 
-
-
-
-
-
-
-
-
-
-        
-        /* std::cout << "dump Conduit Catalyst Node pass forward "< std::endl; */
+        /* std::cout << dump outgoing node << std::endl; */
         // node.print();
+  
         // Pass Conduit node to Catalyst and execute extraction and visualisation
         catalyst_status err = catalyst_execute(conduit_cpp::c_node(&node));
         if (err != catalyst_status_ok) {
             std::cerr << "Failed to execute Catalyst: " << err << std::endl;
         }
-
         /* Catch steerables in results node */
         conduit_cpp::Node results;
         Results(results);  
@@ -792,8 +778,6 @@ void CatalystAdaptor::Initialize([[maybe_unused]] auto& registry_vis, [[maybe_un
             m << "catalyst PNG extract DEACTIVATED" << endl;
         }
 
-        args.append().set_string("--experiment_name");
-        args.append().set_string(TestName);
 
         const char* catalyst_vtk = std::getenv("IPPL_CATALYST_VTK");
 
@@ -940,13 +924,13 @@ void CatalystAdaptor::InitializeRuntime(visreg::VisRegistryRuntime& visReg,
 
 void CatalystAdaptor::ExecuteRuntime(visreg::VisRegistryRuntime& visReg,
                                      visreg::VisRegistryRuntime& steerReg,
+                                     ViewRegistry& viewReg,
                                      int cycle, double time, int rank) {
     conduit_cpp::Node node;
     auto state = node["catalyst/state"];
     state["cycle"].set(cycle);
     state["time"].set(time);
     state["domain_id"].set(rank);
-    ViewRegistry viewReg;
 
     const char* catalyst_steer = std::getenv("IPPL_CATALYST_STEER");
 
@@ -968,8 +952,11 @@ void CatalystAdaptor::ExecuteRuntime(visreg::VisRegistryRuntime& visReg,
     if (catalyst_steer && std::string(catalyst_steer) == "ON") {
         conduit_cpp::Node results;
         Results(results);
-        SteerFetchVisitor fetchV{results};
-        steerReg.for_each(fetchV);
+        steerReg.for_each([&](const std::string& label, auto& val) {
+            if constexpr (std::is_arithmetic_v<std::remove_cvref_t<decltype(val)>>) {
+                FetchSteerableChannelValue(val, label, results);
+            }
+        });
     }
 }
 
