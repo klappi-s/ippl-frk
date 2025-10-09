@@ -129,19 +129,20 @@ public:
         }
     }
 
-    // RVALUE overload: take ownership by storing internally and binding to it
-    template<class T>
-    void add(std::string label, T&& value) {
-        static_assert(AllowedVisTypeOrShared_v<typename std::decay<T>::type>, "VisRegistryRuntime: unsupported value type (rvalue)");
-        using Stored = typename std::decay<T>::type;
-        if constexpr (is_allowed_shared_ptr<Stored>::value) {
-            // value is already a shared_ptr<U>
-            add(label, value);
-        } else {
-            auto holder = std::make_shared<Stored>(std::forward<T>(value));
-            add(label, holder);
-        }
-    }
+    // // RVALUE overload: take ownership by storing internally and binding to it
+    // template<class T>
+    // void add(std::string label, T&& value) {
+    //     static_assert(AllowedVisTypeOrShared_v<typename std::decay<T>::type>,
+    //                   "VisRegistryRuntime: unsupported value type (rvalue)");
+    //     using Stored = typename std::decay<T>::type;
+    //     if constexpr (is_allowed_shared_ptr<Stored>::value) {
+    //         // value is already a shared_ptr<U> -> dispatch to shared_ptr overload explicitly
+    //         this->add(static_cast<const std::string&>(label), std::as_const(value));
+    //     } else {
+    //         auto holder = std::make_shared<Stored>(std::forward<T>(value));
+    //         this->add(static_cast<const std::string&>(label), holder);
+    //     }
+    // }
 
     // Overloads for known visitors
     void for_each(CatalystAdaptor::InitVisitor& v) const {
@@ -171,19 +172,26 @@ public:
 //                 "rho", std::ref(fieldRho),
 //                 "magnetic_scale", std::ref(magnetic_scale));
 // A shared_ptr-returning variant is also provided.
-
 namespace detail {
     inline void add_pairs(VisRegistryRuntime&) {}
 
     template<class L, class V, class... Rest>
     void add_pairs(VisRegistryRuntime& r, L&& label, V&& value, Rest&&... rest) {
-        static_assert(AllowedVisTypeOrShared_v<typename std::decay<V>::type>, "VisRegistryRuntime: unsupported value type in factory");
-        // Forward to appropriate add() overload (lvalue vs rvalue dispatch)
+        static_assert(AllowedVisTypeOrShared_v<typename std::decay<V>::type>,
+                      "VisRegistryRuntime: unsupported value type in factory");
+
+        // Materialize label as std::string to avoid ambiguous overloads
+        std::string lbl{std::forward<L>(label)};
+
         if constexpr (std::is_lvalue_reference_v<V&&>) {
-            r.add(std::forward<L>(label), value); // lvalue version (keeps reference)
-        } else {
-            r.add(std::string(std::forward<L>(label)), std::forward<V>(value));
-        }
+            // lvalue path: keep reference semantics for non-owning entries
+            r.add(lbl, value); // prefers const std::string& overloads
+        } 
+        // else {
+        //     // rvalue path: allow ownership-taking overload
+        //     r.add(std::move(lbl), std::forward<V>(value));
+        // }
+
         if constexpr (sizeof...(Rest) > 0) {
             static_assert(sizeof...(Rest) % 2 == 0, "Factory arguments must be label-value pairs");
             add_pairs(r, std::forward<Rest>(rest)...);

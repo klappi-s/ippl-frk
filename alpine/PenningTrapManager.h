@@ -186,11 +186,12 @@ public:
                 //                     )
 
         // auto myR_steer = 
-    runtime_steer_registry_ =  visreg::MakeVisRegistryRuntimePtr("magnetic", magnetic_scale, "electric", electric_scale);
+        runtime_steer_registry_ =  visreg::MakeVisRegistryRuntimePtr("magnetic", magnetic_scale, "electric", electric_scale);
         
         // auto myR_vis = 
         runtime_vis_registry_ =   visreg::MakeVisRegistryRuntimePtr(
-                                    "ions",             *this->pcontainer_m, 
+                                    "ions",             this->pcontainer_m, 
+                                    // "ions",             *this->pcontainer_m, 
                                     "electrostatic",    this->fcontainer_m->getE(), 
                                     "density",          this->fcontainer_m->getRho() 
                                 );
