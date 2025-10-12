@@ -129,6 +129,8 @@ if (IPPL_ENABLE_CATALYST)
     endif()
 
     # Use the list of hints in find_package
+    message (STATUS "find_package(catalyst...)")
+    # find_package(catalyst 2.0 REQUIRED
     find_package(catalyst REQUIRED
         HINTS 
         ${CATALYST_HINTS}
@@ -247,3 +249,18 @@ else()
 endif()
 
 include(${PROJECT_SOURCE_DIR}/cmake/InstallIppl.cmake)
+
+
+
+
+# target_compile_definitions(ippl PUBLIC
+#   $<$<BOOL:${ENABLE_FFT}>:-DENABLE_FFT>
+#   $<$<BOOL:${ENABLE_CATALYST}>:-DENABLE_CATALYST>
+#   IPPL_ENABLE_TIMER_FENCES=${TimerFences}
+# )
+
+# target_link_libraries(ippl PUBLIC
+#   Kokkos::kokkos
+#   $<$<BOOL:${ENABLE_FFT}>:Heffte>
+#   $<$<BOOL:${ENABLE_CATALYST}>:catalyst::catalyst>
+#   )
