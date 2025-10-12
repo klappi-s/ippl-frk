@@ -90,6 +90,7 @@ namespace CatalystAdaptor {
                     , const std::string label
                     ,       conduit_cpp::Node& node
                     , const std::filesystem::path source_dir
+                    , const bool png_extracts
         // , ViewRegistry& vr
     );
 
@@ -115,6 +116,7 @@ namespace CatalystAdaptor {
                                         , const std::string label
                                         ,       conduit_cpp::Node& node
                                         , const std::filesystem::path source_dir
+                                        , const bool png_extracts
                                         // , ViewRegistry& vr
         );
 
@@ -139,6 +141,7 @@ namespace CatalystAdaptor {
                                         , const std::string label
                                         ,       conduit_cpp::Node& node
                                         , const std::filesystem::path source_dir
+                                        , const bool png_extracts
                                         // , ViewRegistry& vr
         );
 
@@ -160,6 +163,7 @@ namespace CatalystAdaptor {
                 ,                  const std::string label
                 , [[maybe_unused]]       conduit_cpp::Node& node
                 , [[maybe_unused]] const std::filesystem::path source_dir
+                , const bool png_extracts
         // , ViewRegistry& vr
     );
 
@@ -180,6 +184,7 @@ namespace CatalystAdaptor {
                 , const std::string           label
                 ,       conduit_cpp::Node&    node
                 , const std::filesystem::path source_dir
+                , const bool png_extracts
                 // , ViewRegistry& vr 
         );
 
