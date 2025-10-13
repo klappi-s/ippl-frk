@@ -4,6 +4,9 @@
 #include <type_traits>
 #include "Stream/Registry/VisRegistryRuntime.h"
 #include "Stream/Registry/ViewRegistry.h"
+
+
+#include <catalyst.hpp>
 // Avoid circular include with CatalystAdaptor.h; forward-declare needed types/functions instead.
 namespace conduit_cpp { class Node; }
 

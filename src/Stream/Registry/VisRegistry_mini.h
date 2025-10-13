@@ -21,7 +21,7 @@
  * while maintaining type safety during iteration.
  */
 template<typename... Types>
-class VisRegistry {
+class VisRegistry_mini {
 public:
     using storage_type = std::tuple<std::pair<std::string, Types>...>;
 

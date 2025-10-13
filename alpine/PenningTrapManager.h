@@ -19,7 +19,7 @@
 
 
 #ifdef IPPL_ENABLE_CATALYST
-#include "Stream/Registry/VisRegistry2.h"
+// #include "Stream/Registry/VisRegistry2.h"
 #include "Stream/Registry/ViewRegistry.h"
 // #include "Stream/InSitu/VisBaseAdaptor.h"
 #include "Stream/Registry/VisRegistryRuntime.h"

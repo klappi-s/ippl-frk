@@ -16,7 +16,8 @@
 
 #include "Utility/IpplException.h"
 
-#include "Stream/Registry/VisRegistry2.h"
+// #include "Stream/Registry/VisRegistry2.h"
+#include "Stream/Registry/RegistryHelper.h"
 #include "Stream/Registry/ViewRegistry.h"
 #include "Stream/Registry/VisRegistryRuntime.h" // runtime non-templated registry
 #include "Stream/InSitu/CatalystVisitors.h"     // visitor structs

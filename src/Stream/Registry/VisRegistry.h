@@ -21,17 +21,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
 /**
  * @brief Base registry entry container for storing named pointers (type-erased).
  */
