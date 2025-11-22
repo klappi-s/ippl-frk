@@ -12,6 +12,8 @@
 #include "Ippl.h"
 
 #include <catalyst.hpp>
+#include <catalyst_conduit.hpp>
+
 #include <iostream>
 #include <optional>
 #include <string>
@@ -91,6 +93,28 @@ namespace ippl{
 
     /* FORWARD DECLARATION */
 class VisRegistryRuntime;
+
+
+
+struct LinMap{
+    // std::vector
+    double time;
+    ippl::Vector<double, 3> x_row;
+    ippl::Vector<double, 3> y_row;
+    ippl::Vector<double, 3> z_row;
+};
+
+// class BasicMaps{
+//     std::vector<double> time;
+// }
+
+struct LinMaps{
+    
+    std::vector<double> time;
+    std::vector<ippl::Vector<double, 3>> x_row;
+    std::vector<ippl::Vector<double, 3>> y_row;
+    std::vector<ippl::Vector<double, 3>> z_row;
+};
 
 
     /**
