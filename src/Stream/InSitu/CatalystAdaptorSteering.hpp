@@ -158,6 +158,25 @@ inline void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const ippl::
     set_vec3_field("Map_z_row", lms.z_row);
 }
 
+// Init: std::vector<LinMap> (AoS) -> reuse LinMaps (SoA) initialization for identical GUI wiring
+inline void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<ippl::LinMap>& lm_vec, const std::string& label )
+{
+    ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: vector<LinMap> (AoS alias LinMaps)" << endl;
+    ippl::LinMaps tmp;
+    const size_t N = lm_vec.size();
+    tmp.time.reserve(N);
+    tmp.x_row.reserve(N);
+    tmp.y_row.reserve(N);
+    tmp.z_row.reserve(N);
+    for(const auto& m : lm_vec){
+        tmp.time.push_back(m.time);
+        tmp.x_row.push_back(m.x_row);
+        tmp.y_row.push_back(m.y_row);
+        tmp.z_row.push_back(m.z_row);
+    }
+    InitSteerableChannel(tmp, label);
+}
+
 
 
 // =====================================================================================
@@ -388,6 +407,26 @@ inline void CatalystAdaptor::AddSteerableChannel( const ippl::LinMaps& lms, cons
     set_vec3_field("Map_z_row", lms.z_row);
 }
 
+// Add: std::vector<LinMap> forward pass -> convert AoS to SoA and delegate
+inline void CatalystAdaptor::AddSteerableChannel( const std::vector<ippl::LinMap>& lm_vec, const std::string& steerable_suffix )
+{
+    (void)steerable_suffix; // same semantics as LinMaps
+    ca_m << "::Execute()::AddSteerableChannel(vector<LinMap>)" << endl;
+    ippl::LinMaps tmp;
+    const size_t N = lm_vec.size();
+    tmp.time.reserve(N);
+    tmp.x_row.reserve(N);
+    tmp.y_row.reserve(N);
+    tmp.z_row.reserve(N);
+    for(const auto& m : lm_vec){
+        tmp.time.push_back(m.time);
+        tmp.x_row.push_back(m.x_row);
+        tmp.y_row.push_back(m.y_row);
+        tmp.z_row.push_back(m.z_row);
+    }
+    AddSteerableChannel(tmp, steerable_suffix);
+}
+
 
 
 // =====================================================================================
@@ -593,29 +632,29 @@ inline void CatalystAdaptor::FetchSteerableChannelValue( ippl::LinMaps& lms, con
         return false;
     };
 
-        auto fetch_vec3_array = [&](const std::string& where,
-                                ippl::vector<double,3>& _x0,
-                                ippl::vector<double,3>& _y1,
-                                ippl::vector<double,3>& _z2) -> bool {
+    //     auto fetch_vec3_array = [&](const std::string& where,
+    //                             ippl::vector<double,3>& _x0,
+    //                             ippl::vector<double,3>& _y1,
+    //                             ippl::vector<double,3>& _z2) -> bool {
         
-        // Case A: named components x/y/z
-        bool has_indexed = results.has_path(where + "/0") && results.has_path(where + "/1") && results.has_path(where + "/2");
-        // bool has_xyz = results.has_path(root + "/x") && results.has_path(root + "/y") && results.has_path(root + "/z");
-        std::cout << where << "has indexed:"  << has_indexed << std::endl;
-        if (has_indexed) {                                
-                conduit_cpp::Node vals = results[where];
-                conduit_cpp::Node vals_0 = results[where + "/0"];
-                // conduit_cpp::Node vals_1 = results[where + "/1"];
-                // conduit_cpp::Node vals_2 = results[where + "/2"];
-                for (size_t i = 0; i < N; ++i) {
-                    _x0[i] = vals_0.as_double_ptr()[  i];
-                    _y1[i] = vals_0.as_double_ptr()[3+i];
-                    _z2[i] = vals_0.as_double_ptr()[6+i];
-                }
-            return true;
-        }
-        return false;
-    };
+    //     // Case A: named components x/y/z
+    //     bool has_indexed = results.has_path(where + "/0") && results.has_path(where + "/1") && results.has_path(where + "/2");
+    //     // bool has_xyz = results.has_path(root + "/x") && results.has_path(root + "/y") && results.has_path(root + "/z");
+    //     std::cout << where << "has indexed:"  << has_indexed << std::endl;
+    //     if (has_indexed) {                                
+    //             conduit_cpp::Node vals = results[where];
+    //             conduit_cpp::Node vals_0 = results[where + "/0"];
+    //             // conduit_cpp::Node vals_1 = results[where + "/1"];
+    //             // conduit_cpp::Node vals_2 = results[where + "/2"];
+    //             for (size_t i = 0; i < N; ++i) {
+    //                 _x0[i] = vals_0.as_double_ptr()[  i];
+    //                 _y1[i] = vals_0.as_double_ptr()[3+i];
+    //                 _z2[i] = vals_0.as_double_ptr()[6+i];
+    //             }
+    //         return true;
+    //     }
+    //     return false;
+    // };
 
 
 
@@ -671,6 +710,131 @@ inline void CatalystAdaptor::FetchSteerableChannelValue( ippl::LinMaps& lms, con
     }
     ca_m << "::Execute()::FetchSteerableChannel(LinMaps)| after fetch | count=" << lms.time.size() << endl;
 
+}
+
+// Fetch: std::vector<LinMap> <- LinMaps
+inline void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label)
+{
+    (void)label; // same fixed-channel semantics
+    ca_m << "::Execute()::FetchSteerableChannel(vector<LinMap>) | prior_count=" << lm_vec.size() << endl;
+    // ippl::LinMaps tmp;
+    // // Seed tmp with current size (not strictly needed, fetch will overwrite based on results)
+    // tmp.time.reserve(lm_vec.size());
+    // tmp.x_row.reserve(lm_vec.size());
+    // tmp.y_row.reserve(lm_vec.size());
+    // tmp.z_row.reserve(lm_vec.size());
+    // // Perform fetch on LinMaps representation
+    // FetchSteerableChannelValue(tmp, label);
+    // // Convert back to AoS
+    // const size_t N = tmp.time.size();
+    // lm_vec.clear();
+    // lm_vec.reserve(N);
+    // for(size_t i=0;i<N;++i){
+    //     ippl::LinMap m;
+    //     m.time  = tmp.time[i];
+    //     m.x_row = tmp.x_row[i];
+    //     m.y_row = tmp.y_row[i];
+    //     m.z_row = tmp.z_row[i];
+    //     lm_vec.push_back(std::move(m));
+    // }
+
+    // DOESNT WORK ....
+
+
+
+
+
+    auto time_ =  results["catalyst/steerable_channel_backward_all/fields/steerable_field_b_Map_time/values"];
+    size_t N_old = lm_vec.size();
+    size_t N_new = time_.dtype().number_of_elements();
+    size_t N = std::max(N_old,N_new);
+
+
+    auto fetch_scalar_array = [&](const std::string& name, std::vector<double>& out) -> bool {
+        std::string path = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                           "steerable_field_b_" + name + "/values";
+        if (!results.has_path(path)) return false;
+        // values is a list of doubles: [t0, t1, ...] or an object with numeric keys
+
+
+        conduit_cpp::Node vals = results[path];
+        size_t n = 0;
+        n = vals.dtype().number_of_elements();
+        if (n == 0) return false;
+        out.resize(n);
+        for (size_t i = 0; i < n; ++i) out[i] =  vals.as_double_ptr()[i];
+        return true;
+    };
+
+
+
+    auto fetch_vec3_array = [&](const std::string& where,
+                                std::vector<double>& _x0,
+                                std::vector<double>& _y1,
+                                std::vector<double>& _z2) -> bool {
+        
+        // Case A: named components x/y/z
+        bool has_indexed = results.has_path(where + "/0") && results.has_path(where + "/1") && results.has_path(where + "/2");
+        // bool has_xyz = results.has_path(root + "/x") && results.has_path(root + "/y") && results.has_path(root + "/z");
+        std::cout << where << "has indexed:"  << has_indexed << std::endl;
+        if (has_indexed) {                                
+                conduit_cpp::Node vals = results[where];
+                conduit_cpp::Node vals_0 = results[where + "/0"];
+                // conduit_cpp::Node vals_1 = results[where + "/1"];
+                // conduit_cpp::Node vals_2 = results[where + "/2"];
+                for (size_t i = 0; i < N; ++i) {
+                    _x0[i] = vals_0.as_double_ptr()[3*i];
+                    _y1[i] = vals_0.as_double_ptr()[1+i*3];
+                    _z2[i] = vals_0.as_double_ptr()[2+i*3];
+                }
+            return true;
+        }
+        return false;
+    };
+
+    std::vector<double> timeVals;
+    std::vector<double> x_x(N), x_y(N), x_z(N);
+    std::vector<double> y_x(N), y_y(N), y_z(N);
+    std::vector<double> z_x(N), z_y(N), z_z(N);
+    
+    const std::string where = std::string("catalyst/steerable_channel_backward_all/fields/");
+    bool gotTime = fetch_scalar_array("Map_time", timeVals);
+
+    bool gotX = fetch_vec3_array(where + "steerable_field_b_Map_x_row/values", x_x, x_y, x_z);
+    bool gotY = fetch_vec3_array(where + "steerable_field_b_Map_y_row/values", y_x, y_y, y_z);
+    bool gotZ = fetch_vec3_array(where + "steerable_field_b_Map_z_row/values", z_x, z_y, z_z);
+
+
+            // If nothing present, keep prior values (pre-GUI case)
+            if (!(gotTime || gotX || gotY || gotZ)) {
+                return;
+            }
+
+            // Replace current content with exactly what the client sent (prevents mixing)
+            lm_vec.assign(N_new, ippl::LinMap() );
+
+            for (size_t i = 0; i < N_new; ++i) {
+                if (gotTime && i < timeVals.size()) lm_vec[i].time = timeVals[i];
+                if (gotX && i < x_x.size()) lm_vec[i].x_row = ippl::Vector<double,3>({x_x[i], x_y[i], x_z[i]});
+                if (gotY && i < y_x.size()) lm_vec[i].y_row = ippl::Vector<double,3>({y_x[i], y_y[i], y_z[i]});
+                if (gotZ && i < z_x.size()) lm_vec[i].z_row = ippl::Vector<double,3>({z_x[i], z_y[i], z_z[i]});
+
+                /* alternative: */
+                // if (gotX && i < x_x.size()) fetch_vec3_array(where + "steerable_field_b_Map_x_row/values", lms.x_row[0] = ippl::Vector<double,3>({x_x[i], x_y[i], x_z[i]});
+                // if (gotY && i < y_x.size()) fetch_vec3_array(lms.y_row[i] = ippl::Vector<double,3>({y_x[i], y_y[i], y_z[i]});
+                // if (gotZ && i < z_x.size()) fetch_vec3_array(lms.z_row[i] = ippl::Vector<double,3>({z_x[i], z_y[i], z_z[i]});
+            }
+
+    // for (size_t i = 0; i < lms.time.size(); ++i) {
+    //     std::cout << i << ":  time" " " << lms.time[i] << std::endl;
+    //     std::cout << "Map:" << std::endl;
+    //     std::cout << lm_vec.x_row[i][0] << " " << lm_vec.x_row[i][1] << " " << lm_vec.x_row[i][2] << std::endl;
+    //     std::cout << lm_vec.y_row[i][0] << " " << lm_vec.y_row[i][1] << " " << lm_vec.y_row[i][2] << std::endl;
+    //     std::cout << lm_vec.z_row[i][0] << " " << lm_vec.z_row[i][1] << " " << lm_vec.z_row[i][2] << std::endl;
+    // }
+
+    
+    ca_m << "::Execute()::FetchSteerableChannel(vector<LinMap>) | new_count=" << lm_vec.size() << endl;
 }
 
 

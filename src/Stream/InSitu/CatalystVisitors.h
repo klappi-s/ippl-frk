@@ -62,7 +62,8 @@ inline constexpr bool AllowedSteerType_v =
     || is_vector_v<T>
     || std::is_same_v<std::decay_t<T>, Button>
     || std::is_same_v<std::decay_t<T>, LinMap>
-    || std::is_same_v<std::decay_t<T>, LinMaps>;
+    || std::is_same_v<std::decay_t<T>, LinMaps>
+    || std::is_same_v<std::decay_t<T>, std::vector<ippl::LinMap>>; // AoS alternative for LinMaps
 
 
 template<class T>

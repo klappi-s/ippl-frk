@@ -96,6 +96,15 @@ public:
                 lm_m.y_row.push_back(ippl::Vector<double,3>({4.0,5.0,6.0}));
                 lm_m.z_row.push_back(ippl::Vector<double,3>({7.0,8.0,9.0}));
 
+                // Initialize AoS vector lmv_m with identical two LinMap entries
+                lmv_m.clear();
+                {
+                    ippl::LinMap lm1; lm1.time = 1.50; lm1.x_row = ippl::Vector<double,3>({10,20,30}); lm1.y_row = ippl::Vector<double,3>({40,50,60}); lm1.z_row = ippl::Vector<double,3>({70,80,90});
+                    lmv_m.push_back(lm1);
+                    ippl::LinMap lm2; lm2.time = 2.50; lm2.x_row = ippl::Vector<double,3>({1.0,2.0,3.0}); lm2.y_row = ippl::Vector<double,3>({4.0,5.0,6.0}); lm2.z_row = ippl::Vector<double,3>({7.0,8.0,9.0});
+                    lmv_m.push_back(lm2);
+                }
+
             }
 
     ~AlpineSightManager(){}
@@ -114,9 +123,8 @@ private:
 
     ippl::LinMap sLinMap_m;
     ippl::LinMap sLinMap2_m;
-    ippl::LinMaps lm_m;
-
-    std::vector<ippl::LinMap> map_vec;
+    ippl::LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
+    std::vector<ippl::LinMap> lmv_m; // NEW: AoS vector<LinMap> used for steering registration
 
 
     Vector_t<double, Dim> length_m;
@@ -203,6 +211,16 @@ public:
         static IpplTimings::TimerRef SolveTimer = IpplTimings::getTimer("solve");
         IpplTimings::startTimer(SolveTimer);
 
+                // Populate AoS vector lmv_m (mirror of lm_m) before registry build
+                lmv_m.clear();
+                for (size_t i = 0; i < lm_m.time.size(); ++i) {
+                    ippl::LinMap tmp;
+                    tmp.time  = lm_m.time[i];
+                    tmp.x_row = lm_m.x_row[i];
+                    tmp.y_row = lm_m.y_row[i];
+                    tmp.z_row = lm_m.z_row[i];
+                    lmv_m.push_back(tmp);
+                }
         this->fsolver_m->runSolver();
 
         IpplTimings::stopTimer(SolveTimer);
@@ -216,7 +234,6 @@ public:
 
         #ifdef IPPL_ENABLE_CATALYST
         m << "Catalyst is enabled" << endl; 
-        if(!vis_init){
             std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                         //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
                                         // "electric",         electric_scale,
@@ -227,7 +244,8 @@ public:
                                         // "experiment",       e_m,
                                         // "single_LinMap",    sLinMap_m,
                                         // "single_LinMap2",   sLinMap2_m,
-                                        "LinMaps", lm_m 
+                                        // "LinMaps", lm_m            // original SoA registration
+                                        "LinMaps", lmv_m             // now registering AoS variant (vector<LinMap>)
                                     );
                                 
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
@@ -241,17 +259,17 @@ public:
                                     );
 
             /* Register enum choices for dropdowns before initialization */
-            cat_vis.RegisterEnumChoices("experiment", {
-                {"PenningTrap",   static_cast<int>(PenningTrap)},
-                {"LandauDamping", static_cast<int>(LandauDamping)},
-                {"UniformPlasma", static_cast<int>(UniformPlasma)}
-            });
+            // cat_vis.RegisterEnumChoices("experiment", {
+                // {"PenningTrap",   static_cast<int>(PenningTrap)},
+                // {"LandauDamping", static_cast<int>(LandauDamping)},
+                // {"UniformPlasma", static_cast<int>(UniformPlasma)}
+            // });
 
             // CatalystAdaptor::
             cat_vis.InitializeRuntime(runtime_vis_registry, runtime_steer_registry);
 
             vis_init = true;
-        }
+    
         #endif
         
         #ifdef IPPL_ENABLE_ASCENT

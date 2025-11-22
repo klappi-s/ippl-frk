@@ -648,6 +648,8 @@ class CatalystAdaptor {
     void InitSteerableChannel( const ippl::LinMap& lm, const std::string& label );
     // LinMaps dynamic-list steering (N maps: struct-of-arrays)
     void InitSteerableChannel( const ippl::LinMaps& lms, const std::string& label );
+    // AoS alternative: std::vector<LinMap> (converted internally to LinMaps for identical GUI behavior)
+    void InitSteerableChannel( const std::vector<ippl::LinMap>& lm_vec, const std::string& label );
 
 
 
@@ -682,6 +684,8 @@ class CatalystAdaptor {
     void AddSteerableChannel(const ippl::LinMap& lm, const std::string& steerable_suffix);
     // LinMaps dynamic-list steering (N maps: struct-of-arrays)
     void AddSteerableChannel(const ippl::LinMaps& lms, const std::string& steerable_suffix);
+    // AoS alternative forward pass: std::vector<LinMap>
+    void AddSteerableChannel(const std::vector<ippl::LinMap>& lm_vec, const std::string& steerable_suffix);
 
 
     /* maybe use function overloading instead ... */
@@ -714,6 +718,8 @@ class CatalystAdaptor {
     void FetchSteerableChannelValue( ippl::LinMap& lm, const std::string& label);
     // LinMaps dynamic-list fetch
     void FetchSteerableChannelValue( ippl::LinMaps& lms, const std::string& label);
+    // AoS alternative fetch
+    void FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label);
         
 
     /**
