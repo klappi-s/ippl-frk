@@ -20,6 +20,7 @@
 #include <utility>
 #include <functional>
 #include <cassert>
+#include <unordered_map>
 
 #include <Stream/InSitu/CatalystAdaptor.h>
 
@@ -39,37 +40,17 @@
 // Category traits
 namespace ippl {
 
-template<class T>
-inline constexpr bool is_scalar_v = std::is_arithmetic_v<typename std::decay<T>::type>;
 
-template<class T>
-inline constexpr bool is_particle_v = std::is_base_of<ippl::ParticleBaseBase, typename std::decay<T>::type>::value;
 
-template<class T>
-struct is_field : std::false_type {};
-
-template<class V, unsigned Dim, class... Rest>
-struct is_field<ippl::Field<V, Dim, Rest...>> : std::true_type {};
-
-template<class T>
-inline constexpr bool is_field_v = is_field<typename std::decay<T>::type>::value;
-
-template<class T>
-inline constexpr bool AllowedVisType_v =
-    is_scalar_v<T>
-    || std::is_enum_v<typename std::decay<T>::type>
-    || is_particle_v<T>
-    || is_field_v<T>
-    || is_vector_v<T>
-    || std::is_same_v<T,Button>;
 
 // Accept shared_ptr<U> when U is allowed
 template<class T>
 struct is_allowed_shared_ptr : std::false_type {};
 template<class U>
-struct is_allowed_shared_ptr<std::shared_ptr<U>> : std::bool_constant<AllowedVisType_v<U>> {};
+struct is_allowed_shared_ptr<std::shared_ptr<U>> : std::bool_constant<AllowedRegistryType_v<U>> {};
 template<class T>
-inline constexpr bool AllowedVisTypeOrShared_v = AllowedVisType_v<T> || is_allowed_shared_ptr<typename std::decay<T>::type>::value;
+inline constexpr bool AllowedRegistryTypeOrShared_v =
+    AllowedRegistryType_v<T> || is_allowed_shared_ptr<std::decay_t<T>>::value;
 
 // Helper to unwrap reference_wrapper/pointers uniformly if later needed
 template<class T>

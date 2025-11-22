@@ -137,6 +137,8 @@ print_info_(f"Parsed steering option:         {parsed.steer}")
 # ------------------------------------------------------------------------------
 options = catalyst.Options()
 options.GlobalTrigger = 'Time Step'
+
+options.CatalystLiveURL = 'localhost:22221'
 options.EnableCatalystLive = 1
 options.CatalystLiveTrigger = 'Time Step'
 options.ExtractsOutputDirectory = 'data_vtk_extracts_' + exp_string

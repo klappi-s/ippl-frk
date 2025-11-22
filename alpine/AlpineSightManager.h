@@ -79,7 +79,24 @@ public:
             electric_scale(30),
             magnetic_scale({30,30,30}),
             switch_m(false),
-            e_m(PenningTrap) {}
+            e_m(PenningTrap) ,
+            sLinMap_m({1.50 , {7,8,9},{1,2,3},{4,5,6}}),
+            sLinMap2_m({2.50 , {1,2,3},{4,5,6},{7,8,9}}) {
+                // Initialize LinMaps (struct-of-arrays) with two example maps
+                lm_m.time.clear(); lm_m.x_row.clear(); lm_m.y_row.clear(); lm_m.z_row.clear();
+                // Map #1: time=1.50, x={7,8,9}, y={1,2,3}, z={4,5,6}
+                lm_m.time.push_back(1.50);
+                lm_m.x_row.push_back(ippl::Vector<double,3>({10, 20, 30}));
+                lm_m.y_row.push_back(ippl::Vector<double,3>({40, 50, 60}));
+                lm_m.z_row.push_back(ippl::Vector<double,3>({70, 80, 90}));
+
+                // Map #2: time=2.50, x={1,2,3}, y={4,5,6}, z={7,8,9}
+                lm_m.time.push_back(2.50);
+                lm_m.x_row.push_back(ippl::Vector<double,3>({1.0,2.0,3.0}));
+                lm_m.y_row.push_back(ippl::Vector<double,3>({4.0,5.0,6.0}));
+                lm_m.z_row.push_back(ippl::Vector<double,3>({7.0,8.0,9.0}));
+
+            }
 
     ~AlpineSightManager(){}
 
@@ -89,13 +106,17 @@ private:
     ippl::Button useless_button;
     ippl::Button reset_button;
 
-
     double scaleFactor;
     double electric_scale;
     ippl::Vector<double, Dim> magnetic_scale;
-    
     bool switch_m;
     experiment_enum e_m;
+
+    ippl::LinMap sLinMap_m;
+    ippl::LinMap sLinMap2_m;
+    ippl::LinMaps lm_m;
+
+    std::vector<ippl::LinMap> map_vec;
 
 
     Vector_t<double, Dim> length_m;
@@ -198,22 +219,25 @@ public:
         if(!vis_init){
             std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                         //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
-                                        "electric", electric_scale,
-                                        "magnetic", magnetic_scale,
-                                        "switch1",  switch_m,
-                                        "reset_button",  reset_button,
-                                        "useless_button",  useless_button,
-                                        "experiment", e_m
+                                        // "electric",         electric_scale,
+                                        // "magnetic",         magnetic_scale,
+                                        // "switch1",          switch_m,
+                                        // "reset_button",     reset_button,
+                                        // "useless_button",   useless_button,
+                                        // "experiment",       e_m,
+                                        // "single_LinMap",    sLinMap_m,
+                                        // "single_LinMap2",   sLinMap2_m,
+                                        "LinMaps", lm_m 
                                     );
                                 
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
             // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(
 
-                                        // "ions",             this->pcontainer_m, 
-                                        "ions",             *this->pcontainer_m
-                                        , "electrostatic",    this->fcontainer_m->getE()
-                                        ,"density",          this->fcontainer_m->getRho()
-                                        , "potential",          this->fcontainer_m->getRho()
+                                          //   "ions",             *this->pcontainer_m
+                                          "ions",             this->pcontainer_m
+                                        // , "electrostatic",    this->fcontainer_m->getE()
+                                        , "density",          this->fcontainer_m->getRho()
+                                        // , "potential",        this->fcontainer_m->getRho()
                                     );
 
             /* Register enum choices for dropdowns before initialization */
@@ -239,11 +263,6 @@ public:
 
 
         this->dump();
-
-        if(reset_button){
-
-            this->pre_run();
-        }
 
         m << "Done\n\n\n";
     }
@@ -492,6 +511,24 @@ public:
         Kokkos::fence();
         ippl::Comm->barrier();
         IpplTimings::stopTimer(PTimer);
+
+
+
+
+
+
+
+
+        std::cout << reset_button << std::endl;
+        std::cout << electric_scale << std::endl;
+        std::cout << magnetic_scale << std::endl;
+        std::cout << switch_m << std::endl;
+        std::cout << to_string(e_m) << std::endl;
+        if(reset_button){
+            std::cout << "\n\n\n\n\n\n\n REEESSSEEETTTTTTTTTT \n\n\n\n\n\n\n" << std::endl;
+            // this->pre_run();
+        }
+
         
         std::cout << "PTManager: sleeping a second..." << std::endl;
         sleep(1);

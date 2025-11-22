@@ -54,6 +54,9 @@ public:
     bool        isBool{false};
     bool        isButton{false};
     bool        isEnum{false};
+  bool        scalarAsTextBox{false}; // if true, render scalar as text box (no slider)
+  bool        preserveDefaults{false}; // if true, keep provided vecDefaults over type defaults
+  bool        preserveScalarDefault{false}; // if true, keep provided scalar default over type default
     std::vector<std::pair<std::string,int>> enumEntries{};
     int         defaultInt{0};
     unsigned    vecDim{1};             // 1..3 exposed components
@@ -103,6 +106,21 @@ public:
 
   template <typename T, unsigned Dim_v>
   void includeVector(const std::string& label);
+
+  // Register a LinMap group under a single base label. This creates:
+  //  - three vector channels: base_x_row, base_y_row, base_z_row
+  //  - one scalar channel: base_time (rendered as a text box)
+  // Defaults and ranges are pulled from current config caches when present.
+  void includeLinMap(const std::string& baseLabel, double timeDefault = 0.0);
+
+  // Register LinMap with explicit per-component defaults for vectors and time.
+  // This ensures the GUI shows the current simulation values initially.
+  void includeLinMapWithDefaults(
+      const std::string& baseLabel,
+      const std::array<double,3>& xDefaults,
+      const std::array<double,3>& yDefaults,
+      const std::array<double,3>& zDefaults,
+      double timeDefault);
 
   /**
    * @brief Register a boolean switch channel.

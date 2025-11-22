@@ -116,6 +116,14 @@ struct LinMaps{
     std::vector<ippl::Vector<double, 3>> z_row;
 };
 
+struct AffineMap{
+    double time;
+    ippl::Vector<double, 3> x_row;
+    ippl::Vector<double, 3> y_row;
+    ippl::Vector<double, 3> z_row;
+    ippl::Vector<double, 3> shift;
+};
+
 
     /**
      * @struct Button
@@ -636,6 +644,11 @@ class CatalystAdaptor {
     template<typename T, unsigned Dim_v>
     void InitSteerableChannel( const ippl::Vector<T, Dim_v>& steerable_vec_forwardpass, const std::string& label );
 
+    // LinMap grouped steering (3 vectors + time)
+    void InitSteerableChannel( const ippl::LinMap& lm, const std::string& label );
+    // LinMaps dynamic-list steering (N maps: struct-of-arrays)
+    void InitSteerableChannel( const ippl::LinMaps& lms, const std::string& label );
+
 
 
     /**
@@ -665,6 +678,11 @@ class CatalystAdaptor {
     template<typename T, unsigned Dim_v>
     void AddSteerableChannel(const ippl::Vector<T, Dim_v>& steerable_vec_forwardpass, const std::string& steerable_suffix);
 
+    // LinMap grouped steering (3 vectors + time)
+    void AddSteerableChannel(const ippl::LinMap& lm, const std::string& steerable_suffix);
+    // LinMaps dynamic-list steering (N maps: struct-of-arrays)
+    void AddSteerableChannel(const ippl::LinMaps& lms, const std::string& steerable_suffix);
+
 
     /* maybe use function overloading instead ... */
         // const std::string value_path = ... 
@@ -692,6 +710,10 @@ class CatalystAdaptor {
     // Vector overloads for steerable channels
     template<typename T, unsigned Dim_v>
     void FetchSteerableChannelValue( ippl::Vector<T, Dim_v>& steerable_vec_backwardpass, const std::string& steerable_suffix);
+    // LinMap grouped fetch
+    void FetchSteerableChannelValue( ippl::LinMap& lm, const std::string& label);
+    // LinMaps dynamic-list fetch
+    void FetchSteerableChannelValue( ippl::LinMaps& lms, const std::string& label);
         
 
     /**

@@ -8,28 +8,18 @@ namespace ippl {
     template<class T>
     requires(!is_allowed_shared_ptr<typename std::decay<T>::type>::value)
     void VisRegistryRuntime::add(const std::string& label, T& value) {
-        static_assert(AllowedVisType_v<T>, "VisRegistryRuntime: unsupported value type (lvalue)");
+        static_assert(AllowedRegistryType_v<T>, "VisRegistryRuntime: unsupported value type (lvalue)");
         Entry e;
         e.label = label;
-        if constexpr (is_field_v<T>) {
-            e.do_init = [&value, label](InitVisitor_t& v) { v(label, value); };
-            e.do_exec = [&value, label](ExecuteVisitor_t& v) { v(label, value); };
-        } else if constexpr (is_particle_v<T>) {
+        if constexpr (AllowedVisType_v<T>) {
             e.do_init = [&value, label](InitVisitor_t& v) { v(label, value); };
             e.do_exec = [&value, label](ExecuteVisitor_t& v) { v(label, value); };
         } 
-        /*  dont need scalar vis?... */
-        else if constexpr (is_scalar_v<T> || is_vector_v<T> || std::is_enum_v<typename std::decay<T>::type> || std::is_same_v<typename std::decay<T>::type,Button>) {
+        else if constexpr (AllowedSteerType_v<T>) {
             e.do_steer_init = [&value, label](SteerInitVisitor_t& v)    { v(label, value); };
             e.do_steer_fwd  = [&value, label](SteerForwardVisitor_t& v) { v(label, value); };
             e.do_steer_fetch= [&value, label](SteerFetchVisitor_t& v)   { v(label, value); };
-        } 
-        // Vector steerables: enable steer init/forward/fetch
-        // else if constexpr (is_vector_v<T>) {
-        //     e.do_steer_init = [&value, label](SteerInitVisitor_t& v)    { v(label, value); };
-        //     e.do_steer_fwd  = [&value, label](SteerForwardVisitor_t& v) { v(label, value); };
-        //     e.do_steer_fetch= [&value, label](SteerFetchVisitor_t& v)   { v(label, value); };
-        // }
+        }
         entries_.push_back(std::move(e));
 
         // Maintain execute index only for entries that can execute.
@@ -44,7 +34,7 @@ namespace ippl {
     // Overload: add shared_ptr<U> by binding to referenced object and keeping lifetime
     template<class U>
     void VisRegistryRuntime::add(const std::string& label, const std::shared_ptr<U>& ptr) {
-        static_assert(AllowedVisType_v<U>, "VisRegistryRuntime: unsupported shared_ptr<U> type");
+        static_assert(AllowedRegistryType_v<U>, "VisRegistryRuntime: unsupported shared_ptr<U> type");
         if (!ptr) return;
         add(label, *ptr);
         // keep alive by capturing shared_ptr in a no-op callback
@@ -90,7 +80,7 @@ namespace detail {
      * This helper is used by MakeVisRegistryRuntime and MakeVisRegistryRuntimePtr to build a registry from alternating label-value arguments.
      *
      * @tparam L The type of the label (should be convertible to std::string).
-     * @tparam V The type of the value (must satisfy AllowedVisTypeOrShared_v).
+     * @tparam V The type of the value (must satisfy AllowedRegistryTypeOrShared_v).
      * @tparam Rest The remaining label-value argument types.
      * @param r The registry to add to.
      * @param label The label for the entry.
@@ -100,7 +90,7 @@ namespace detail {
     template<class L, class V, class... Rest>
     void add_pairs(VisRegistryRuntime& r, L&& label, V&& value, Rest&&... rest) {
         using DV = typename std::decay<V>::type;
-        static_assert(AllowedVisTypeOrShared_v<DV> || std::is_enum_v<DV>,
+        static_assert(AllowedRegistryTypeOrShared_v<DV> || std::is_enum_v<DV>,
                       "VisRegistryRuntime: unsupported value type in factory");
 
         // Materialize label as std::string to avoid ambiguous overloads

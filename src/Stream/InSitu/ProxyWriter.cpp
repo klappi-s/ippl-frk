@@ -256,8 +256,13 @@ void ProxyWriter::appendSourceProxy(const Channel& ch) {
 void ProxyWriter::appendPrototype() {
   // Prototype for numeric steerables (scalars and vectors)
   misc_ << "      <Proxy name='SteerableNumericsPrototype' label=' Numerics-Collective-Prototype (do not cancel [x] or add new [+]!!)'> \n";
+  auto isLinMapComponent = [](const std::string& L){
+    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+    return ends_with(L, "_x_row") || ends_with(L, "_y_row") || ends_with(L, "_z_row") || ends_with(L, "_time");
+  };
   for (const auto& ch : channels_) {
     if (ch.isBool || ch.isButton || ch.isEnum) continue;
+    if (isLinMapComponent(ch.label)) continue; // exclude LinMap parts from Numerics prototype
     if (ch.isVector) {
       const double d0 = ch.hasVectorRanges ? ch.vecDefaults[0] : ch.defaultValue;
       const double d1 = ch.hasVectorRanges ? ch.vecDefaults[1] : ch.defaultValue;
@@ -298,6 +303,81 @@ void ProxyWriter::appendPrototype() {
     misc_ << "        </IntVectorProperty>\n";
   }
   misc_ << "      </Proxy>\n";
+
+  // Prototype for LinMap steerables (group time + 3 vectors under a base label)
+  // Detect LinMap bases by presence of labels with suffixes _x_row, _y_row, _z_row (time optional)
+  auto findChannelByLabel = [this](const std::string& L) -> const Channel* {
+    for (const auto& ch : channels_) if (ch.label == L) return &ch; return nullptr;
+  };
+  std::map<std::string, std::array<bool,4>> lmPresence; // {base : [x,y,z,time]}
+  for (const auto& ch : channels_) {
+    const std::string& L = ch.label;
+    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+    if (ends_with(L, "_x_row")) { lmPresence[L.substr(0, L.size()-6)][0] = true; }
+    else if (ends_with(L, "_y_row")) { lmPresence[L.substr(0, L.size()-6)][1] = true; }
+    else if (ends_with(L, "_z_row")) { lmPresence[L.substr(0, L.size()-6)][2] = true; }
+    else if (ends_with(L, "_time"))  { lmPresence[L.substr(0, L.size()-5)][3] = true; }
+  }
+  bool hasLinMap = false;
+  for (auto it = lmPresence.begin(); it != lmPresence.end(); ) {
+    const auto& flags = it->second;
+    if (!(flags[0] && flags[1] && flags[2])) it = lmPresence.erase(it); else { hasLinMap = true; ++it; }
+  }
+  if (hasLinMap) {
+    misc_ << "      <Proxy name='LinMapPrototype' label='LinMap Prototype'>\n";
+    for (const auto& kv : lmPresence) {
+      const std::string& base = kv.first;
+      // Time (optional scalar) - render as text box (no slider) and place on top
+      if (const Channel* ct = findChannelByLabel(base + "_time")) {
+        const double sdef = ct->defaultValue;
+        if (ct->scalarAsTextBox) {
+          misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleLineEdit'>\n";
+          misc_ << "        </DoubleVectorProperty>\n";
+        } else {
+          const double smin = ct->hasScalarRange ? ct->scalarMin : rangeMin_;
+          const double smax = ct->hasScalarRange ? ct->scalarMax : rangeMax_;
+          misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
+          misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+          misc_ << "        </DoubleVectorProperty>\n";
+        }
+      }
+      // X rowumn
+      if (const Channel* cx = findChannelByLabel(base + "_x_row")) {
+        const double d0 = cx->hasVectorRanges ? cx->vecDefaults[0] : cx->defaultValue;
+        const double d1 = cx->hasVectorRanges ? cx->vecDefaults[1] : cx->defaultValue;
+        const double d2 = cx->hasVectorRanges ? cx->vecDefaults[2] : cx->defaultValue;
+        const double vmin = cx->hasVectorRanges ? cx->vecMin : rangeMin_;
+        const double vmax = cx->hasVectorRanges ? cx->vecMax : rangeMax_;
+        misc_ << "        <DoubleVectorProperty name='vec3_" << base << "_x_row' label='" << base << "_x_row' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
+        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+        misc_ << "        </DoubleVectorProperty>\n";
+      }
+      // Y rowumn
+      if (const Channel* cy = findChannelByLabel(base + "_y_row")) {
+        const double d0 = cy->hasVectorRanges ? cy->vecDefaults[0] : cy->defaultValue;
+        const double d1 = cy->hasVectorRanges ? cy->vecDefaults[1] : cy->defaultValue;
+        const double d2 = cy->hasVectorRanges ? cy->vecDefaults[2] : cy->defaultValue;
+        const double vmin = cy->hasVectorRanges ? cy->vecMin : rangeMin_;
+        const double vmax = cy->hasVectorRanges ? cy->vecMax : rangeMax_;
+        misc_ << "        <DoubleVectorProperty name='vec3_" << base << "_y_row' label='" << base << "_y_row' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
+        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+        misc_ << "        </DoubleVectorProperty>\n";
+      }
+      // Z rowumn
+      if (const Channel* cz = findChannelByLabel(base + "_z_row")) {
+        const double d0 = cz->hasVectorRanges ? cz->vecDefaults[0] : cz->defaultValue;
+        const double d1 = cz->hasVectorRanges ? cz->vecDefaults[1] : cz->defaultValue;
+        const double d2 = cz->hasVectorRanges ? cz->vecDefaults[2] : cz->defaultValue;
+        const double vmin = cz->hasVectorRanges ? cz->vecMin : rangeMin_;
+        const double vmax = cz->hasVectorRanges ? cz->vecMax : rangeMax_;
+        misc_ << "        <DoubleVectorProperty name='vec3_" << base << "_z_row' label='" << base << "_z_row' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
+        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+        misc_ << "        </DoubleVectorProperty>\n";
+      }
+      // (time already printed above)
+    }
+    misc_ << "      </Proxy>\n";
+  }
 }
 
 void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
@@ -402,23 +482,68 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
 
   // Property groups
   bool hasNumerics = false;
-  for (const auto& ch : channels_) {
-    if (!ch.isBool && !ch.isButton && !ch.isEnum) { hasNumerics = true; break; }
+  {
+    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+    for (const auto& ch : channels_) {
+      if (ch.isBool || ch.isButton || ch.isEnum) continue;
+      if (ends_with(ch.label, "_x_row") || ends_with(ch.label, "_y_row") || ends_with(ch.label, "_z_row") || ends_with(ch.label, "_time")) continue;
+      hasNumerics = true; break;
+    }
   }
   if (hasNumerics) {
     sources_ << "            <PropertyGroup label='Numerics' panel_widget='PropertyCollection'>\n";
     sources_ << "                <Hints>\n";
     sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableNumericsPrototype' />\n";
     sources_ << "                </Hints>\n";
-    for (const auto& ch : channels_) {
-      if (ch.isBool || ch.isButton || ch.isEnum) continue;
-      if (ch.isVector) {
-        sources_ << "                <Property name='" << ch.label << "' function='vec3_" << ch.label << "' label='" << ch.label << "'/>\n";
-      } else {
-        sources_ << "                <Property name='" << ch.label << "' function='scaleFactor_" << ch.label << "' label='" << ch.label << "'/>\n";
+    {
+      auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+      for (const auto& ch : channels_) {
+        if (ch.isBool || ch.isButton || ch.isEnum) continue;
+        if (ends_with(ch.label, "_x_row") || ends_with(ch.label, "_y_row") || ends_with(ch.label, "_z_row") || ends_with(ch.label, "_time")) continue; // skip LinMap parts
+        if (ch.isVector) {
+          sources_ << "                <Property name='" << ch.label << "' function='vec3_" << ch.label << "' label='" << ch.label << "'/>\n";
+        } else {
+          sources_ << "                <Property name='" << ch.label << "' function='scaleFactor_" << ch.label << "' label='" << ch.label << "'/>\n";
+        }
       }
     }
     sources_ << "            </PropertyGroup>\n\n";
+  }
+
+  // LinMap Property Group: label 'static Maps type 1'
+  // Re-run presence detection
+  {
+    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+    std::map<std::string, std::array<bool,4>> lmPresence;
+    for (const auto& ch : channels_) {
+      const std::string& L = ch.label;
+      if (ends_with(L, "_x_row")) { lmPresence[L.substr(0, L.size()-6)][0] = true; }
+      else if (ends_with(L, "_y_row")) { lmPresence[L.substr(0, L.size()-6)][1] = true; }
+      else if (ends_with(L, "_z_row")) { lmPresence[L.substr(0, L.size()-6)][2] = true; }
+      else if (ends_with(L, "_time"))  { lmPresence[L.substr(0, L.size()-5)][3] = true; }
+    }
+    // filter bases requiring x,y,z
+    std::vector<std::string> bases;
+    for (auto& kv : lmPresence) if (kv.second[0] && kv.second[1] && kv.second[2]) bases.push_back(kv.first);
+    if (!bases.empty()) {
+      sources_ << "            <PropertyGroup label='static Maps type 1' panel_widget='PropertyCollection'>\n";
+      sources_ << "                <Hints>\n";
+      sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='LinMapPrototype' />\n";
+      sources_ << "                </Hints>\n";
+      int mapIndex = 1;
+      for (const auto& base : bases) {
+        std::string mapPrefix = std::string("Map# ") + std::to_string(mapIndex) + " (" + base + ") - ";
+        // time first (if present)
+        bool hasTime = lmPresence[base][3];
+        if (hasTime) sources_ << "                <Property name='" << base << "_time' function='scaleFactor_" << base << "_time' label='" << mapPrefix << base << "_time'/>\n";
+        // then the three rows
+        sources_ << "                <Property name='" << base << "_x_row' function='vec3_" << base << "_x_row' label='" << mapPrefix << base << "_x_row'/>\n";
+        sources_ << "                <Property name='" << base << "_y_row' function='vec3_" << base << "_y_row' label='" << mapPrefix << base << "_y_row'/>\n";
+        sources_ << "                <Property name='" << base << "_z_row' function='vec3_" << base << "_z_row' label='" << mapPrefix << base << "_z_row'/>\n";
+        ++mapIndex;
+      }
+      sources_ << "            </PropertyGroup>\n\n";
+    }
   }
 
   bool hasEnums = false;
@@ -491,16 +616,20 @@ void ProxyWriter::applyScalarConfig(Channel& ch) const {
     ch.hasScalarRange = true;
     ch.scalarMin = typeDefaultScalar_.min;
     ch.scalarMax = typeDefaultScalar_.max;
-    ch.defaultValue = typeDefaultScalar_.def;
-    ch.hasScalarDefault = true;
+    if (!ch.preserveScalarDefault) {
+      ch.defaultValue = typeDefaultScalar_.def;
+      ch.hasScalarDefault = true;
+    }
   }
   auto it = labelScalarCfg_.find(ch.label);
   if (it != labelScalarCfg_.end() && it->second.has) {
     ch.hasScalarRange = true;
     ch.scalarMin = it->second.min;
     ch.scalarMax = it->second.max;
-    ch.defaultValue = it->second.def;
-    ch.hasScalarDefault = true;
+    if (!ch.preserveScalarDefault) {
+      ch.defaultValue = it->second.def;
+      ch.hasScalarDefault = true;
+    }
   }
 }
 

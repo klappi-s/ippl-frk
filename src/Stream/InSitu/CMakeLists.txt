@@ -18,6 +18,7 @@ install(FILES
     ProxyWriter.h
     ProxyWriter.hpp
     CatalystAdaptor.h
+    CatalystAdaptorSteering.h
     CatalystAdaptor.hpp
     CatalystVisitors.h
     AscentAdatpor.h
