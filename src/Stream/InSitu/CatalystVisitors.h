@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include <Stream/InSitu/CatalystAdaptor.h>
 // #include <Stream/Registry/VisRegistryRuntime.h>
@@ -55,11 +56,21 @@ inline constexpr bool is_field_v = is_field<std::decay_t<T>>::value;
 
 
 
+// Helper: detect std::vector of supported scalar/button types
+template<typename U>
+struct is_std_vector_of_allowed_scalar : std::false_type {};
+template<typename U>
+struct is_std_vector_of_allowed_scalar<std::vector<U>> : std::bool_constant<
+    std::is_arithmetic_v<std::decay_t<U>>
+    || std::is_same_v<std::decay_t<U>, bool>
+    || std::is_same_v<std::decay_t<U>, Button>> {};
+
 template<class T>
 inline constexpr bool AllowedSteerType_v =
     std::is_arithmetic_v<std::decay_t<T>>
     || std::is_enum_v<std::decay_t<T>>
-    || is_vector_v<T>
+    || is_vector_v<T> // ippl::Vector<>
+    || is_std_vector_of_allowed_scalar<std::decay_t<T>>::value // std::vector<double/int/.../Button/bool>
     || std::is_same_v<std::decay_t<T>, Button>
     || std::is_same_v<std::decay_t<T>, LinMap>
     || std::is_same_v<std::decay_t<T>, LinMaps>

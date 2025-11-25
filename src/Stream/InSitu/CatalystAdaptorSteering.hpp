@@ -49,6 +49,10 @@ struct StructMeta {
     static inline std::function<void(CatalystAdaptor::SteerInitVisitor&, const T&, const std::string&)>    do_init;
     static inline std::function<void(CatalystAdaptor::SteerForwardVisitor&, const T&, const std::string&)> do_fwd;
     static inline std::function<void(CatalystAdaptor::SteerFetchVisitor&, T&, const std::string&)>         do_fetch;
+    // Array-of-struct aggregation (vector<T>) – built at registration time.
+    static inline std::function<void(CatalystAdaptor::SteerInitVisitor&, const std::vector<T>&, const std::string&)>    do_init_vec;
+    static inline std::function<void(CatalystAdaptor::SteerForwardVisitor&, const std::vector<T>&, const std::string&)> do_fwd_vec;
+    static inline std::function<void(CatalystAdaptor::SteerFetchVisitor&, std::vector<T>&, const std::string&)>         do_fetch_vec;
 };
 
 } // namespace detail
@@ -93,6 +97,64 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
     };
     detail::StructMeta<DecayT>::do_fetch = [pack](SteerFetchVisitor& vis, DecayT& obj, const std::string& root) mutable {
         std::apply([&](auto&&... all){ ippl::detail::apply_struct_members(vis, obj, ippl::detail::sanitize_label(root), all...); }, pack);
+    };
+
+    // ================= Array-of-Struct (vector<T>) support =================
+    detail::StructMeta<DecayT>::do_init_vec = [pack](SteerInitVisitor& vis, const std::vector<DecayT>& arr, const std::string& root) mutable {
+        if (arr.empty()) return;
+        constexpr size_t PC = PairCount;
+        [&]<std::size_t... I>(std::index_sequence<I...>){
+            ( [&](){
+                using MemberPtrT = std::tuple_element_t<2*I+1, decltype(pack)>;
+                MemberPtrT mptr = std::get<2*I+1>(pack);
+                auto rawName = std::get<2*I>(pack);
+                std::string memberLabel = ippl::detail::sanitize_label(root) + "_" + ippl::detail::sanitize_label(std::string(rawName));
+                using MType = std::remove_reference_t<decltype(std::declval<DecayT>().*mptr)>;
+                std::vector<MType> collected; collected.reserve(arr.size());
+                for (auto& el : arr) collected.push_back(el.*mptr);
+                vis(memberLabel, collected);
+            }(), ... );
+        }(std::make_index_sequence<PC>{});
+    };
+
+    detail::StructMeta<DecayT>::do_fwd_vec = [pack](SteerForwardVisitor& vis, const std::vector<DecayT>& arr, const std::string& root) mutable {
+        if (arr.empty()) return;
+        constexpr size_t PC = PairCount;
+        [&]<std::size_t... I>(std::index_sequence<I...>){
+            ( [&](){
+                using MemberPtrT = std::tuple_element_t<2*I+1, decltype(pack)>;
+                MemberPtrT mptr = std::get<2*I+1>(pack);
+                auto rawName = std::get<2*I>(pack);
+                std::string memberLabel = ippl::detail::sanitize_label(root) + "_" + ippl::detail::sanitize_label(std::string(rawName));
+                using MType = std::remove_reference_t<decltype(std::declval<DecayT>().*mptr)>;
+                std::vector<MType> collected; collected.reserve(arr.size());
+                for (auto& el : arr) collected.push_back(el.*mptr);
+                vis(memberLabel, collected);
+            }(), ... );
+        }(std::make_index_sequence<PC>{});
+    };
+
+    detail::StructMeta<DecayT>::do_fetch_vec = [pack](SteerFetchVisitor& vis, std::vector<DecayT>& arr, const std::string& root) mutable {
+        constexpr size_t PC = PairCount;
+        [&]<std::size_t... I>(std::index_sequence<I...>){
+            ( [&](){
+                using MemberPtrT = std::tuple_element_t<2*I+1, decltype(pack)>;
+                MemberPtrT mptr = std::get<2*I+1>(pack);
+                auto rawName = std::get<2*I>(pack);
+                std::string memberLabel = ippl::detail::sanitize_label(root) + "_" + ippl::detail::sanitize_label(std::string(rawName));
+                using MType = std::remove_reference_t<decltype(std::declval<DecayT>().*mptr)>;
+                std::vector<MType> tmp; tmp.reserve(arr.size());
+                for (auto& el : arr) tmp.push_back(el.*mptr);
+                vis(memberLabel, tmp); // fetch updates tmp
+                if (tmp.size() != arr.size()) {
+                    arr.resize(tmp.size()); // default construct new structs
+                }
+                // Write back member values
+                for (std::size_t i = 0; i < tmp.size(); ++i) {
+                    arr[i].*mptr = tmp[i];
+                }
+            }(), ... );
+        }(std::make_index_sequence<PC>{});
     };
 
     detail::StructMeta<DecayT>::registered = true;
@@ -265,6 +327,41 @@ inline void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::v
         tmp.z_row.push_back(m.z_row);
     }
     InitSteerableChannel(tmp, label);
+}
+
+
+// =============================================================
+// Generic std::vector<T> steerables (AoS-of-struct members)
+// Supports arithmetic, bool and ippl::Button as element types.
+// =============================================================
+template<typename Elem>
+requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<Elem>& arr, const std::string& label )
+{
+    ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: std::vector<elem> size=" << arr.size() << endl;
+    // Derive prefix (dynamic steering array name) from label before first underscore.
+    std::string prefix = label;
+    auto us_pos = prefix.find('_');
+    if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
+
+    // Inform Python pipeline about each label (still needed for backward mapping)
+    conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
+    script_args.append().set_string(label);
+
+    // Create a dedicated forward mesh channel for this struct array prefix, once.
+    std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
+    auto steerable_channel = node[std::string("catalyst/channels/") + mesh_name];
+    if(!steerable_channel.has_child("type")){
+        steerable_channel["type"].set("mesh");
+        auto data = steerable_channel["data"];
+        data["coordsets/coords/type"].set_string("explicit");
+        // minimal placeholder coordinates (will be resized in AddSteerableChannel)
+        data["coordsets/coords/values/x"].set(std::vector<double>{0.0});
+        data["topologies/sMesh_topo/type"].set("unstructured");
+        data["topologies/sMesh_topo/coordset"].set("coords");
+        data["topologies/sMesh_topo/elements/shape"].set("point");
+        data["topologies/sMesh_topo/elements/connectivity"].set(std::vector<int32_t>{0});
+    }
 }
 
 
@@ -515,6 +612,50 @@ inline void CatalystAdaptor::AddSteerableChannel( const std::vector<ippl::LinMap
         tmp.z_row.push_back(m.z_row);
     }
     AddSteerableChannel(tmp, steerable_suffix);
+}
+
+// std::vector<T> forward: publish as 1D mesh array under fields/steerable_field_f_<label>/values
+template<typename Elem>
+requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+void CatalystAdaptor::AddSteerableChannel( const std::vector<Elem>& arr, const std::string& label )
+{
+    ca_m << "::Execute()::AddSteerableChannel(vector<elem>) " << label << " | N=" << arr.size() << endl;
+    // Group by dynamic array prefix: everything before first underscore.
+    std::string prefix = label;
+    auto us_pos = prefix.find('_');
+    if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
+    std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
+    auto steerable_channel = node[std::string("catalyst/channels/") + mesh_name];
+    steerable_channel["type"].set("mesh");
+    auto steerable_data = steerable_channel["data"];
+    steerable_data["coordsets/coords/type"].set_string("explicit");
+    const size_t N = arr.size();
+    {
+        std::vector<double> xs; xs.reserve(N);
+        for (size_t i = 0; i < N; ++i) xs.push_back(static_cast<double>(i));
+        steerable_data["coordsets/coords/values/x"].set(xs);
+    }
+    steerable_data["topologies/sMesh_topo/type"].set("unstructured");
+    steerable_data["topologies/sMesh_topo/coordset"].set("coords");
+    steerable_data["topologies/sMesh_topo/elements/shape"].set("point");
+    {
+        std::vector<int32_t> conn; conn.reserve(N);
+        for (int32_t i = 0; i < static_cast<int32_t>(N); ++i) conn.push_back(i);
+        steerable_data["topologies/sMesh_topo/elements/connectivity"].set(conn);
+    }
+
+    auto f = steerable_data[std::string("fields/steerable_field_f_") + label];
+    f["association"].set("vertex");
+    f["topology"].set("sMesh_topo");
+    f["volume_dependent"].set("false");
+    // store values as doubles/ints as appropriate
+    std::vector<double> vals; vals.reserve(N);
+    for (const auto& e : arr) {
+        if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)        vals.push_back(e ? 1.0 : 0.0);
+        else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) vals.push_back(static_cast<int>(e ? 1 : 0));
+        else                                                           vals.push_back(static_cast<double>(e));
+    }
+    f["values"].set(vals);
 }
 
 
@@ -852,7 +993,8 @@ inline void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::LinMa
         n = vals.dtype().number_of_elements();
         if (n == 0) return false;
         out.resize(n);
-        for (size_t i = 0; i < n; ++i) out[i] =  vals.as_double_ptr()[i];
+        // for (size_t i = 0; i < n; ++i) out[i] =  vals.as_double_ptr()[i];
+        for (size_t i = 0; i < n; ++i) out[i] =  vals.as_int32_ptr()[i];
         return true;
     };
 
@@ -925,6 +1067,84 @@ inline void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::LinMa
 
     
     ca_m << "::Execute()::FetchSteerableChannel(vector<LinMap>) | new_count=" << lm_vec.size() << endl;
+}
+
+// Fetch std::vector<T> from unified backward channel; resize destination to match
+template<typename Elem>
+requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const std::string& label)
+{
+    ca_m << "::Execute()::FetchSteerableChannel(vector<elem>) " << label << endl;
+    const std::string path = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                             "steerable_field_b_" + label + "/values";
+    if (!results.has_path(path)) {
+        ca_m << "  no backward array for '" << label << "'" << endl;
+        return;
+    }
+    conduit_cpp::Node vals = results[path];
+    // Support integer and floating arrays; fall back to child iteration if needed.
+    conduit_cpp::DataType dt = vals.dtype();
+    size_t n = dt.number_of_elements();
+    if (n == 0) {
+        // Some conduit arrays may appear as an object with numeric child nodes instead of a flat dtype
+        size_t nc = vals.number_of_children();
+        if (nc == 0) return;
+        n = nc;
+    }
+    out.resize(n);
+
+    auto assign_from_double = [&](size_t i, double d){
+        if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)             out[i] = (d != 0.0);
+        else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) out[i] = (static_cast<int>(d) != 0);
+        else                                                                 out[i] = static_cast<Elem>(d);
+    };
+
+    // Prefer child iteration when available (safe for lists and objects)
+    if (vals.number_of_children() > 0) {
+        for (size_t i = 0; i < n; ++i) {
+            assign_from_double(i, vals.child(i).to_double());
+        }
+        return;
+    }
+
+    // Otherwise, try direct pointer access but guard with try/catch and a final safe fallback
+    bool success = false;
+    try {
+        if (dt.is_double()) {
+            const double* ptr = vals.as_double_ptr();
+            for (size_t i = 0; i < n; ++i) assign_from_double(i, ptr[i]);
+            success = true;
+        }
+        else if (dt.is_int32()) {
+            const int32_t* ptr = vals.as_int32_ptr();
+            for (size_t i = 0; i < n; ++i) assign_from_double(i, static_cast<double>(ptr[i]));
+            success = true;
+        }
+        else if (dt.is_uint32()) {
+            const uint32_t* ptr = vals.as_uint32_ptr();
+            for (size_t i = 0; i < n; ++i) assign_from_double(i, static_cast<double>(ptr[i]));
+            success = true;
+        }
+    } catch (const std::exception &e) {
+        ca_m << "  [DEBUG] direct pointer read failed for '" << label << "': " << e.what() << endl;
+        success = false;
+    } catch (...) {
+        ca_m << "  [DEBUG] direct pointer read failed for '" << label << "' (unknown error)" << endl;
+        success = false;
+    }
+
+    if (success) return;
+
+    // Final fallback: read each element by indexed child path (robust but slightly slower)
+    for (size_t i = 0; i < n; ++i) {
+        std::string child_path = path + "/" + std::to_string(i);
+        if (results.has_path(child_path)) {
+            assign_from_double(i, results[child_path].to_double());
+        } else {
+            // If even this fails, leave default value and warn
+            ca_m << "  [WARN] Could not read element " << i << " of '" << label << "' via fallback" << endl;
+        }
+    }
 }
 
 

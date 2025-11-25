@@ -89,7 +89,8 @@ public:
             e_m(PenningTrap) ,
             sLinMap_m({1.50 , {7,8,9},{1,2,3},{4,5,6}}),
             sLinMap2_m({2.50 , {1,2,3},{4,5,6},{7,8,9}}),
-            simp{1.0, 0, ippl::Button(false)}
+            simp{1.0, 0, ippl::Button(false)},
+            simp_vec{ {1.0, 0, ippl::Button(false)}, {2.0, 5, ippl::Button(false)}, {3.0, 10, ippl::Button(false)} }
             {
                 // Initialize LinMaps (struct-of-arrays) with two example maps
                 lm_m.time.clear(); lm_m.x_row.clear(); lm_m.y_row.clear(); lm_m.z_row.clear();
@@ -135,6 +136,7 @@ private:
     ippl::LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
     std::vector<ippl::LinMap> lmv_m; // NEW: AoS vector<LinMap> used for steering registration
     SimParams simp;
+    std::vector<SimParams> simp_vec; // vector of SimParams for AoS steering demo
 
     Vector_t<double, Dim> length_m;
     double Bext_m;
@@ -267,6 +269,7 @@ public:
                                         "LinMaps", lmv_m             // now registering AoS variant (vector<LinMap>)
                                     );
             runtime_steer_registry->add("simp", simp);
+            runtime_steer_registry->add("simpVec", simp_vec);
                                 
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
             // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(

@@ -650,6 +650,10 @@ class CatalystAdaptor {
     void InitSteerableChannel( const ippl::LinMaps& lms, const std::string& label );
     // AoS alternative: std::vector<LinMap> (converted internally to LinMaps for identical GUI behavior)
     void InitSteerableChannel( const std::vector<ippl::LinMap>& lm_vec, const std::string& label );
+    // Generic std::vector elements (arithmetic/bool/Button) for array steerables
+    template<typename Elem>
+    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+    void InitSteerableChannel( const std::vector<Elem>& arr, const std::string& label );
 
 
 
@@ -686,6 +690,10 @@ class CatalystAdaptor {
     void AddSteerableChannel(const ippl::LinMaps& lms, const std::string& steerable_suffix);
     // AoS alternative forward pass: std::vector<LinMap>
     void AddSteerableChannel(const std::vector<ippl::LinMap>& lm_vec, const std::string& steerable_suffix);
+    // Generic std::vector elements (arithmetic/bool/Button) for array steerables
+    template<typename Elem>
+    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+    void AddSteerableChannel(const std::vector<Elem>& arr, const std::string& label);
 
 
     /* maybe use function overloading instead ... */
@@ -720,6 +728,10 @@ class CatalystAdaptor {
     void FetchSteerableChannelValue( ippl::LinMaps& lms, const std::string& label);
     // AoS alternative fetch
     void FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label);
+    // Generic std::vector elements (arithmetic/bool/Button) fetch
+    template<typename Elem>
+    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+    void FetchSteerableChannelValue( std::vector<Elem>& out, const std::string& label);
         
     // ---------------------------------------------------------------------
     // Struct steering registration (simple initial version)

@@ -1,0 +1,306 @@
+<ServerManagerConfiguration>
+<ProxyGroup name='sources'>
+
+  <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_ALL'>
+            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>
+            </IntVectorProperty>
+
+            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>
+            </IntVectorProperty>
+
+            <!-- Dynamic list properties for LinMaps (two maps shown as example defaults) -->
+            <DoubleVectorProperty name='Map_x_row'
+                                  command='SetTuple3Double'
+                                  use_index='1'
+                                  clean_command='Clear'
+                                  initial_string='steerable_field_b_Map_x_row'
+                                  number_of_elements_per_command='3'
+                                  repeat_command='1'
+                                  default_values='10 20 30 1 2 3'>
+            </DoubleVectorProperty>
+
+            <DoubleVectorProperty name='Map_y_row'
+                                  command='SetTuple3Double'
+                                  use_index='1'
+                                  clean_command='Clear'
+                                  initial_string='steerable_field_b_Map_y_row'
+                                  number_of_elements_per_command='3'
+                                  repeat_command='1'
+                                  default_values='40 50 60 4 5 6'>
+            </DoubleVectorProperty>
+
+            <DoubleVectorProperty name='Map_z_row'
+                                  command='SetTuple3Double'
+                                  use_index='1'
+                                  clean_command='Clear'
+                                  initial_string='steerable_field_b_Map_z_row'
+                                  number_of_elements_per_command='3'
+                                  repeat_command='1'
+                                  default_values='70 80 90 7 8 9'>
+            </DoubleVectorProperty>
+
+            <IntVectorProperty name='Map_time'
+                                  command='SetTuple1Int'
+                                  clean_command='Clear'
+                                  use_index='1'
+                                  initial_string='steerable_field_b_Map_time'
+                                  number_of_elements_per_command='1'
+                                  repeat_command='1'
+                                  default_values='1.5 2.5'>
+            </IntVectorProperty>
+
+
+
+         
+      <PropertyGroup label='LinMaps' panel_widget='PropertyCollection'>
+          <Hints>
+            <PropertyCollectionWidgetPrototype group='misc' name='LinMapPrototype' />
+          </Hints>
+          <Property name='Map_time'  function='map_time' />
+          <Property name='Map_x_row' function='map_x_row' />
+          <Property name='Map_y_row' function='map_y_row' />
+          <Property name='Map_z_row' function='map_z_row' />
+      </PropertyGroup>
+      
+
+      <Hints>
+        <CatalystInitializePropertiesWithMesh mesh='steerable_channel_1D_mesh'>
+          <Property name='Map_x_row' association='point' array='steerable_field_f_Map_x_row' />
+          <Property name='Map_y_row' association='point' array='steerable_field_f_Map_y_row' />
+          <Property name='Map_z_row' association='point' array='steerable_field_f_Map_z_row' />
+          <Property name='Map_time'  association='point' array='steerable_field_f_Map_time' />
+        </CatalystInitializePropertiesWithMesh>
+      </Hints>
+  </SourceProxy>
+
+        
+        
+
+
+
+<SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_ALL2'>
+            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>
+            </IntVectorProperty>
+
+            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>
+            </IntVectorProperty>
+
+
+              <!-- SimParams struct (hardcoded steering fields) -->
+              <DoubleVectorProperty name='simp.temperature'
+                                    label='Temperature'
+                                    command='SetTuple1Double'
+                                    clean_command='Clear'
+                                    use_index='1'
+                                    initial_string='steerable_field_b_simp.temperature'
+                                    number_of_elements_per_command='1'
+                                    repeat_command='1'
+                                    default_values='11'
+
+                                    
+              >
+                  <!-- <DoubleRangeDomain name='range' min='0.0'  max='5.0'/> -->
+                  <Documentation>
+                    The temperature of the simulation.
+                  </Documentation>
+              </DoubleVectorProperty>
+              <DoubleVectorProperty name='simp.steps'
+                                 label='Steps'
+                                 command='SetTuple1Double'
+                                 clean_command='Clear'
+                                 use_index='1'
+                                 initial_string='steerable_field_b_simp.steps'
+                                 number_of_elements_per_command='1'
+                                 repeat_command='1'
+                                 default_values='10'> <Documentation>Number of simulation steps.</Documentation>
+              </DoubleVectorProperty>
+
+              <IntVectorProperty name='simp.reset_btn'
+                                 label='Reset Simulation'
+                                 command='SetTuple1Int'
+                                 clean_command='Clear'
+                                 use_index='1'
+                                 initial_string='steerable_field_b_simp.reset_btn'
+                                 number_of_elements_per_command='1'
+                                 repeat_command='1'
+                                 default_values='0'
+                                 >
+                  <Documentation>Reset the simulation state.</Documentation>
+              </IntVectorProperty>
+
+         
+      
+      <PropertyGroup label='Simulation Parameters' panel_widget='PropertyCollection'>
+          <Hints>
+            <PropertyCollectionWidgetPrototype group='misc' name='simpPrototype' />
+          </Hints>
+          <Property name='simp.temperature' function='temp'/>
+          <Property name='simp.steps'       function='steps'/>
+          <Property name='simp.reset_btn'   function='reset'/>
+      </PropertyGroup>
+  <!-- 
+      <PropertyGroup label='Unusable'>
+          <StringVectorProperty>
+            <Hints>
+              <PlaceholderText>Enter label</PlaceholderText>
+            </Hints>
+          </StringVectorProperty>
+          Buttons
+          other 
+      </PropertyGroup> -->
+      <Hints>
+      
+        <CatalystInitializePropertiesWithMesh mesh='steerable_channel_0D_mesh'>
+          <Property name='simp.temperature' association='point' array='steerable_field_f_simp.temperature'/>
+          <Property name='simp.steps'       association='point' array='steerable_field_f_simp.steps'/>
+          <Property name='simp.reset_btn'   association='point' array='steerable_field_f_simp.reset_btn'/>
+        </CatalystInitializePropertiesWithMesh> 
+      </Hints>
+</SourceProxy>
+
+  <!-- Array-of-Struct (SimParams vector) steering channel -->
+<SourceProxy class='vtkSteeringDataGenerator' name='Steerables_SIMPVEC'>
+    <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'/>
+    <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'/>
+
+    <!-- Dynamic list properties for SimParams vector (three initial structs) -->
+    <DoubleVectorProperty name='simpVec_temperature'
+                          command='SetTuple1Double'
+                          use_index='1'
+                          clean_command='Clear'
+                          initial_string='steerable_field_b_simpVec_temperature'
+                          number_of_elements_per_command='1'
+                          repeat_command='1'
+                          default_values='1.0 2.0 3.0'>
+      <Documentation>SimParams.temperature across array entries.</Documentation>
+    </DoubleVectorProperty>
+    <IntVectorProperty name='simpVec_steps'
+                       command='SetTuple1Int'
+                       use_index='1'
+                       clean_command='Clear'
+                       initial_string='steerable_field_b_simpVec_steps'
+                       number_of_elements_per_command='1'
+                       repeat_command='1'
+                       default_values='0 5 10'>
+      <Documentation>SimParams.steps across array entries.</Documentation>
+    </IntVectorProperty>
+    <IntVectorProperty name='simpVec_reset_btn'
+                       command='SetTuple1Int'
+                       use_index='1'
+                       clean_command='Clear'
+                       initial_string='steerable_field_b_simpVec_reset_btn'
+                       number_of_elements_per_command='1'
+                       repeat_command='1'
+                       default_values='0 0 0'
+                       panel_widget='CheckBox'>
+      <!-- <BooleanDomain name='bool'/> -->
+      <Documentation>Reset button states per struct entry.</Documentation>
+    </IntVectorProperty>
+
+    <PropertyGroup label='SimParams Vector' panel_widget='PropertyCollection'>
+      <Hints>
+        <PropertyCollectionWidgetPrototype group='misc' name='simpStructPrototype'/>
+      </Hints>
+      <Property name='simpVec_temperature' function='temperature'/>
+      <Property name='simpVec_steps' function='steps'/>
+      <Property name='simpVec_reset_btn' function='reset_btn'/>
+    </PropertyGroup>
+
+    <Hints>
+      <!-- Updated to per-array dedicated forward mesh: steerable_channel_1D_mesh_simpVec -->
+      <CatalystInitializePropertiesWithMesh mesh='steerable_channel_1D_mesh_simpVec'>
+        <Property name='simpVec_temperature' association='point' array='steerable_field_f_simpVec_temperature'/>
+        <Property name='simpVec_steps' association='point' array='steerable_field_f_simpVec_steps'/>
+        <Property name='simpVec_reset_btn' association='point' array='steerable_field_f_simpVec_reset_btn'/>
+      </CatalystInitializePropertiesWithMesh>
+    </Hints>
+  </SourceProxy>
+
+</ProxyGroup>
+
+
+
+
+<ProxyGroup name='misc'>
+      <Proxy name='LinMapPrototype' label='LinMap'>
+        <IntVectorProperty name='map_time' label='Time'
+            number_of_elements='1' default_values='0.0'>
+            <!-- <DoubleRangeDomain name="range" min="0.0" max="10.0" /> -->
+        </IntVectorProperty>
+
+
+        <DoubleVectorProperty name='map_x_row' label='X Row'
+            number_of_elements='3' default_values='1 0 0' >
+          <DoubleRangeDomain name='range' min='-99' max='99'/>
+          <Hints>
+                <ShowComponentLabels>
+                  <ComponentLabel component='0' label='X'/>
+                  <ComponentLabel component='1' label='Y'/>
+                  <ComponentLabel component='2' label='Z'/>
+                </ShowComponentLabels>
+                <ShowLabel />
+
+              </Hints>
+        </DoubleVectorProperty>
+
+        <DoubleVectorProperty name='map_y_row' label='Y Row'
+            number_of_elements='3' default_values='0 1 0'>
+          <DoubleRangeDomain name='range' min='-99' max='99'/>
+                        <Hints>
+                <ShowComponentLabels>
+                  <ComponentLabel component='0' label='X'/>
+                  <ComponentLabel component='1' label='Y'/>
+                  <ComponentLabel component='2' label='Z'/>
+                </ShowComponentLabels>
+              </Hints>
+        </DoubleVectorProperty>
+        <DoubleVectorProperty name='map_z_row' label='Z Row'
+            number_of_elements='3' default_values='0 0 1'>
+          <DoubleRangeDomain name='range' min='-99' max='99'/>
+                        <Hints>
+                <ShowComponentLabels>
+                  <ComponentLabel component='0' label='X'/>
+                  <ComponentLabel component='1' label='Y'/>
+                  <ComponentLabel component='2' label='Z'/>
+                </ShowComponentLabels>
+              </Hints>
+        </DoubleVectorProperty>
+      </Proxy>
+
+
+      
+    <Proxy name='simpPrototype' label='simp-protoyp'> 
+      <DoubleVectorProperty name='temp' label='Temperature'
+          number_of_elements='1' default_values='0.0'>
+      </DoubleVectorProperty>
+
+      <DoubleVectorProperty name='steps' label='Steps'
+          number_of_elements='1' default_values='0.0'>
+      </DoubleVectorProperty>
+
+      <IntVectorProperty name='reset' label='Reset'
+          number_of_elements='1' default_values='0'>
+          <BooleanDomain name='bool'/>
+      </IntVectorProperty>
+    </Proxy>
+
+    <!-- Prototype for one SimParams struct entry (used by SimParams Vector collection) -->
+    <Proxy name='simpStructPrototype' label='SimParams'>
+      <DoubleVectorProperty name='temperature' label='Temperature'
+                            number_of_elements='1' default_values='0.0'/>
+      <IntVectorProperty name='steps' label='Steps'
+                         number_of_elements='1' default_values='0'/>
+      <IntVectorProperty name='reset_btn' label='Reset'
+                         number_of_elements='1' default_values='0'>
+        <BooleanDomain name='bool'/>
+      </IntVectorProperty>
+    </Proxy>
+</ProxyGroup>
+
+
+
+
+
+
+
+</ServerManagerConfiguration>

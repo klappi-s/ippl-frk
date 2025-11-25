@@ -1,8 +1,19 @@
 #pragma once
 #include "Stream/Registry/VisRegistryRuntime.h"
 
+#include <type_traits>
+#include <vector>
+
 
 namespace ippl {
+
+    // Small trait to detect exactly std::vector<T, A>
+    template<typename T>
+    struct is_std_vector : std::false_type {};
+    template<typename T, typename A>
+    struct is_std_vector<std::vector<T, A>> : std::true_type {};
+    template<typename T>
+    inline constexpr bool is_std_vector_v = is_std_vector<std::decay_t<T>>::value;
 
     // LVALUE overload: bind callbacks to referenced object
     template<class T>
@@ -36,6 +47,18 @@ namespace ippl {
             e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)   { ippl::detail::StructMeta<DecayT>::do_fetch(v, value, label); };
             entries_.push_back(std::move(e));
             return;
+        }
+
+        // Vector<RegisteredStruct>: aggregate members across elements
+        if constexpr (is_std_vector_v<DecayT>) {
+            using ElemT = typename DecayT::value_type;
+            if (ippl::detail::StructMeta<ElemT>::registered) {
+                e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<ElemT>::do_init_vec(v, value, label); };
+                e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v){ ippl::detail::StructMeta<ElemT>::do_fwd_vec(v, value, label); };
+                e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)  { ippl::detail::StructMeta<ElemT>::do_fetch_vec(v, value, label); };
+                entries_.push_back(std::move(e));
+                return;
+            }
         }
 
         // Fallback: unsupported type -> throw (runtime instead of static_assert for flexibility)

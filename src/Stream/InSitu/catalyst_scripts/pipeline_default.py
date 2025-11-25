@@ -231,14 +231,35 @@ if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
     except Exception as e:
         print_info_(f"Could not hide steerable_channel_0D_mesh: {e}")
 
-if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
-    try:
-        src = paraview.simple.FindSource("steerable_channel_1D_mesh")
-        if src is not None:
-            print_info_("Hiding auto-created steerable_channel_0D_mesh from GUI")
-            paraview.simple.Delete(src)
-    except Exception as e:
-        print_info_(f"Could not hide steerable_channel_0D_mesh: {e}")
+# if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
+#     # Hide legacy shared 1D mesh (if still present) and any per-array forward meshes
+#     try:
+#         legacy = paraview.simple.FindSource("steerable_channel_1D_mesh")
+#         if legacy is not None:
+#             print_info_("Hiding legacy steerable_channel_1D_mesh from GUI")
+#             paraview.simple.Delete(legacy)
+#     except Exception as e:
+#         print_info_(f"Could not hide legacy steerable_channel_1D_mesh: {e}")
+
+#     # Dynamically hide all per-array meshes matching prefix pattern
+#     try:
+#         pm2 = servermanager.ProxyManager()
+#         sources_group = pm2.GetProxyGroup("sources")
+#         if sources_group is not None:
+#             for i in range(sources_group.GetNumberOfProxies()):
+#                 proxy = sources_group.GetProxy(i)
+#                 if not proxy: continue
+#                 pname = pm2.GetProxyName("sources", proxy)
+#                 if pname.startswith("steerable_channel_1D_mesh_"):
+#                     try:
+#                         src = paraview.simple.FindSource(pname)
+#                         if src is not None:
+#                             print_info_(f"Hiding per-array forward mesh '{pname}' from GUI")
+#                             paraview.simple.Delete(src)
+#                     except Exception as _e:
+#                         print_info_(f"Could not hide forward mesh '{pname}': {_e}")
+#     except Exception as e:
+#         print_info_(f"Error while scanning for per-array forward meshes: {e}")
 
 
 
@@ -397,25 +418,31 @@ steer_channel_senders = {}
 steer_channels = {}
 
 if parsed.steer == "ON":
-    if parsed.steer_channel_names :
-        print_info_("===CREATING STEERABLES============="[0:40]+"|0")
+#     if parsed.steer_channel_names :
+#         print_info_("===CREATING STEERABLES============="[0:40]+"|0")
 
-        # ------------------------------------------------------------------------------
-        # forward / incoming steering channels
-        # ------------------------------------------------------------------------------
-        print_info_("FORWARD")
-        if parsed.show_forward_channels == "ON":
-            for sname in parsed.steer_channel_names:
-                print_info_(sname)
-                # All steerables share a single 0D mesh channel; reuse the same producer for each entry
-                steer_channel_readers[sname] = PVTrivialProducer(registrationName="steerable_channel_0D_mesh")
-        else:
-            # Suppress creating pipeline objects so nothing appears in the GUI
-            for sname in parsed.steer_channel_names:
-                print_info_(f"(hidden) {sname}")
-                steer_channel_readers[sname] = None
-    else:
-        print_info_("No channel names provided in parsed.channel_names.")
+#         # ------------------------------------------------------------------------------
+#         # forward / incoming steering channels
+#         # ------------------------------------------------------------------------------
+#         print_info_("FORWARD")
+#         if parsed.show_forward_channels == "ON":
+#             for sname in parsed.steer_channel_names:
+#                 print_info_(sname)
+#                 # Default forward mesh for scalar steerables
+#                 reg = "steerable_channel_0D_mesh"
+#                 if "_" in sname:
+#                     pref = sname.split('_',1)[0]
+#                     # Only treat as dynamic array if prefix contains no '.' (exclude struct scalar members like simp.temperature)
+#                     if '.' not in pref:
+#                         reg = f"steerable_channel_1D_mesh_{pref}"
+#                 steer_channel_readers[sname] = PVTrivialProducer(registrationName=reg)
+#         else:
+#             # Suppress creating readers entirely so channels stay hidden
+#             for sname in parsed.steer_channel_names:
+#                 print_info_(f"(hidden) {sname}")
+#                 steer_channel_readers[sname] = None
+#     else:
+#         print_info_("No channel names provided in parsed.channel_names.")
 
     # EG: but not needed...
     # steerable_field_in_magnetic = PVTrivialProducer(registrationName='steerable_channel_forward_magnetic')
@@ -429,22 +456,101 @@ if parsed.steer == "ON":
     try:
         # Unified sender: one proxy carrying one property per channel, single result mesh
         sender_all = CreateSteerableParameters(
-                                steerable_proxy_type_name           = "SteerableParameters_ALL",
-                                steerable_proxy_registration_name   = "SteeringParameters_ALL",
-                                result_mesh_name                    = "steerable_channel_backward_all"
-        )        
-        sender_all = CreateSteerableParameters(
-                                steerable_proxy_type_name           = "SteerableParameters_ALL2",
-                                steerable_proxy_registration_name   = "SteeringParameters_ALL2",
-                                result_mesh_name                    = "steerable_channel_backward_all"
+            steerable_proxy_type_name           = "SteerableParameters_ALL",
+            steerable_proxy_registration_name   = "SteeringParameters_ALL",
+            result_mesh_name                    = "steerable_channel_backward_all"
         )
+        # print_info_("[DEBUG] Created sender_all (LinMaps + generic) proxy object", level=2 )
+        sender_all2 = CreateSteerableParameters(
+            steerable_proxy_type_name           = "SteerableParameters_ALL2",
+            steerable_proxy_registration_name   = "SteeringParameters_ALL2",
+            result_mesh_name                    = "steerable_channel_backward_all"
+        )
+        # print_info_("[DEBUG] Created sender_all2 (SimParams scalar struct) proxy object", level=2 )
+
+
+
+        # if sender3 is None:
+            # print_info_("[DEBUG][WARN] Failed to create hard-coded struct array sender 'simpVec'", level=2)
+        # else:
+            # print_info_("[DEBUG] Created hard-coded struct array sender 'simpVec'", level=2)
         if sender_all is None:
             print_info_("Error: SteerableParameters_ALL proxy not found (CreateSteerableParameters returned None).")
         else:
             print_info_("SteerableParameters_ALL loaded successfully.")
-        # keep dictionary for compatibility; all entries point to the same sender
-        for sname in parsed.steer_channel_names:
-            steer_channel_senders[sname] = sender_all
+        if sender_all2 is None:
+            print_info_("Error: SteerableParameters_ALL2 proxy not found (CreateSteerableParameters returned None).")
+        else:
+            print_info_("SteerableParameters_ALL2 loaded successfully.")
+
+
+
+
+
+        # ------------------------------------------------------------------
+        # HARD-CODED struct vector sender (temporary simplification): simpVec
+        # The dynamic prefix detection above is commented out. We assume a
+        # single vector-of-struct named 'simpVec' with members:
+        #   simpVec_temperature, simpVec_steps, simpVec_reset_btn
+        # ------------------------------------------------------------------
+        # (Commented dynamic detection retained for reference)
+        # struct_member_names = { 'temperature', 'steps', 'reset_btn' }
+        # prefix_suffixes = {}
+        # for name in parsed.steer_channel_names:
+        #     if '_' in name:
+        #         pre, suf = name.split('_',1)
+        #         if '.' in pre:
+        #             continue
+        #         prefix_suffixes.setdefault(pre, set()).add(suf)
+        # true_prefixes = [pre for pre, sufs in prefix_suffixes.items() if len(sufs & struct_member_names) > 0]
+        # true_prefixes.sort()
+        # print_info_(f"[DEBUG] Detected struct-array prefixes (filtered): {true_prefixes}", level=2)
+        # for prefix in true_prefixes:
+        #     ...
+
+
+        struct_array_senders = {}
+        # Create only one sender for 'simpVec'
+        if any(n.startswith('simpVec_') for n in parsed.steer_channel_names):
+            struct_array_senders['simpVec'] = CreateSteerableParameters(
+                steerable_proxy_type_name         = "Steerables_SIMPVEC",
+                steerable_proxy_registration_name = "Steering" + 'simpVec',
+                result_mesh_name                  = "steerable_channel_backward_all"
+            )
+            if struct_array_senders['simpVec'] is None:
+                print_info_("[DEBUG][WARN] Failed to create hard-coded struct array sender 'simpVec'", level=2)
+            else:
+                print_info_("[DEBUG] Created hard-coded struct array sender 'simpVec'", level=2)
+
+
+
+
+
+
+
+
+
+
+
+
+        # Classification + routing with debug output
+        # for sname in parsed.steer_channel_names:
+        #     matched = False
+        #     route_desc = "?"
+        #     # Hard-coded struct array routing for simpVec members
+        #     if sname.startswith('simpVec_') and 'simpVec' in struct_array_senders and struct_array_senders['simpVec'] is not None:
+        #         steer_channel_senders[sname] = struct_array_senders['simpVec']
+        #         matched = True
+        #         route_desc = "struct-array[simpVec]"
+        #     if not matched:
+        #         # Distinguish SimParams scalar struct members (simp.) vs LinMaps/others
+        #         if sname.startswith('simp.'):
+        #             steer_channel_senders[sname] = sender_all2 if sender_all2 is not None else sender_all
+        #             route_desc = "SimParams-scalar"
+        #         else:
+        #             steer_channel_senders[sname] = sender_all
+        #             route_desc = "generic"
+        #     print_info_(f"[DEBUG] Routed '{sname}' -> {route_desc}", level=2)
         
         # EG:
         # steerable_parameters_magnetic =  CreateSteerableParameters(
@@ -463,8 +569,8 @@ if parsed.steer == "ON":
 
 
 
-for sname in parsed.steer_channel_names:
-    steer_channels[sname] = (steer_channel_readers[sname], steer_channel_senders[sname])
+# for sname in parsed.steer_channel_names:
+#     steer_channels[sname] = (steer_channel_readers[sname], steer_channel_senders[sname])
 
 
 
@@ -482,7 +588,7 @@ def catalyst_initialize():
     print_info_("catalyst_initialize()"+exp_string)
     print_info("#################################################")
     print_info("OPEN PV CLIENT NOW")
-    time.sleep(5)
+    time.sleep(1)
     print_info("#################################################")
     
 # ------------------------------------------------------------------------------
@@ -525,9 +631,36 @@ def catalyst_execute(info):
 
 
     if parsed.steer == "ON" and  parsed.show_forward_channels == "ON":
-        for name, (reader, sender) in steer_channels.items():
+        for name, reader in steer_channel_readers.items():
+        # for name, (reader, sender) in steer_channels.items():
             reader.UpdatePipeline()
             reader.UpdateVTKObjects()
+
+    # # Always update backward senders to ensure result mesh generation
+    # if parsed.steer == "ON":
+    #     # Unique sender proxies
+    #     updated = set()
+    #     for sender in steer_channel_senders.values():
+    #         if sender is None: continue
+    #         if sender in updated: continue
+    #         try:
+    #             sender.UpdatePipeline()
+    #             sender.UpdateVTKObjects()
+    #             pname = getattr(sender, 'GetXMLName', lambda : 'unknown')()
+    #             print_info_(f"[DEBUG] Updated backward sender proxy '{pname}'", level=2)
+    #         except Exception as e:
+    #             print_info_(f"[DEBUG][WARN] Failed to update sender proxy: {e}", level=2)
+    #         updated.add(sender)
+
+    #     # Debug: list properties present on each sender
+    #     for sender in updated:
+    #         try:
+    #             pname = getattr(sender, 'GetXMLName', lambda : 'unknown')()
+    #             props = [p for p in dir(sender) if not p.startswith('_') and hasattr(sender, p)]
+    #             print_info_(f"[DEBUG] Sender '{pname}' has properties: {props[:25]} ...", level=2)
+    #         except Exception as e:
+    #             print_info_(f"[DEBUG][WARN] Could not enumerate properties for sender: {e}", level=2)
+
 
 
     # if options.EnableCatalystLive:
