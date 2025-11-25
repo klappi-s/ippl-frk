@@ -721,6 +721,24 @@ class CatalystAdaptor {
     // AoS alternative fetch
     void FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label);
         
+    // ---------------------------------------------------------------------
+    // Struct steering registration (simple initial version)
+    // ---------------------------------------------------------------------
+    // Expose any user struct composed of already supported steerable member
+    // types (arithmetic, bool, ippl::Button, ippl::Vector<>, enums, LinMap,
+    // LinMaps, std::vector<LinMap>). Nested structs are intentionally not
+    // supported yet. Must be called before adding the struct instance to a
+    // runtime registry.
+    // Example:
+    //   struct SimParams { double temp; int steps; ippl::Button reset; };
+    //   ippl::CatalystAdaptor::RegisterStructMembers<SimParams>(
+    //        "temperature", &SimParams::temp,
+    //        "steps",       &SimParams::steps,
+    //        "reset_btn",   &SimParams::reset);
+    //   SimParams params; steerRegistry->add("simulation", params);
+    template<typename T, typename... Args>
+    static void RegisterStructMembers(Args&&... args);
+
 
     /**
      * @brief Retrieves results from Catalyst and populates the given Conduit node.

@@ -231,6 +231,15 @@ if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
     except Exception as e:
         print_info_(f"Could not hide steerable_channel_0D_mesh: {e}")
 
+if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
+    try:
+        src = paraview.simple.FindSource("steerable_channel_1D_mesh")
+        if src is not None:
+            print_info_("Hiding auto-created steerable_channel_0D_mesh from GUI")
+            paraview.simple.Delete(src)
+    except Exception as e:
+        print_info_(f"Could not hide steerable_channel_0D_mesh: {e}")
+
 
 
 # Global dictionaries to store proxies, filters etc
@@ -422,6 +431,11 @@ if parsed.steer == "ON":
         sender_all = CreateSteerableParameters(
                                 steerable_proxy_type_name           = "SteerableParameters_ALL",
                                 steerable_proxy_registration_name   = "SteeringParameters_ALL",
+                                result_mesh_name                    = "steerable_channel_backward_all"
+        )        
+        sender_all = CreateSteerableParameters(
+                                steerable_proxy_type_name           = "SteerableParameters_ALL2",
+                                steerable_proxy_registration_name   = "SteeringParameters_ALL2",
                                 result_mesh_name                    = "steerable_channel_backward_all"
         )
         if sender_all is None:

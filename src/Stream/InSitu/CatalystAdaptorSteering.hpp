@@ -1,13 +1,103 @@
 #pragma once
 
 #include "Stream/InSitu/CatalystAdaptor.h"
-#include "Stream/InSitu/CatalystAdaptor.hpp"
+#include "Stream/InSitu/CatalystVisitors.h" // ensure AllowedSteerType_v available
 #include <array>
 
 
 
 
 namespace ippl{
+
+// =====================================================================================
+// SIMPLE STRUCT STEERING META (Initial Implementation)
+// =====================================================================================
+// Supports user-defined structs composed ONLY of existing steerable member types.
+// No nesting, no arrays-of-struct (AoS/SoA) yet. Each member is exposed as:
+//   <rootLabel>/<memberName>
+// Member names are sanitized ( '/' -> '_' ). Registration builds three lambdas
+// invoked by runtime registry visitors (Init/Fwd/Fetch).
+
+namespace detail {
+
+// Label sanitation: replace '/' to avoid unintended Conduit subtree splitting.
+inline std::string sanitize_label(const std::string& in) {
+    std::string out; out.reserve(in.size());
+    for (char c : in) out += (c=='/' ? '_' : c);
+    return out;
+}
+
+// Recursive applicator: base case (no members left).
+template <typename Visitor, typename T>
+inline void apply_struct_members(Visitor&, T&, const std::string&) {}
+
+// Recursive step: visit (name, pointer-to-member) then recurse.
+template <typename Visitor, typename T, typename NameType, typename MemberPtr, typename... Rest>
+inline void apply_struct_members(Visitor& vis, T& obj, const std::string& rootLabel,
+                                 NameType name, MemberPtr ptr, Rest&&... rest) {
+    // Build full label and dispatch to existing visitor overloads.
+    std::string fullLabel = rootLabel + "." + sanitize_label(std::string(name));
+    vis(fullLabel, obj.*ptr);  // rely on visitor operator() overload selection
+    apply_struct_members(vis, obj, rootLabel, std::forward<Rest>(rest)...);
+}
+
+// Meta storage per struct type T.
+template <typename T>
+struct StructMeta {
+    static inline bool registered = false;
+    // Lambdas capturing (name, memberPtr) pack for each steering phase.
+    static inline std::function<void(CatalystAdaptor::SteerInitVisitor&, const T&, const std::string&)>    do_init;
+    static inline std::function<void(CatalystAdaptor::SteerForwardVisitor&, const T&, const std::string&)> do_fwd;
+    static inline std::function<void(CatalystAdaptor::SteerFetchVisitor&, T&, const std::string&)>         do_fetch;
+};
+
+} // namespace detail
+
+// -------------------------------------------------------------------------------------
+// Registration function (static method of CatalystAdaptor declared in header)
+// -------------------------------------------------------------------------------------
+// Args must be an even-sized pack of: name(string-like), pointer-to-member.
+// Validates each member type at registration (throws IpplException if invalid).
+// Stores three lambdas which expand the pack and delegate to visitor overloads.
+template<typename T, typename... Args>
+void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
+    using DecayT = std::decay_t<T>;
+    static_assert(sizeof...(Args) % 2 == 0, "RegisterStructMembers requires (name, memberPtr) pairs");
+    if (detail::StructMeta<DecayT>::registered) return;
+
+    // Pack names and member pointers interleaved.
+    auto pack = std::tuple<Args...>(std::forward<Args>(args)...);
+    constexpr size_t N = sizeof...(Args);
+    constexpr size_t PairCount = N / 2;
+
+    // Validate each (name, memberPtr) pair.
+    [&]<std::size_t... I>(std::index_sequence<I...>){
+        (([] (auto name, auto memberPtr){
+            using MemberType = std::remove_reference_t<decltype(std::declval<DecayT>().*memberPtr)>;
+            if constexpr (!AllowedSteerType_v<MemberType>) {
+                throw IpplException(
+                    "CatalystAdaptor::RegisterStructMembers",
+                    std::string("Unsupported member type for steering in struct '") + typeid(DecayT).name() +
+                    "' member '" + std::string(name) + "'"
+                );
+            }
+        })(std::get<2*I>(pack), std::get<2*I+1>(pack)), ...);
+    }(std::make_index_sequence<PairCount>{});
+
+    // Visitor lambdas reuse generic applicator.
+    detail::StructMeta<DecayT>::do_init = [pack](SteerInitVisitor& vis, const DecayT& obj, const std::string& root) mutable {
+        std::apply([&](auto&&... all){ ippl::detail::apply_struct_members(vis, const_cast<DecayT&>(obj), ippl::detail::sanitize_label(root), all...); }, pack);
+    };
+    detail::StructMeta<DecayT>::do_fwd = [pack](SteerForwardVisitor& vis, const DecayT& obj, const std::string& root) mutable {
+        std::apply([&](auto&&... all){ ippl::detail::apply_struct_members(vis, const_cast<DecayT&>(obj), ippl::detail::sanitize_label(root), all...); }, pack);
+    };
+    detail::StructMeta<DecayT>::do_fetch = [pack](SteerFetchVisitor& vis, DecayT& obj, const std::string& root) mutable {
+        std::apply([&](auto&&... all){ ippl::detail::apply_struct_members(vis, obj, ippl::detail::sanitize_label(root), all...); }, pack);
+    };
+
+    detail::StructMeta<DecayT>::registered = true;
+}
+
 
 
 
@@ -105,7 +195,7 @@ inline void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const ippl::
     // can find them immediately on proxy creation (before first execute).
     // This mirrors AddSteerableChannel(LinMaps) but runs during initialize.
     const size_t N = lms.time.size();
-    auto steerable_channel = node["catalyst/channels/steerable_channel_0D_mesh"];
+    auto steerable_channel = node["catalyst/channels/steerable_channel_1D_mesh"];
     steerable_channel["type"].set("mesh");
     auto steerable_data = steerable_channel["data"];
     steerable_data["coordsets/coords/type"].set_string("explicit");
@@ -351,7 +441,7 @@ inline void CatalystAdaptor::AddSteerableChannel( const ippl::LinMaps& lms, cons
     (void)steerable_suffix; // ignored for LinMaps; XML expects fixed Map_* names
     ca_m << "::Execute()::AddSteerableChannel(LinMaps)" << endl;
 
-    auto steerable_channel = node["catalyst/channels/steerable_channel_0D_mesh"];
+    auto steerable_channel = node["catalyst/channels/steerable_channel_1D_mesh"];
     steerable_channel["type"].set("mesh");
     auto steerable_data = steerable_channel["data"];
     steerable_data["coordsets/coords/type"].set_string("explicit");
@@ -526,7 +616,7 @@ void CatalystAdaptor::FetchSteerableChannelValue( ippl::Vector<T, Dim_v>& steera
             conduit_cpp::Node vnode = results[*chosen];
                 bool idx_read = true;
                 for (unsigned c = 0; c < comps; ++c) {
-                    std::string idx_path = *chosen + "/" + std::to_string(c);
+                    std::string idx_path = *chosen + "." + std::to_string(c);
                     if (results.has_path(idx_path)) {
                         conduit_cpp::Node ic = results[idx_path];
                         if (ic.dtype().is_number()) {

@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 #include <Stream/InSitu/CatalystAdaptor.h>
+#include <Stream/InSitu/CatalystAdaptorSteering.hpp> // ensure StructMeta available for registered structs
 
 
 // Yes, you can use if constexpr to generate a single function body that

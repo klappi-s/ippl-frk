@@ -34,6 +34,13 @@ enum experiment_enum {
     UniformPlasma
 };
 
+struct SimParams {
+    double temperature;
+    int steps;
+    ippl::Button reset_btn;
+};
+
+
 // 1. Write a helper function
 std::string to_string(experiment_enum c) {
     switch (c) {
@@ -81,7 +88,9 @@ public:
             switch_m(false),
             e_m(PenningTrap) ,
             sLinMap_m({1.50 , {7,8,9},{1,2,3},{4,5,6}}),
-            sLinMap2_m({2.50 , {1,2,3},{4,5,6},{7,8,9}}) {
+            sLinMap2_m({2.50 , {1,2,3},{4,5,6},{7,8,9}}),
+            simp{1.0, 0, ippl::Button(false)}
+            {
                 // Initialize LinMaps (struct-of-arrays) with two example maps
                 lm_m.time.clear(); lm_m.x_row.clear(); lm_m.y_row.clear(); lm_m.z_row.clear();
                 // Map #1: time=1.50, x={7,8,9}, y={1,2,3}, z={4,5,6}
@@ -125,7 +134,7 @@ private:
     ippl::LinMap sLinMap2_m;
     ippl::LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
     std::vector<ippl::LinMap> lmv_m; // NEW: AoS vector<LinMap> used for steering registration
-
+    SimParams simp;
 
     Vector_t<double, Dim> length_m;
     double Bext_m;
@@ -234,6 +243,16 @@ public:
 
         #ifdef IPPL_ENABLE_CATALYST
         m << "Catalyst is enabled" << endl; 
+
+
+            ippl::CatalystAdaptor::RegisterStructMembers<SimParams>(
+                "temperature", &SimParams::temperature,
+                "steps",       &SimParams::steps,
+                "reset_btn",   &SimParams::reset_btn
+            );
+
+
+
             std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                         //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
                                         // "electric",         electric_scale,
@@ -247,6 +266,7 @@ public:
                                         // "LinMaps", lm_m            // original SoA registration
                                         "LinMaps", lmv_m             // now registering AoS variant (vector<LinMap>)
                                     );
+            runtime_steer_registry->add("simp", simp);
                                 
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
             // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(

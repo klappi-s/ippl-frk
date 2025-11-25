@@ -8,35 +8,53 @@ namespace ippl {
     template<class T>
     requires(!is_allowed_shared_ptr<typename std::decay<T>::type>::value)
     void VisRegistryRuntime::add(const std::string& label, T& value) {
-        static_assert(AllowedRegistryType_v<T>, "VisRegistryRuntime: unsupported value type (lvalue)");
-        Entry e;
-        e.label = label;
+        using DecayT = std::decay_t<T>;
+        Entry e; e.label = label;
+
+        // Visualization types (fields/particles)
         if constexpr (AllowedVisType_v<T>) {
             e.do_init = [&value, label](InitVisitor_t& v) { v(label, value); };
             e.do_exec = [&value, label](ExecuteVisitor_t& v) { v(label, value); };
-        } 
-        else if constexpr (AllowedSteerType_v<T>) {
-            e.do_steer_init = [&value, label](SteerInitVisitor_t& v)    { v(label, value); };
-            e.do_steer_fwd  = [&value, label](SteerForwardVisitor_t& v) { v(label, value); };
-            e.do_steer_fetch= [&value, label](SteerFetchVisitor_t& v)   { v(label, value); };
+            entries_.push_back(std::move(e));
+            index_exec_[label] = entries_.size() - 1;
+            return;
         }
-        entries_.push_back(std::move(e));
 
-        // Maintain execute index only for entries that can execute.
-        const std::size_t idx = entries_.size() - 1;
-        // if (entries_.back().do_exec) 
-        // {
-            index_exec_[label] = idx;
-        // }
+        // Standard steerables (scalars, vectors, buttons, enums, LinMap(s), etc.)
+        if constexpr (AllowedSteerType_v<T>) {
+            e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { v(label, value); };
+            e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v) { v(label, value); };
+            e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)   { v(label, value); };
+            entries_.push_back(std::move(e));
+            return; // no execute index for pure steerables
+        }
+
+        // Registered user struct (simple steering aggregation)
+        if (ippl::detail::StructMeta<DecayT>::registered) {
+            e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<DecayT>::do_init(v, value, label); };
+            e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v) { ippl::detail::StructMeta<DecayT>::do_fwd(v, value, label); };
+            e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)   { ippl::detail::StructMeta<DecayT>::do_fetch(v, value, label); };
+            entries_.push_back(std::move(e));
+            return;
+        }
+
+        // Fallback: unsupported type -> throw (runtime instead of static_assert for flexibility)
+    throw IpplException("VisRegistryRuntime::add", std::string("Unsupported value type for registry entry '") + label + "' (type=" + typeid(T).name() + ")");
     }
 
 
     // Overload: add shared_ptr<U> by binding to referenced object and keeping lifetime
     template<class U>
     void VisRegistryRuntime::add(const std::string& label, const std::shared_ptr<U>& ptr) {
-        static_assert(AllowedRegistryType_v<U>, "VisRegistryRuntime: unsupported shared_ptr<U> type");
+        using DecayU = std::decay_t<U>;
         if (!ptr) return;
-        add(label, *ptr);
+        // Allow visualisation, steerables, and registered structs.
+        if constexpr (!(AllowedRegistryType_v<DecayU>)) {
+            if (!ippl::detail::StructMeta<DecayU>::registered) {
+                throw IpplException("VisRegistryRuntime::add(shared_ptr)", std::string("Unsupported shared_ptr type for entry '") + label + "' (type=" + typeid(U).name() + ")");
+            }
+        }
+        add(label, *ptr); // delegates to lvalue path (already handles struct/meta)
         // keep alive by capturing shared_ptr in a no-op callback
         auto& e = entries_.back();
         auto keep = ptr; // copy
