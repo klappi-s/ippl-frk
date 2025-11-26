@@ -535,6 +535,56 @@ void ProxyWriter::appendPrototype() {
       misc_ << "      </Proxy>\n";
     }
   }
+
+  // Prototypes for ARRAY channels that are basic types (no struct member part)
+  // Create one prototype per basic array namespace (ns == propertyName for these),
+  // e.g., a prototype 'double_arrayPrototype' containing a single property 'double_array'.
+  {
+    std::map<std::string, const Channel*> basicByNs;
+    for (const auto& ch : channels_) {
+      if (!ch.isArray) continue;
+      if (ch.propertyName.find('.') != std::string::npos) continue; // struct members handled above
+      // For basic arrays, ns equals propertyName
+      basicByNs[ch.ns] = &ch;
+    }
+    for (const auto& kv : basicByNs) {
+      const std::string& ns = kv.first;
+      const Channel* c = kv.second;
+      misc_ << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
+      const std::string& name = ns; // property name inside prototype
+      if (c->isButton || c->isBool) {
+        misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
+        misc_ << "          <BooleanDomain name='bool'/>\n";
+        misc_ << "        </IntVectorProperty>\n";
+      } else if (c->isEnum) {
+        misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
+        misc_ << "          <EnumerationDomain name='enum'>\n";
+        for (const auto& ev : c->enumEntries) {
+          misc_ << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
+        }
+        misc_ << "          </EnumerationDomain>\n";
+        misc_ << "        </IntVectorProperty>\n";
+      } else if (c->isVector) {
+        const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
+        const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
+        const double d2 = c->hasVectorRanges ? c->vecDefaults[2] : c->defaultValue;
+        const double vmin = c->hasVectorRanges ? c->vecMin : rangeMin_;
+        const double vmax = c->hasVectorRanges ? c->vecMax : rangeMax_;
+        misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='3' default_values='"
+              << d0 << " " << d1 << " " << d2 << "'>\n";
+        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+        misc_ << "        </DoubleVectorProperty>\n";
+      } else {
+        const double sdef = c->defaultValue;
+        const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
+        const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
+        misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
+        misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+        misc_ << "        </DoubleVectorProperty>\n";
+      }
+      misc_ << "      </Proxy>\n";
+    }
+  }
 }
 
 void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
@@ -895,6 +945,23 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
       if (c->propertyName.find('.') == std::string::npos) continue;
       std::string member = c->propertyName.substr(c->propertyName.find('.')+1);
       sources_ << "                <Property name='" << c->propertyName << "' function='" << ns << ":" << member << "' label='" << c->propertyName << "'/>\n";
+    }
+    sources_ << "            </PropertyGroup>\n\n";
+  }
+
+  // Property group for basic-type array channels (no struct member part)
+  // Reference the per-ns prototype '<ns>Prototype' and map property by same name.
+  bool hasBasicArray = false;
+  for (const Channel* c : chans) { if (c->propertyName.find('.') == std::string::npos) { hasBasicArray = true; break; } }
+  if (hasBasicArray) {
+    sources_ << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
+    sources_ << "                <Hints>\n";
+    sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
+    sources_ << "                </Hints>\n";
+    for (const Channel* c : chans) {
+      if (c->propertyName.find('.') != std::string::npos) continue;
+      const std::string& P = c->propertyName;
+      sources_ << "                <Property name='" << P << "' function='" << ns << "' label='" << P << "'/>\n";
     }
     sources_ << "            </PropertyGroup>\n\n";
   }

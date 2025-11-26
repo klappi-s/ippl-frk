@@ -327,10 +327,14 @@ public:
                                     // Array-of-struct steerables
                                     runtime_steer_registry->add("LinMap_array", LinMap_array);
                                     runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
-                                    // NOTE: arrays of primitive types (double_array, int_array, etc.) are not yet registered
-                                    // because VisRegistryRuntime currently only supports vector<T> where T is a registered struct.
-                                    // Extend VisRegistryRuntime::add to handle primitive vectors if steering is required.
-                                    // runtime_steer_registry->add("LinMaps", lmv_m);
+                                    // Primitive/basic-type vector steerables (now supported)
+                                    runtime_steer_registry->add("array:double_array",     double_array);
+                                    runtime_steer_registry->add("array:double_array_2",   double_array_2);
+                                    runtime_steer_registry->add("array:int_array",        int_array);
+                                    runtime_steer_registry->add("array:bool_array",       bool_array);
+                                    runtime_steer_registry->add("array:button_array",     button_array);
+                                    runtime_steer_registry->add("array:vector_array",     vector_array);
+                                    // LinMaps (SoA) or other compound arrays can be added similarly when needed
                                 
                                     // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
