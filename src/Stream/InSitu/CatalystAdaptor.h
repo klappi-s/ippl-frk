@@ -22,7 +22,8 @@
 #include <utility>
 #include <type_traits>
 #include <list>
-#include<filesystem>
+#include <filesystem>
+#include <typeindex>
 
 #if defined(MPI_VERSION)
 #include <mpi.h>
@@ -226,6 +227,10 @@ class CatalystAdaptor {
     ProxyWriter proxyWriter;
     // Optional enum metadata: label -> list of (text,value) choices
     std::unordered_map<std::string, std::vector<std::pair<std::string,int>>> enumChoices_;
+    // Optional enum metadata registered by type (reusable across labels)
+    std::unordered_map<std::type_index, std::vector<std::pair<std::string,int>>> enumChoicesByType_;
+    // Optional enum metadata: type -> list of (text,value) choices (for reuse across labels)
+    // std::unordered_map<std::type_index, std::vector<std::pair<std::string,int>>> enumChoicesByType_;
 
 
     // conduit_cpp::Node node_forward;
@@ -258,7 +263,16 @@ class CatalystAdaptor {
     // std::unordered_map<std::tuple<const void*, const void*,const size_t>, HostMaskView1D_t> ghostMaskCache;
     std::unordered_map<GhostKey_t, HostMaskView1D_t, GhostKeyHash> ghostMaskCache;
 
-    public:
+public:
+    // Typed enum choices registration: provide choices as (name, enum) pairs for a specific label
+    template<typename E>
+    requires (std::is_enum_v<std::decay_t<E>>)
+    void RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries);
+
+    // Typed enum choices registration without label: register once per enum type (reused across labels)
+    template<typename E>
+    requires (std::is_enum_v<std::decay_t<E>>)
+    void RegisterEnumChoicesTyped(const std::vector<std::pair<std::string, E>>& entries);
 
     CatalystAdaptor() : CatalystAdaptor(ippl::Info->getOutputLevel()){}
 
@@ -622,7 +636,7 @@ class CatalystAdaptor {
 
     // Generic std::vector elements (arithmetic/bool/Button) for array steerables
     template<typename Elem>
-    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void InitSteerableChannel( const std::vector<Elem>& arr, const std::string& label );
 
     // std::vector of ippl::Vector<T,Dim> steerables
@@ -659,7 +673,7 @@ class CatalystAdaptor {
 
     // Generic std::vector elements (arithmetic/bool/Button) for array steerables
     template<typename Elem>
-    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void AddSteerableChannel(const std::vector<Elem>& arr, const std::string& label);
 
     // std::vector of ippl::Vector<T,Dim> arrays forward
@@ -695,7 +709,7 @@ class CatalystAdaptor {
     void FetchSteerableChannelValue( ippl::Vector<T, Dim_v>& steerable_vec_backwardpass, const std::string& steerable_suffix);
 
     template<typename Elem>
-    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+    requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void FetchSteerableChannelValue( std::vector<Elem>& out, const std::string& label);
 
     // std::vector of ippl::Vector<T,Dim> arrays backward

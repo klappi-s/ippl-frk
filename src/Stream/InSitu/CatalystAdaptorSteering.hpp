@@ -180,6 +180,31 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
     detail::StructMeta<DecayT>::registered = true;
 }
 
+// ===================== Typed enum choices registration (definitions) =====================
+
+
+template<typename E>
+requires (std::is_enum_v<std::decay_t<E>>)
+void CatalystAdaptor::RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries) {
+    std::vector<std::pair<std::string,int>> conv;
+    conv.reserve(entries.size());
+    for (const auto& p : entries) {
+        conv.emplace_back(p.first, static_cast<int>(p.second));
+    }
+    RegisterEnumChoices(label, conv);
+}
+
+template<typename E>
+requires (std::is_enum_v<std::decay_t<E>>)
+void CatalystAdaptor::RegisterEnumChoicesTyped(const std::vector<std::pair<std::string, E>>& entries) {
+    std::vector<std::pair<std::string,int>> conv;
+    conv.reserve(entries.size());
+    for (const auto& p : entries) {
+        conv.emplace_back(p.first, static_cast<int>(p.second));
+    }
+    enumChoicesByType_[std::type_index(typeid(E))] = std::move(conv);
+}
+
 
 
 
@@ -211,8 +236,14 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const E& e, const s
     if (it != enumChoices_.end()) {
         proxyWriter.includeEnum(label, it->second, static_cast<int>(e));
     } else {
-        // Fallback to an int-like property without dropdown (simplest path is to use Int checkbox placeholder replaced above)
-        proxyWriter.includeBool(label, false);
+        // Try type-based enum choices
+        auto itt = enumChoicesByType_.find(std::type_index(typeid(E)));
+        if (itt != enumChoicesByType_.end()) {
+            proxyWriter.includeEnum(label, itt->second, static_cast<int>(e));
+        } else {
+            // Fallback to a checkbox if no choices registered
+            proxyWriter.includeBool(label, false);
+        }
     }
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
     script_args.append().set_string(label);
@@ -257,7 +288,7 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const ippl::Vector<
 // Supports arithmetic, bool and ippl::Button as element types.
 // =============================================================
 template<typename Elem>
-requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<Elem>& arr, const std::string& label )
 {
     ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: std::vector<elem> size=" << arr.size() << endl;
@@ -275,6 +306,22 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<E
         Elem def{};
         if (!arr.empty()) def = arr.front();
         proxyWriter.include(def, label);
+    } else if constexpr (std::is_enum_v<std::decay_t<Elem>>) {
+        // Enum arrays: register as enum with choices; default from first element if present
+        int def = !arr.empty() ? static_cast<int>(arr.front()) : 0;
+        // Prefer label-scoped choices, then type-scoped, else fallback to a checkbox
+        auto it = enumChoices_.find(label);
+        if (it != enumChoices_.end()) {
+            proxyWriter.includeEnum(label, it->second, def);
+        } else {
+            auto itt = enumChoicesByType_.find(std::type_index(typeid(Elem)));
+            if (itt != enumChoicesByType_.end()) {
+                proxyWriter.includeEnum(label, itt->second, def);
+            } else {
+                // No choices registered; use a checkbox as a minimal fallback UI
+                proxyWriter.includeBool(label, false);
+            }
+        }
     } else if constexpr (std::is_same_v<std::decay_t<Elem>, bool>) {
         bool def = !arr.empty() ? static_cast<bool>(arr.front()) : false;
         proxyWriter.includeBool(label, def);
@@ -499,7 +546,7 @@ void CatalystAdaptor::AddSteerableChannel( const ippl::Vector<T, Dim_v>& steerab
 
 // std::vector<T> forward: publish as 1D mesh array under fields/steerable_field_f_<label>/values
 template<typename Elem>
-requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::AddSteerableChannel( const std::vector<Elem>& arr, const std::string& label )
 {
     ca_m << "::Execute()::AddSteerableChannel(vector<elem>) " << label << " | N=" << arr.size() << endl;
@@ -531,14 +578,20 @@ void CatalystAdaptor::AddSteerableChannel( const std::vector<Elem>& arr, const s
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
-    // store values as doubles/ints as appropriate
-    std::vector<double> vals; vals.reserve(N);
-    for (const auto& e : arr) {
-        if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)        vals.push_back(e ? 1.0 : 0.0);
-        else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) vals.push_back(static_cast<int>(e ? 1 : 0));
-        else                                                           vals.push_back(static_cast<double>(e));
+    // store values as ints/doubles as appropriate
+    if constexpr (std::is_enum_v<std::decay_t<Elem>>) {
+        std::vector<int32_t> vals; vals.reserve(N);
+        for (const auto& e : arr) vals.push_back(static_cast<int32_t>(e));
+        f["values"].set(vals);
+    } else {
+        std::vector<double> vals; vals.reserve(N);
+        for (const auto& e : arr) {
+            if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)             vals.push_back(e ? 1.0 : 0.0);
+            else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) vals.push_back(static_cast<int>(e ? 1 : 0));
+            else                                                                vals.push_back(static_cast<double>(e));
+        }
+        f["values"].set(vals);
     }
-    f["values"].set(vals);
 }
 
 // std::vector<ippl::Vector<T,Dim>> forward: publish as 1D mesh with 3-component field arrays
@@ -718,7 +771,7 @@ void CatalystAdaptor::FetchSteerableChannelValue( ippl::Vector<T, Dim_v>& steera
 
 // Fetch std::vector<T> from unified backward channel; resize destination to match
 template<typename Elem>
-requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
+requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const std::string& label)
 {
     ca_m << "::Execute()::FetchSteerableChannel(vector<elem>) " << label << endl;
@@ -741,9 +794,10 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const 
     out.resize(n);
 
     auto assign_from_double = [&](size_t i, double d){
-        if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)             out[i] = (d != 0.0);
+        if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)              out[i] = (d != 0.0);
         else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) out[i] = (static_cast<int>(d) != 0);
-        else                                                                 out[i] = static_cast<Elem>(d);
+        else if constexpr (std::is_enum_v<std::decay_t<Elem>>)               out[i] = static_cast<Elem>(static_cast<int>(d));
+        else                                                                  out[i] = static_cast<Elem>(d);
     };
 
     // Prefer child iteration when available (safe for lists and objects)
@@ -801,15 +855,33 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::Vector<T, Di
     ca_m << "::Execute()::FetchSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << label << endl;
     const std::string root = std::string("catalyst/steerable_channel_backward_all/fields/") +
                              "steerable_field_b_" + label + "/values";
+    
+    
+    
+    //                          // Prefer named component arrays x/y/z
+    // bool has_xyz = results.has_path(root + "/x") && results.has_path(root + "/y") && results.has_path(root + "/z");
+    // if (!has_xyz) {
+    //     ca_m << "  no backward vector array for '" << label << "' (expected x/y/z)" << endl;
+    //     return;
+    // }
+    // conduit_cpp::Node xn = results[root + "/x"]; 
+    // conduit_cpp::Node yn = results[root + "/y"]; 
+    // conduit_cpp::Node zn = results[root + "/z"]; 
+
     // Prefer named component arrays x/y/z
-    bool has_xyz = results.has_path(root + "/x") && results.has_path(root + "/y") && results.has_path(root + "/z");
+    bool has_xyz = results.has_path(root + "/0") && results.has_path(root + "/1") && results.has_path(root + "/2");
     if (!has_xyz) {
-        ca_m << "  no backward vector array for '" << label << "' (expected x/y/z)" << endl;
+        ca_m << "  no backward vector array for '" << label << "' (expected 0/1/2)" << endl;
         return;
     }
-    conduit_cpp::Node xn = results[root + "/x"]; 
-    conduit_cpp::Node yn = results[root + "/y"]; 
-    conduit_cpp::Node zn = results[root + "/z"]; 
+    conduit_cpp::Node xn = results[root + "/0"]; 
+    conduit_cpp::Node yn = results[root + "/1"]; 
+    conduit_cpp::Node zn = results[root + "/2"]; 
+
+
+
+
+
     const size_t nx = xn.dtype().number_of_elements();
     const size_t ny = yn.dtype().number_of_elements();
     const size_t nz = zn.dtype().number_of_elements();

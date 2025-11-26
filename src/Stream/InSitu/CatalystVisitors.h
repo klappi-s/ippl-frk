@@ -71,6 +71,7 @@ struct is_std_vector_of_allowed_scalar : std::false_type {};
 template<typename U>
 struct is_std_vector_of_allowed_scalar<std::vector<U>> : std::bool_constant<
     std::is_arithmetic_v<std::decay_t<U>>
+    || std::is_enum_v<std::decay_t<U>>
     || std::is_same_v<std::decay_t<U>, bool>
     || std::is_same_v<std::decay_t<U>, Button>> {};
 

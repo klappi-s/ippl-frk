@@ -40,6 +40,7 @@ struct SimParams {
     bool Switch;
     ippl::Button reset_btn;
     ippl::Vector<double, 3> vec;
+    experiment_enum exp_enum;
 };
 
 
@@ -118,7 +119,7 @@ public:
             button_single(ippl::Button(false)),
             vector_single(ippl::Vector<double,3>({1.0,2.0,3.0})),
             LinMap_single({0.75, {1,1,1}, {2,2,2}, {3,3,3}}),
-            SimParams_single{5, 2.5, false, ippl::Button(false), ippl::Vector<double,3>({9,9,9})},
+            SimParams_single{5, 2.5, false, ippl::Button(false), ippl::Vector<double,3>({9,9,9}), PenningTrap},
             double_array({1.0,2.0,3.0}),
             double_array_2({10.0,20.0}),
             int_array({1,2,3}),
@@ -128,8 +129,8 @@ public:
             LinMap_array({  {1.5,{1,2,3},{4,5,6},{7,8,9}},
                             {2.5,{9,8,7},{6,5,4},{3,2,1}}
                         }),
-            SimpParams_arrays({ {10,1.5,false,ippl::Button(false),ippl::Vector<double,3>({1,1,1})}, 
-                                {20,2.5,true,ippl::Button(false),ippl::Vector<double,3>({2,2,2})} 
+            SimpParams_arrays({ {10,1.5,false,ippl::Button(false),ippl::Vector<double,3>({1,1,1}), PenningTrap}, 
+                                {20,2.5,true,ippl::Button(false),ippl::Vector<double,3>({2,2,2}), LandauDamping} 
                             })
             {
                
@@ -279,7 +280,8 @@ public:
                 "steps",       &SimParams::steps,
                 "switch",      &SimParams::Switch,
                 "reset_btn",   &SimParams::reset_btn,
-                "vec",         &SimParams::vec
+                "vec",         &SimParams::vec,
+                "enum",        &SimParams::exp_enum
                  
             );
 
@@ -290,9 +292,14 @@ public:
                 "z_row", &LinMap::z_row
             );
 
+            cat_vis.RegisterEnumChoicesTyped<experiment_enum>({
+                {"PenningTrap",   experiment_enum::PenningTrap},
+                {"LandauDamping", experiment_enum::LandauDamping},
+                {"UniformPlasma", experiment_enum::UniformPlasma}
+            });
 
-            std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
-                        //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
+
+            //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
                             // "experiment",       e_m
                             // "magnetic",         magnetic_scale,
                                         // "switch1",          switch_m,
@@ -302,6 +309,7 @@ public:
                                         // "LinMaps", lm_m            // original SoA registration
                                         // "single_LinMap",    sLinMap_m,
                                         // "LinMaps",          lmv_m
+        std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                                         "electric",         electric_scale
                                     );
                                     
@@ -324,24 +332,18 @@ public:
                                     // Extend VisRegistryRuntime::add to handle primitive vectors if steering is required.
                                     // runtime_steer_registry->add("LinMaps", lmv_m);
                                 
+                                    // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
-            // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(
+                "density",          this->fcontainer_m->getRho()
+            );
 
-                                          //   "ions",             *this->pcontainer_m
+                                        //   "ions",             *this->pcontainer_m
                                         //   "ions",             this->pcontainer_m
-                                        // , "electrostatic",    this->fcontainer_m->getE()
-                                        // , 
-                                        "density",          this->fcontainer_m->getRho()
                                         // , "potential",        this->fcontainer_m->getRho()
-                                    );
-
-            /* Register enum choices for dropdowns before initialization */
-            cat_vis.RegisterEnumChoices("enum_single", {
-                {"PenningTrap",   static_cast<int>(PenningTrap)},
-                {"LandauDamping", static_cast<int>(LandauDamping)},
-                {"UniformPlasma", static_cast<int>(UniformPlasma)}
-            });
-
+                                        // , "electrostatic",    this->fcontainer_m->getE()
+                                        
+            /* Register enum choices globally for experiment_enum */
+            // Labels 'experiment' and 'enum_single' will now pick up choices from type-based registry
             // CatalystAdaptor::
             cat_vis.InitializeRuntime(runtime_vis_registry, runtime_steer_registry);
 
