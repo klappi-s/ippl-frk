@@ -21,6 +21,7 @@
 #include <catalyst_conduit.hpp>
 
 namespace ippl {
+#define IPPL_PROXYWRITER_DECL 1
 
 /**
  * Generates ParaView Catalyst proxy XML for steerable parameters.
@@ -107,21 +108,6 @@ public:
   template <typename T, unsigned Dim_v>
   void includeVector(const std::string& label);
 
-  // Register a LinMap group under a single base label. This creates:
-  //  - three vector channels: base_x_row, base_y_row, base_z_row
-  //  - one scalar channel: base_time (rendered as a text box)
-  // Defaults and ranges are pulled from current config caches when present.
-  void includeLinMap(const std::string& baseLabel, double timeDefault = 0.0);
-
-  // Register LinMap with explicit per-component defaults for vectors and time.
-  // This ensures the GUI shows the current simulation values initially.
-  void includeLinMapWithDefaults(
-      const std::string& baseLabel,
-      const std::array<double,3>& xDefaults,
-      const std::array<double,3>& yDefaults,
-      const std::array<double,3>& zDefaults,
-      double timeDefault);
-
   /**
    * @brief Register a boolean switch channel.
    * @param label UI label and XML property name.
@@ -205,3 +191,23 @@ private:
 // Provide template definitions (keep at global scope to avoid injecting std headers into namespace ippl)
 #include "ProxyWriter.hpp"
 
+
+
+
+
+
+
+  // // Register a LinMap group under a single base label. This creates:
+  // //  - three vector channels: base_x_row, base_y_row, base_z_row
+  // //  - one scalar channel: base_time (rendered as a text box)
+  // // Defaults and ranges are pulled from current config caches when present.
+  // void includeLinMap(const std::string& baseLabel, double timeDefault = 0.0);
+
+  // // Register LinMap with explicit per-component defaults for vectors and time.
+  // // This ensures the GUI shows the current simulation values initially.
+  // void includeLinMapWithDefaults(
+  //     const std::string& baseLabel,
+  //     const std::array<double,3>& xDefaults,
+  //     const std::array<double,3>& yDefaults,
+  //     const std::array<double,3>& zDefaults,
+  //     double timeDefault);
