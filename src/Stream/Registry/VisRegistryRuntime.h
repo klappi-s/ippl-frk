@@ -42,17 +42,6 @@
 namespace ippl {
 
 
-
-
-// Accept shared_ptr<U> when U is allowed
-template<class T>
-struct is_allowed_shared_ptr : std::false_type {};
-template<class U>
-struct is_allowed_shared_ptr<std::shared_ptr<U>> : std::bool_constant<AllowedRegistryType_v<U>> {};
-template<class T>
-inline constexpr bool AllowedRegistryTypeOrShared_v =
-    AllowedRegistryType_v<T> || is_allowed_shared_ptr<std::decay_t<T>>::value;
-
 // Helper to unwrap reference_wrapper/pointers uniformly if later needed
 template<class T>
 struct access_traits {

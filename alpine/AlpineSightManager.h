@@ -41,6 +41,35 @@ struct SimParams {
 };
 
 
+struct LinMap{
+    // std::vector
+    double time;
+    ippl::Vector<double, 3> x_row;
+    ippl::Vector<double, 3> y_row;
+    ippl::Vector<double, 3> z_row;
+};
+
+// class BasicMaps{
+//     std::vector<double> time;
+// }
+
+struct LinMaps{
+    
+    std::vector<double> time;
+    std::vector<ippl::Vector<double, 3>> x_row;
+    std::vector<ippl::Vector<double, 3>> y_row;
+    std::vector<ippl::Vector<double, 3>> z_row;
+};
+
+struct AffineMap{
+    double time;
+    ippl::Vector<double, 3> x_row;
+    ippl::Vector<double, 3> y_row;
+    ippl::Vector<double, 3> z_row;
+    ippl::Vector<double, 3> shift;
+};
+
+
 // 1. Write a helper function
 std::string to_string(experiment_enum c) {
     switch (c) {
@@ -109,9 +138,9 @@ public:
                 // Initialize AoS vector lmv_m with identical two LinMap entries
                 lmv_m.clear();
                 {
-                    ippl::LinMap lm1; lm1.time = 1.50; lm1.x_row = ippl::Vector<double,3>({10,20,30}); lm1.y_row = ippl::Vector<double,3>({40,50,60}); lm1.z_row = ippl::Vector<double,3>({70,80,90});
+                    LinMap lm1; lm1.time = 1.50; lm1.x_row = ippl::Vector<double,3>({10,20,30}); lm1.y_row = ippl::Vector<double,3>({40,50,60}); lm1.z_row = ippl::Vector<double,3>({70,80,90});
                     lmv_m.push_back(lm1);
-                    ippl::LinMap lm2; lm2.time = 2.50; lm2.x_row = ippl::Vector<double,3>({1.0,2.0,3.0}); lm2.y_row = ippl::Vector<double,3>({4.0,5.0,6.0}); lm2.z_row = ippl::Vector<double,3>({7.0,8.0,9.0});
+                    LinMap lm2; lm2.time = 2.50; lm2.x_row = ippl::Vector<double,3>({1.0,2.0,3.0}); lm2.y_row = ippl::Vector<double,3>({4.0,5.0,6.0}); lm2.z_row = ippl::Vector<double,3>({7.0,8.0,9.0});
                     lmv_m.push_back(lm2);
                 }
 
@@ -131,10 +160,10 @@ private:
     bool switch_m;
     experiment_enum e_m;
 
-    ippl::LinMap sLinMap_m;
-    ippl::LinMap sLinMap2_m;
-    ippl::LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
-    std::vector<ippl::LinMap> lmv_m; // NEW: AoS vector<LinMap> used for steering registration
+    LinMap sLinMap_m;
+    LinMap sLinMap2_m;
+    LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
+    std::vector<LinMap> lmv_m; // NEW: AoS vector<LinMap> used for steering registration
     SimParams simp;
     std::vector<SimParams> simp_vec; // vector of SimParams for AoS steering demo
 
@@ -225,7 +254,7 @@ public:
                 // Populate AoS vector lmv_m (mirror of lm_m) before registry build
                 lmv_m.clear();
                 for (size_t i = 0; i < lm_m.time.size(); ++i) {
-                    ippl::LinMap tmp;
+                    LinMap tmp;
                     tmp.time  = lm_m.time[i];
                     tmp.x_row = lm_m.x_row[i];
                     tmp.y_row = lm_m.y_row[i];
@@ -253,6 +282,12 @@ public:
                 "reset_btn",   &SimParams::reset_btn
             );
 
+            ippl::CatalystAdaptor::RegisterStructMembers<LinMap>(
+                "time",  &LinMap::time,
+                "x_row", &LinMap::x_row,
+                "y_row", &LinMap::y_row,
+                "z_row", &LinMap::z_row
+            );
 
 
             std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
@@ -263,21 +298,26 @@ public:
                                         // "reset_button",     reset_button,
                                         // "useless_button",   useless_button,
                                         // "experiment",       e_m,
-                                        // "single_LinMap",    sLinMap_m,
                                         // "single_LinMap2",   sLinMap2_m,
                                         // "LinMaps", lm_m            // original SoA registration
-                                        "LinMaps", lmv_m             // now registering AoS variant (vector<LinMap>)
+                                        // "single_LinMap",    sLinMap_m,
+                                        "LinMaps", lmv_m
                                     );
-            runtime_steer_registry->add("simp", simp);
-            runtime_steer_registry->add("simpVec", simp_vec);
+
+
+            
+                                    runtime_steer_registry->add("simp", simp);
+                                    runtime_steer_registry->add("simpVec", simp_vec);
+                                    // runtime_steer_registry->add("LinMaps", lmv_m);
                                 
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
             // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(
 
                                           //   "ions",             *this->pcontainer_m
-                                          "ions",             this->pcontainer_m
+                                        //   "ions",             this->pcontainer_m
                                         // , "electrostatic",    this->fcontainer_m->getE()
-                                        , "density",          this->fcontainer_m->getRho()
+                                        // , 
+                                        "density",          this->fcontainer_m->getRho()
                                         // , "potential",        this->fcontainer_m->getRho()
                                     );
 

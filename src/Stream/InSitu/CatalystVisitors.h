@@ -7,6 +7,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <memory>
 
 #include <Stream/InSitu/CatalystAdaptor.h>
 // #include <Stream/Registry/VisRegistryRuntime.h>
@@ -56,6 +57,14 @@ inline constexpr bool is_field_v = is_field<std::decay_t<T>>::value;
 
 
 
+// Detect ippl::Vector<T,Dim>
+template<typename U>
+struct is_ippl_vector : std::false_type {};
+template<typename V, unsigned Dim>
+struct is_ippl_vector<ippl::Vector<V, Dim>> : std::true_type {};
+template<typename T>
+inline constexpr bool is_ippl_vector_v = is_ippl_vector<std::decay_t<T>>::value;
+
 // Helper: detect std::vector of supported scalar/button types
 template<typename U>
 struct is_std_vector_of_allowed_scalar : std::false_type {};
@@ -65,24 +74,61 @@ struct is_std_vector_of_allowed_scalar<std::vector<U>> : std::bool_constant<
     || std::is_same_v<std::decay_t<U>, bool>
     || std::is_same_v<std::decay_t<U>, Button>> {};
 
+// Helper: detect std::vector of ippl::Vector<...>
+template<typename U>
+struct is_std_vector_of_ippl_vector : std::false_type {};
+template<typename U>
+struct is_std_vector_of_ippl_vector<std::vector<U>> : std::bool_constant<is_ippl_vector_v<U>> {};
+
+
+
+
+// Helper: detect any std::vector<...> (used to route struct arrays via StructMeta)
+template<typename U>
+struct is_std_vector_any : std::false_type {};
+template<typename U>
+struct is_std_vector_any<std::vector<U>> : std::true_type {};
+
 template<class T>
 inline constexpr bool AllowedSteerType_v =
     std::is_arithmetic_v<std::decay_t<T>>
     || std::is_enum_v<std::decay_t<T>>
-    || is_vector_v<T> // ippl::Vector<>
-    || is_std_vector_of_allowed_scalar<std::decay_t<T>>::value // std::vector<double/int/.../Button/bool>
     || std::is_same_v<std::decay_t<T>, Button>
-    || std::is_same_v<std::decay_t<T>, LinMap>
-    || std::is_same_v<std::decay_t<T>, LinMaps>
-    || std::is_same_v<std::decay_t<T>, std::vector<ippl::LinMap>>; // AoS alternative for LinMaps
+    || is_ippl_vector_v<T> // ippl::Vector<>
+    || is_std_vector_of_allowed_scalar<std::decay_t<T>>::value
+    || is_std_vector_of_ippl_vector<std::decay_t<T>>::value
+    ; 
+
+// template<class T>
+// inline constexpr bool AllowedSteerType2_v =
+//     AllowedSteerType_v<T>
+//     || is_std_vector_any<std::decay_t<T>>::value
+//     ; 
+    
 
 
 template<class T>
 inline constexpr bool AllowedVisType_v = is_particle_v<T> || is_field_v<T>;
 
 template<class T>
-inline constexpr bool AllowedRegistryType_v = AllowedVisType_v<T> || AllowedSteerType_v<T>;
+inline constexpr bool AllowedRegistryType_v =      AllowedVisType_v<T> 
+                                                || AllowedSteerType_v<T> 
+                                                || is_std_vector_any<std::decay_t<T>>::value
+                                                ;
     
+
+// Accept shared_ptr<U> when U is allowed
+template<class T>
+struct is_allowed_shared_ptr : std::false_type {};
+template<class U>
+struct is_allowed_shared_ptr<std::shared_ptr<U>> : std::bool_constant<AllowedRegistryType_v<U>> {};
+
+
+template<class T>
+inline constexpr bool AllowedRegistryTypeOrShared_v =
+    AllowedRegistryType_v<T> || is_allowed_shared_ptr<std::decay_t<T>>::value;
+
+
 
 
 

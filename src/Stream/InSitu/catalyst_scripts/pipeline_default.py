@@ -456,16 +456,12 @@ if parsed.steer == "ON":
     try:
         # Unified sender: one proxy carrying one property per channel, single result mesh
         sender_all = CreateSteerableParameters(
-            steerable_proxy_type_name           = "SteerableParameters_ALL",
-            steerable_proxy_registration_name   = "SteeringParameters_ALL",
+            steerable_proxy_type_name           = "SteerableParameters_SCALARS",
+            steerable_proxy_registration_name   = "SteeringParameters_SCALARS",
             result_mesh_name                    = "steerable_channel_backward_all"
         )
         # print_info_("[DEBUG] Created sender_all (LinMaps + generic) proxy object", level=2 )
-        sender_all2 = CreateSteerableParameters(
-            steerable_proxy_type_name           = "SteerableParameters_ALL2",
-            steerable_proxy_registration_name   = "SteeringParameters_ALL2",
-            result_mesh_name                    = "steerable_channel_backward_all"
-        )
+      
         # print_info_("[DEBUG] Created sender_all2 (SimParams scalar struct) proxy object", level=2 )
 
 
@@ -478,56 +474,44 @@ if parsed.steer == "ON":
             print_info_("Error: SteerableParameters_ALL proxy not found (CreateSteerableParameters returned None).")
         else:
             print_info_("SteerableParameters_ALL loaded successfully.")
-        if sender_all2 is None:
-            print_info_("Error: SteerableParameters_ALL2 proxy not found (CreateSteerableParameters returned None).")
-        else:
-            print_info_("SteerableParameters_ALL2 loaded successfully.")
+        
 
 
 
-
-
-        # ------------------------------------------------------------------
-        # HARD-CODED struct vector sender (temporary simplification): simpVec
-        # The dynamic prefix detection above is commented out. We assume a
-        # single vector-of-struct named 'simpVec' with members:
-        #   simpVec_temperature, simpVec_steps, simpVec_reset_btn
-        # ------------------------------------------------------------------
-        # (Commented dynamic detection retained for reference)
-        # struct_member_names = { 'temperature', 'steps', 'reset_btn' }
-        # prefix_suffixes = {}
-        # for name in parsed.steer_channel_names:
-        #     if '_' in name:
-        #         pre, suf = name.split('_',1)
-        #         if '.' in pre:
-        #             continue
-        #         prefix_suffixes.setdefault(pre, set()).add(suf)
-        # true_prefixes = [pre for pre, sufs in prefix_suffixes.items() if len(sufs & struct_member_names) > 0]
-        # true_prefixes.sort()
-        # print_info_(f"[DEBUG] Detected struct-array prefixes (filtered): {true_prefixes}", level=2)
-        # for prefix in true_prefixes:
-        #     ...
-
-
+        # Dynamically detect struct-array namespaces from steer_channel_names with prefix 'array:'
+        # Example entries: 'array:LinMaps.time', 'array:simpVec.temperature'
         struct_array_senders = {}
-        # Create only one sender for 'simpVec'
-        if any(n.startswith('simpVec_') for n in parsed.steer_channel_names):
-            struct_array_senders['simpVec'] = CreateSteerableParameters(
-                steerable_proxy_type_name         = "Steerables_SIMPVEC",
-                steerable_proxy_registration_name = "Steering" + 'simpVec',
+        detected_namespaces = set()
+        try:
+            for entry in (parsed.steer_channel_names or []):
+                if not isinstance(entry, str):
+                    continue
+                if not entry.startswith("array:"):
+                    continue
+                # Extract namespace between ':' and first '.'; fallback to full tail if no '.'
+                tail = entry.split(":", 1)[1]
+                ns = tail.split(".", 1)[0] if "." in tail else tail
+                if ns:
+                    detected_namespaces.add(ns)
+        except Exception as e:
+            print_info_(f"[DEBUG][WARN] Failed to parse struct-array namespaces: {e}", level=2)
+
+        # Create one sender per detected namespace (e.g., 'LinMaps', 'simpVec')
+        for ns in sorted(detected_namespaces):
+            sender = CreateSteerableParameters(
+                steerable_proxy_type_name         = f"SteerableParameters_{ns}",
+                steerable_proxy_registration_name = f"Steering{ns}",
                 result_mesh_name                  = "steerable_channel_backward_all"
             )
-            if struct_array_senders['simpVec'] is None:
-                print_info_("[DEBUG][WARN] Failed to create hard-coded struct array sender 'simpVec'", level=2)
+            struct_array_senders[ns] = sender
+
+            if sender is None:
+                print_info_(f"[DEBUG][WARN] Failed to create struct array sender '{ns}'", level=2)
             else:
-                print_info_("[DEBUG] Created hard-coded struct array sender 'simpVec'", level=2)
+                print_info_(f"[DEBUG] Created struct array sender '{ns}'", level=2)
 
 
-
-
-
-
-
+  
 
 
 

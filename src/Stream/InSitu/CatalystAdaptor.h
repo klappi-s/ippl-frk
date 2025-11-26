@@ -96,33 +96,6 @@ class VisRegistryRuntime;
 
 
 
-struct LinMap{
-    // std::vector
-    double time;
-    ippl::Vector<double, 3> x_row;
-    ippl::Vector<double, 3> y_row;
-    ippl::Vector<double, 3> z_row;
-};
-
-// class BasicMaps{
-//     std::vector<double> time;
-// }
-
-struct LinMaps{
-    
-    std::vector<double> time;
-    std::vector<ippl::Vector<double, 3>> x_row;
-    std::vector<ippl::Vector<double, 3>> y_row;
-    std::vector<ippl::Vector<double, 3>> z_row;
-};
-
-struct AffineMap{
-    double time;
-    ippl::Vector<double, 3> x_row;
-    ippl::Vector<double, 3> y_row;
-    ippl::Vector<double, 3> z_row;
-    ippl::Vector<double, 3> shift;
-};
 
 
     /**
@@ -644,16 +617,17 @@ class CatalystAdaptor {
     template<typename T, unsigned Dim_v>
     void InitSteerableChannel( const ippl::Vector<T, Dim_v>& steerable_vec_forwardpass, const std::string& label );
 
-    // LinMap grouped steering (3 vectors + time)
-    void InitSteerableChannel( const ippl::LinMap& lm, const std::string& label );
-    // LinMaps dynamic-list steering (N maps: struct-of-arrays)
-    void InitSteerableChannel( const ippl::LinMaps& lms, const std::string& label );
-    // AoS alternative: std::vector<LinMap> (converted internally to LinMaps for identical GUI behavior)
-    void InitSteerableChannel( const std::vector<ippl::LinMap>& lm_vec, const std::string& label );
+
+    void InitSteerableChannel( const ippl::Button& btn, const std::string& label );
+
     // Generic std::vector elements (arithmetic/bool/Button) for array steerables
     template<typename Elem>
     requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void InitSteerableChannel( const std::vector<Elem>& arr, const std::string& label );
+
+    // std::vector of ippl::Vector<T,Dim> steerables
+    template<typename T, unsigned Dim_v>
+    void InitSteerableChannel( const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label );
 
 
 
@@ -677,23 +651,20 @@ class CatalystAdaptor {
     // Bool-like switch overload
     void AddSteerableChannel(const bool& sw, const std::string& steerable_suffix);
     // Button-like push overloads
-    void InitSteerableChannel( const ippl::Button& btn, const std::string& label );
     void AddSteerableChannel(const ippl::Button& btn, const std::string& steerable_suffix);
 
     // Vector overloads for steerable channels
     template<typename T, unsigned Dim_v>
     void AddSteerableChannel(const ippl::Vector<T, Dim_v>& steerable_vec_forwardpass, const std::string& steerable_suffix);
 
-    // LinMap grouped steering (3 vectors + time)
-    void AddSteerableChannel(const ippl::LinMap& lm, const std::string& steerable_suffix);
-    // LinMaps dynamic-list steering (N maps: struct-of-arrays)
-    void AddSteerableChannel(const ippl::LinMaps& lms, const std::string& steerable_suffix);
-    // AoS alternative forward pass: std::vector<LinMap>
-    void AddSteerableChannel(const std::vector<ippl::LinMap>& lm_vec, const std::string& steerable_suffix);
     // Generic std::vector elements (arithmetic/bool/Button) for array steerables
     template<typename Elem>
     requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void AddSteerableChannel(const std::vector<Elem>& arr, const std::string& label);
+
+    // std::vector of ippl::Vector<T,Dim> arrays forward
+    template<typename T, unsigned Dim_v>
+    void AddSteerableChannel(const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label);
 
 
     /* maybe use function overloading instead ... */
@@ -722,16 +693,14 @@ class CatalystAdaptor {
     // Vector overloads for steerable channels
     template<typename T, unsigned Dim_v>
     void FetchSteerableChannelValue( ippl::Vector<T, Dim_v>& steerable_vec_backwardpass, const std::string& steerable_suffix);
-    // LinMap grouped fetch
-    void FetchSteerableChannelValue( ippl::LinMap& lm, const std::string& label);
-    // LinMaps dynamic-list fetch
-    void FetchSteerableChannelValue( ippl::LinMaps& lms, const std::string& label);
-    // AoS alternative fetch
-    void FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label);
-    // Generic std::vector elements (arithmetic/bool/Button) fetch
+
     template<typename Elem>
     requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void FetchSteerableChannelValue( std::vector<Elem>& out, const std::string& label);
+
+    // std::vector of ippl::Vector<T,Dim> arrays backward
+    template<typename T, unsigned Dim_v>
+    void FetchSteerableChannelValue( std::vector<ippl::Vector<T, Dim_v>>& out, const std::string& label);
         
     // ---------------------------------------------------------------------
     // Struct steering registration (simple initial version)
@@ -820,3 +789,43 @@ class CatalystAdaptor {
 
 
 #endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // LinMap grouped steering (3 vectors + time)
+    // void InitSteerableChannel( const ippl::LinMap& lm, const std::string& label );
+    // LinMaps dynamic-list steering (N maps: struct-of-arrays)
+    // void InitSteerableChannel( const ippl::LinMaps& lms, const std::string& label );
+    // AoS alternative: std::vector<LinMap> (converted internally to LinMaps for identical GUI behavior)
+    // void InitSteerableChannel( const std::vector<ippl::LinMap>& lm_vec, const std::string& label );
+
+
+    // // LinMap grouped steering (3 vectors + time)
+    // void AddSteerableChannel(const ippl::LinMap& lm, const std::string& steerable_suffix);
+    // // LinMaps dynamic-list steering (N maps: struct-of-arrays)
+    // void AddSteerableChannel(const ippl::LinMaps& lms, const std::string& steerable_suffix);
+    // // AoS alternative forward pass: std::vector<LinMap>
+    // void AddSteerableChannel(const std::vector<ippl::LinMap>& lm_vec, const std::string& steerable_suffix);
+
+
+    // LinMap grouped fetch
+    // void FetchSteerableChannelValue( ippl::LinMap& lm, const std::string& label);
+    // LinMaps dynamic-list fetch
+    // void FetchSteerableChannelValue( ippl::LinMaps& lms, const std::string& label);
+    // AoS alternative fetch
+    // void FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label);
+    // Generic std::vector elements (arithmetic/bool/Button) fetch

@@ -31,7 +31,7 @@ namespace ippl {
             return;
         }
 
-        // Standard steerables (scalars, vectors, buttons, enums, LinMap(s), etc.)
+        // Standard steerables (scalars, vectors, buttons, enums, etc.)
         if constexpr (AllowedSteerType_v<T>) {
             e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { v(label, value); };
             e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v) { v(label, value); };
@@ -52,7 +52,10 @@ namespace ippl {
         // Vector<RegisteredStruct>: aggregate members across elements
         if constexpr (is_std_vector_v<DecayT>) {
             using ElemT = typename DecayT::value_type;
+            std::cout << "is_std_vector" << std::endl;
             if (ippl::detail::StructMeta<ElemT>::registered) {
+                std::cout << "is_registered ..." << std::endl;
+
                 e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<ElemT>::do_init_vec(v, value, label); };
                 e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v){ ippl::detail::StructMeta<ElemT>::do_fwd_vec(v, value, label); };
                 e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)  { ippl::detail::StructMeta<ElemT>::do_fetch_vec(v, value, label); };
@@ -69,14 +72,16 @@ namespace ippl {
     // Overload: add shared_ptr<U> by binding to referenced object and keeping lifetime
     template<class U>
     void VisRegistryRuntime::add(const std::string& label, const std::shared_ptr<U>& ptr) {
-        using DecayU = std::decay_t<U>;
+        // using DecayU = std::decay_t<U>;
         if (!ptr) return;
+
         // Allow visualisation, steerables, and registered structs.
-        if constexpr (!(AllowedRegistryType_v<DecayU>)) {
-            if (!ippl::detail::StructMeta<DecayU>::registered) {
-                throw IpplException("VisRegistryRuntime::add(shared_ptr)", std::string("Unsupported shared_ptr type for entry '") + label + "' (type=" + typeid(U).name() + ")");
-            }
-        }
+        // if constexpr (!(AllowedRegistryType_v<DecayU>)) {
+        //     if (!ippl::detail::StructMeta<DecayU>::registered) {
+        //         throw IpplException("VisRegistryRuntime::add(shared_ptr)", std::string("Unsupported shared_ptr type for entry '") + label + "' (type=" + typeid(U).name() + ")");
+        //     }
+        // }
+
         add(label, *ptr); // delegates to lvalue path (already handles struct/meta)
         // keep alive by capturing shared_ptr in a no-op callback
         auto& e = entries_.back();
@@ -130,9 +135,11 @@ namespace detail {
      */
     template<class L, class V, class... Rest>
     void add_pairs(VisRegistryRuntime& r, L&& label, V&& value, Rest&&... rest) {
-        using DV = typename std::decay<V>::type;
-        static_assert(AllowedRegistryTypeOrShared_v<DV> || std::is_enum_v<DV>,
-                      "VisRegistryRuntime: unsupported value type in factory");
+
+        
+        // using DecayV = typename std::decay<V>::type;
+        // static_assert(AllowedRegistryTypeOrShared_v<DecayV> || std::is_enum_v<DecayV>,
+                    //   "VisRegistryRuntime: unsupported value type in factory");
 
         // Materialize label as std::string to avoid ambiguous overloads
         std::string lbl{std::forward<L>(label)};
@@ -141,10 +148,6 @@ namespace detail {
             // lvalue path: keep reference semantics for non-owning entries
             r.add(lbl, value); // prefers const std::string& overloads
         } 
-        // else {
-        //     // rvalue path: allow ownership-taking overload
-        //     r.add(std::move(lbl), std::forward<V>(value));
-        // }
 
         if constexpr (sizeof...(Rest) > 0) {
             static_assert(sizeof...(Rest) % 2 == 0, "Factory arguments must be label-value pairs");
