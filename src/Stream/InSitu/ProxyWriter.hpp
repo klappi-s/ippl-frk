@@ -24,12 +24,27 @@ inline void ProxyWriter::include(const T& defaultValue, const std::string& label
     if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
   }
   ch.defaultValue = static_cast<double>(defaultValue); ch.isVector = false; ch.vecDim = 1;
+  // Mark integer scalars (exclude bool which is handled via includeBool)
+  if constexpr (std::is_integral_v<T> && !std::is_same_v<std::decay_t<T>, bool>) {
+    ch.isInteger = true;
+  }
   // Heuristic: treat button-like labels as buttons (Int checkbox) even if numeric
   {
     auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
     if (ends_with(ch.propertyName, ".reset_btn") || ends_with(ch.propertyName, "_btn") || ch.propertyName.find("btn") != std::string::npos) {
       ch.isButton = true;
       ch.isVector = false;
+    }
+    // Heuristic: detect booleans when users accidentally call include<T> for bool arrays
+    // Common patterns: names starting with 'bool_' or members ending with '.switch'
+    if (!ch.isButton) {
+      bool looksBool = false;
+      if (ch.propertyName.rfind("bool_", 0) == 0) looksBool = true; // starts with bool_
+      if (ends_with(ch.propertyName, ".switch")) looksBool = true;   // struct member switch
+      if (looksBool) {
+        ch.isBool = true;
+        ch.isInteger = false; // treat as boolean domain rather than integer slider
+      }
     }
   }
   if (hasConfig_) {

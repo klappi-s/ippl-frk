@@ -60,6 +60,7 @@ public:
     bool        isBool{false};
     bool        isButton{false};
     bool        isEnum{false};
+    bool        isInteger{false};     // true for integral types (excl. bool)
   bool        scalarAsTextBox{false}; // if true, render scalar as text box (no slider)
   bool        preserveDefaults{false}; // if true, keep provided vecDefaults over type defaults
   bool        preserveScalarDefault{false}; // if true, keep provided scalar default over type default

@@ -330,11 +330,17 @@ void ProxyWriter::appendPrototype() {
       misc_ << "        </DoubleVectorProperty>\n";
     } else {
       const double sdef = ch.defaultValue;
-      const double smin = ch.hasScalarRange ? ch.scalarMin : rangeMin_;
-      const double smax = ch.hasScalarRange ? ch.scalarMax : rangeMax_;
-  misc_ << "        <DoubleVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
-  misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
-      misc_ << "        </DoubleVectorProperty>\n";
+      if (ch.isInteger) {
+        // Integer scalar in numerics prototype
+        misc_ << "        <IntVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+        misc_ << "        </IntVectorProperty>\n";
+      } else {
+        const double smin = ch.hasScalarRange ? ch.scalarMin : rangeMin_;
+        const double smax = ch.hasScalarRange ? ch.scalarMax : rangeMax_;
+        misc_ << "        <DoubleVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
+        misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+        misc_ << "        </DoubleVectorProperty>\n";
+      }
     }
   }
   misc_ << "      </Proxy>\n\n";
@@ -472,12 +478,18 @@ void ProxyWriter::appendPrototype() {
           misc_ << "        </DoubleVectorProperty>\n";
         } else {
           const double sdef = c->defaultValue;
-          const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-          const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
-          misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
-                << sdef << "' panel_widget='DoubleRange'>\n";
-          misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
-          misc_ << "        </DoubleVectorProperty>\n";
+          if (c->isInteger) {
+            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
+                  << static_cast<int>(sdef) << "'>\n";
+            misc_ << "        </IntVectorProperty>\n";
+          } else {
+            const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
+            const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
+            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
+                  << sdef << "' panel_widget='DoubleRange'>\n";
+            misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+            misc_ << "        </DoubleVectorProperty>\n";
+          }
         }
       }
       misc_ << "      </Proxy>\n";
@@ -574,14 +586,19 @@ void ProxyWriter::appendPrototype() {
               << d0 << " " << d1 << " " << d2 << "'>\n";
         misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
         misc_ << "        </DoubleVectorProperty>\n";
-      } else {
-        const double sdef = c->defaultValue;
-        const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-        const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
-        misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
-        misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
-        misc_ << "        </DoubleVectorProperty>\n";
-      }
+        } else {
+          const double sdef = c->defaultValue;
+          if (c->isInteger) {
+            misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+            misc_ << "        </IntVectorProperty>\n";
+          } else {
+            const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
+            const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
+            misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
+            misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+            misc_ << "        </DoubleVectorProperty>\n";
+          }
+        }
       misc_ << "      </Proxy>\n";
     }
   }
@@ -647,7 +664,20 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                << "            </IntVectorProperty>\n\n";
     } else if (!ch.isVector) {
       const double sdef = ch.defaultValue;
-      sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+      if (ch.isInteger) {
+        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+               << "                                  command='SetTuple1Int'\n"
+               << "                                  clean_command='Clear'\n"
+               << "                                  use_index='1'\n"
+              //  << "                                  number_of_elements='1'\n"
+               << "                                  initial_string='steerable_field_b_" << L << "'\n"
+               << "                                  default_values='" << static_cast<int>(sdef) << "'\n"
+               << "                                  number_of_elements_per_command='1'\n"
+               << "                                  repeat_command='1'\n"
+               << "                                  >\n"
+               << "            </IntVectorProperty>\n\n";
+      } else {
+        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Double'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -659,6 +689,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                << "                                  panel_widget='DoubleRange'\n"
                << "                                  >\n"
                << "            </DoubleVectorProperty>\n\n";
+      }
     } else {
       const double d0 = ch.hasVectorRanges ? ch.vecDefaults[0] : ch.defaultValue;
       const double d1 = ch.hasVectorRanges ? ch.vecDefaults[1] : ch.defaultValue;
@@ -867,6 +898,7 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
       sources_ << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
+               << "                                  >\n"
                << "            </IntVectorProperty>\n\n";
     } else if (c->isEnum) {
       sources_ << "            <IntVectorProperty name='" << P << "'\n"
@@ -911,25 +943,44 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                << "                                  repeat_command='1'>\n"
                << "            </DoubleVectorProperty>\n\n";
     } else {
-      const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-      const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
       const double sdef = c->defaultValue;
-  sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+      if (c->isInteger) {
+        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+               << "                                  command='SetTuple1Int'\n"
+               << "                                  clean_command='Clear'\n"
+               << "                                  use_index='1'\n"
+               << "                                  initial_string='steerable_field_b_" << L << "'\n"
+               << "                                  default_values='";
+        if (initLen > 0) {
+          for (unsigned i=0;i<initLen;++i) { sources_ << static_cast<int>(sdef); if (i+1<initLen) sources_ << " "; }
+        } else {
+          sources_ << static_cast<int>(sdef);
+        }
+        sources_ << "'\n"
+               << "                                  number_of_elements_per_command='1'\n"
+               << "                                  repeat_command='1'\n"
+               << "                                  >\n"
+               << "            </IntVectorProperty>\n\n";
+      } else {
+        const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
+        const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
+        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Double'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
-      if (initLen > 0) {
-        for (unsigned i=0;i<initLen;++i) { sources_ << sdef; if (i+1<initLen) sources_ << " "; }
-      } else {
-        sources_ << sdef;
-      }
-  sources_     << "'\n"
+        if (initLen > 0) {
+          for (unsigned i=0;i<initLen;++i) { sources_ << sdef; if (i+1<initLen) sources_ << " "; }
+        } else {
+          sources_ << sdef;
+        }
+        sources_ << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
                << "                                  >\n"
                << "            </DoubleVectorProperty>\n\n";
+      }
     }
   }
 

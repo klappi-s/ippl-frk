@@ -121,7 +121,7 @@ public:
             LinMap_single({0.75, {1,1,1}, {2,2,2}, {3,3,3}}),
             SimParams_single{5, 2.5, false, ippl::Button(false), ippl::Vector<double,3>({9,9,9}), PenningTrap},
             double_array({1.0,2.0,3.0}),
-            double_array_2({10.0,20.0}),
+            double_array_2(),
             int_array({1,2,3}),
             bool_array({false,true,false}),
             button_array({ippl::Button(false), ippl::Button(true)}),
