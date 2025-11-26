@@ -35,9 +35,11 @@ enum experiment_enum {
 };
 
 struct SimParams {
-    double temperature;
     int steps;
+    double temperature;
+    bool Switch;
     ippl::Button reset_btn;
+    ippl::Vector<double, 3> vec;
 };
 
 
@@ -108,41 +110,29 @@ public:
                        std::string& solver_, std::string& stepMethod_,
                        std::vector<std::string> preconditioner_params_)
         : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_, preconditioner_params_),
-            vis_init(false),
-            useless_button(false),
-            reset_button(false),
-            scaleFactor(30),
             electric_scale(30),
-            magnetic_scale({30,30,30}),
-            switch_m(false),
-            e_m(PenningTrap) ,
-            sLinMap_m({1.50 , {7,8,9},{1,2,3},{4,5,6}}),
-            sLinMap2_m({2.50 , {1,2,3},{4,5,6},{7,8,9}}),
-            simp{1.0, 0, ippl::Button(false)},
-            simp_vec{ {1.0, 0, ippl::Button(false)}, {2.0, 5, ippl::Button(false)}, {3.0, 10, ippl::Button(false)} }
+            enum_single(PenningTrap),
+            double_single(1.0),
+            int_single(42),
+            bool_single(false),
+            button_single(ippl::Button(false)),
+            vector_single(ippl::Vector<double,3>({1.0,2.0,3.0})),
+            LinMap_single({0.75, {1,1,1}, {2,2,2}, {3,3,3}}),
+            SimParams_single{5, 2.5, false, ippl::Button(false), ippl::Vector<double,3>({9,9,9})},
+            double_array({1.0,2.0,3.0}),
+            double_array_2({10.0,20.0}),
+            int_array({1,2,3}),
+            bool_array({false,true,false}),
+            button_array({ippl::Button(false), ippl::Button(true)}),
+            vector_array({ ippl::Vector<double,3>({1,2,3}), ippl::Vector<double,3>({4,5,6}) }),
+            LinMap_array({  {1.5,{1,2,3},{4,5,6},{7,8,9}},
+                            {2.5,{9,8,7},{6,5,4},{3,2,1}}
+                        }),
+            SimpParams_arrays({ {10,1.5,false,ippl::Button(false),ippl::Vector<double,3>({1,1,1})}, 
+                                {20,2.5,true,ippl::Button(false),ippl::Vector<double,3>({2,2,2})} 
+                            })
             {
-                // Initialize LinMaps (struct-of-arrays) with two example maps
-                lm_m.time.clear(); lm_m.x_row.clear(); lm_m.y_row.clear(); lm_m.z_row.clear();
-                // Map #1: time=1.50, x={7,8,9}, y={1,2,3}, z={4,5,6}
-                lm_m.time.push_back(1.50);
-                lm_m.x_row.push_back(ippl::Vector<double,3>({10, 20, 30}));
-                lm_m.y_row.push_back(ippl::Vector<double,3>({40, 50, 60}));
-                lm_m.z_row.push_back(ippl::Vector<double,3>({70, 80, 90}));
-
-                // Map #2: time=2.50, x={1,2,3}, y={4,5,6}, z={7,8,9}
-                lm_m.time.push_back(2.50);
-                lm_m.x_row.push_back(ippl::Vector<double,3>({1.0,2.0,3.0}));
-                lm_m.y_row.push_back(ippl::Vector<double,3>({4.0,5.0,6.0}));
-                lm_m.z_row.push_back(ippl::Vector<double,3>({7.0,8.0,9.0}));
-
-                // Initialize AoS vector lmv_m with identical two LinMap entries
-                lmv_m.clear();
-                {
-                    LinMap lm1; lm1.time = 1.50; lm1.x_row = ippl::Vector<double,3>({10,20,30}); lm1.y_row = ippl::Vector<double,3>({40,50,60}); lm1.z_row = ippl::Vector<double,3>({70,80,90});
-                    lmv_m.push_back(lm1);
-                    LinMap lm2; lm2.time = 2.50; lm2.x_row = ippl::Vector<double,3>({1.0,2.0,3.0}); lm2.y_row = ippl::Vector<double,3>({4.0,5.0,6.0}); lm2.z_row = ippl::Vector<double,3>({7.0,8.0,9.0});
-                    lmv_m.push_back(lm2);
-                }
+               
 
             }
 
@@ -150,22 +140,40 @@ public:
 
 private:
 
-    bool vis_init;
-    ippl::Button useless_button;
-    ippl::Button reset_button;
 
-    double scaleFactor;
     double electric_scale;
-    ippl::Vector<double, Dim> magnetic_scale;
-    bool switch_m;
-    experiment_enum e_m;
 
-    LinMap sLinMap_m;
-    LinMap sLinMap2_m;
-    LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
-    std::vector<LinMap> lmv_m; // NEW: AoS vector<LinMap> used for steering registration
-    SimParams simp;
-    std::vector<SimParams> simp_vec; // vector of SimParams for AoS steering demo
+    experiment_enum         enum_single;
+    double                  double_single;
+    int                     int_single;
+    bool                    bool_single;
+    ippl::Button            button_single;
+    ippl::Vector<double, 3> vector_single;
+    LinMap                  LinMap_single;
+    SimParams               SimParams_single;
+        
+    std::vector<double>                   double_array;
+    std::vector<double>                   double_array_2;
+    std::vector<int>                      int_array;
+    std::vector<bool>                     bool_array;
+    std::vector<ippl::Button>             button_array;
+    std::vector<ippl::Vector<double, 3>>  vector_array;
+    std::vector<LinMap>                   LinMap_array;
+    std::vector<SimParams>                SimpParams_arrays;
+    
+
+    // SoA 
+    
+    // bool   switch_sin;
+    // LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
+    // bool vis_init;
+    // ippl::Button reset_button;
+    // ippl::Button    button_useless;
+    // LinMap sLinMap2_m;
+
+
+
+
 
     Vector_t<double, Dim> length_m;
     double Bext_m;
@@ -251,16 +259,6 @@ public:
         static IpplTimings::TimerRef SolveTimer = IpplTimings::getTimer("solve");
         IpplTimings::startTimer(SolveTimer);
 
-                // Populate AoS vector lmv_m (mirror of lm_m) before registry build
-                lmv_m.clear();
-                for (size_t i = 0; i < lm_m.time.size(); ++i) {
-                    LinMap tmp;
-                    tmp.time  = lm_m.time[i];
-                    tmp.x_row = lm_m.x_row[i];
-                    tmp.y_row = lm_m.y_row[i];
-                    tmp.z_row = lm_m.z_row[i];
-                    lmv_m.push_back(tmp);
-                }
         this->fsolver_m->runSolver();
 
         IpplTimings::stopTimer(SolveTimer);
@@ -279,7 +277,10 @@ public:
             ippl::CatalystAdaptor::RegisterStructMembers<SimParams>(
                 "temperature", &SimParams::temperature,
                 "steps",       &SimParams::steps,
-                "reset_btn",   &SimParams::reset_btn
+                "switch",      &SimParams::Switch,
+                "reset_btn",   &SimParams::reset_btn,
+                "vec",         &SimParams::vec
+                 
             );
 
             ippl::CatalystAdaptor::RegisterStructMembers<LinMap>(
@@ -292,22 +293,35 @@ public:
 
             std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                         //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
-                                        "electric",         electric_scale,
-                                        "magnetic",         magnetic_scale,
-                                        "switch1",          switch_m,
-                                        "useless_button",   useless_button,
-                                        "experiment",       e_m,
+                            // "experiment",       e_m
+                            // "magnetic",         magnetic_scale,
+                                        // "switch1",          switch_m,
+                                        // "useless_button",   useless_button,
                                         // "reset_button",     reset_button,
                                         // "single_LinMap2",   sLinMap2_m,
                                         // "LinMaps", lm_m            // original SoA registration
-                                        "single_LinMap",    sLinMap_m,
-                                        "LinMaps",          lmv_m
+                                        // "single_LinMap",    sLinMap_m,
+                                        // "LinMaps",          lmv_m
+                                        "electric",         electric_scale
                                     );
+                                    
+                                    
 
-
-            
-                                    runtime_steer_registry->add("simp", simp);
-                                    runtime_steer_registry->add("simpVec", simp_vec);
+                                    // Newly introduced single steerables
+                                    runtime_steer_registry->add("double_single", double_single);
+                                    runtime_steer_registry->add("int_single", int_single);
+                                    runtime_steer_registry->add("bool_single", bool_single);
+                                    runtime_steer_registry->add("button_single", button_single);
+                                    runtime_steer_registry->add("vector_single", vector_single);
+                                    runtime_steer_registry->add("SimParams_single", SimParams_single);
+                                    runtime_steer_registry->add("LinMap_single_extra", LinMap_single);
+                                    runtime_steer_registry->add("enum_single", enum_single);
+                                    // Array-of-struct steerables
+                                    runtime_steer_registry->add("LinMap_array", LinMap_array);
+                                    runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
+                                    // NOTE: arrays of primitive types (double_array, int_array, etc.) are not yet registered
+                                    // because VisRegistryRuntime currently only supports vector<T> where T is a registered struct.
+                                    // Extend VisRegistryRuntime::add to handle primitive vectors if steering is required.
                                     // runtime_steer_registry->add("LinMaps", lmv_m);
                                 
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
@@ -322,16 +336,15 @@ public:
                                     );
 
             /* Register enum choices for dropdowns before initialization */
-            // cat_vis.RegisterEnumChoices("experiment", {
-                // {"PenningTrap",   static_cast<int>(PenningTrap)},
-                // {"LandauDamping", static_cast<int>(LandauDamping)},
-                // {"UniformPlasma", static_cast<int>(UniformPlasma)}
-            // });
+            cat_vis.RegisterEnumChoices("enum_single", {
+                {"PenningTrap",   static_cast<int>(PenningTrap)},
+                {"LandauDamping", static_cast<int>(LandauDamping)},
+                {"UniformPlasma", static_cast<int>(UniformPlasma)}
+            });
 
             // CatalystAdaptor::
             cat_vis.InitializeRuntime(runtime_vis_registry, runtime_steer_registry);
 
-            vis_init = true;
     
         #endif
         
@@ -595,22 +608,6 @@ public:
 
 
 
-
-
-
-
-
-        std::cout << reset_button << std::endl;
-        std::cout << electric_scale << std::endl;
-        std::cout << magnetic_scale << std::endl;
-        std::cout << switch_m << std::endl;
-        std::cout << to_string(e_m) << std::endl;
-        if(reset_button){
-            std::cout << "\n\n\n\n\n\n\n REEESSSEEETTTTTTTTTT \n\n\n\n\n\n\n" << std::endl;
-            // this->pre_run();
-        }
-
-        
         std::cout << "PTManager: sleeping a second..." << std::endl;
         sleep(1);
     }
