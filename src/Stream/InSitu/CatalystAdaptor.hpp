@@ -1078,11 +1078,11 @@ void CatalystAdaptor::InitializeRuntime(
     
 
     if( std::string(proxy_option) == "PRODUCE_ONLY"){
-            proxyWriter.produceUnified("SteerableParameters_ALL", "SteerableParameters");
+            proxyWriter.produceUnified("SteerableParameters_SCALARS", "SteerableParameters");
             throw IpplException("Stream::InSitu::CatalystAdaptor", "write_proxy_only_run: proxies have been printed");
     }else if( std::string(proxy_option) == "OFF"){
     }else{
-        proxyWriter.produceUnified("SteerableParameters_ALL", "SteerableParameters");
+        proxyWriter.produceUnified("SteerableParameters_SCALARS", "SteerableParameters");
     }
 
 

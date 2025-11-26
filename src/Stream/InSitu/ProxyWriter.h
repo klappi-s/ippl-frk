@@ -50,6 +50,11 @@ public:
   // ------------------------------- Channel model --------------------------------
   struct Channel {
     std::string label;                 // human label and suffix
+    // XML property name (for arrays, this strips the 'array:' prefix)
+    std::string propertyName;          
+    // Namespace/group (struct or array name); for 'a.b' it's 'a', for 'a' it's 'a'
+    std::string ns;
+    bool        isArray{false};        // true when label starts with "array:"
     double      defaultValue{1.0};     // scalar default or seed for vectors
     bool        isVector{false};
     bool        isBool{false};
@@ -144,6 +149,8 @@ public:
   bool produceUnified(const std::string& unifiedProxyName,
                       const std::string& unifiedGroupLabel);
 
+   // Record desired initial tuple count for a given array namespace (e.g., "LinMaps")
+   void setArrayInitialSize(const std::string& ns, std::size_t n) { arrayInitialSize_[ns] = static_cast<unsigned>(n); }
 private:
   // Internal XML builders and helpers (implemented in ProxyWriter.cpp)
   void resetStreams();
@@ -151,6 +158,10 @@ private:
   void appendPrototype();
   void appendUnifiedSourceProxy(const std::string& proxyName,
                                 const std::string& groupLabel);
+  // Build one per-array source proxy for channels sharing the same namespace
+  void appendArraySourceProxy(const std::string& ns,
+                              const std::vector<const Channel*>& chans);
+
 
   void setConfigNode(const conduit_cpp::Node n);
   bool loadConfigFromYamlFile(const std::string& path);
@@ -185,6 +196,9 @@ private:
   VectorCompCfg typeDefaultVectorComp_{};
   std::map<std::string, ScalarCfg> labelScalarCfg_{};
   std::map<std::string, VectorCfg> labelVectorCfg_{};
+
+  // Initial lengths for array namespaces; used to pre-populate default_values count
+  std::map<std::string, unsigned> arrayInitialSize_{};
 };
 } // namespace ippl
 

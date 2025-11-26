@@ -292,16 +292,16 @@ public:
 
             std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                         //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
-                                        // "electric",         electric_scale,
-                                        // "magnetic",         magnetic_scale,
-                                        // "switch1",          switch_m,
+                                        "electric",         electric_scale,
+                                        "magnetic",         magnetic_scale,
+                                        "switch1",          switch_m,
+                                        "useless_button",   useless_button,
+                                        "experiment",       e_m,
                                         // "reset_button",     reset_button,
-                                        // "useless_button",   useless_button,
-                                        // "experiment",       e_m,
                                         // "single_LinMap2",   sLinMap2_m,
                                         // "LinMaps", lm_m            // original SoA registration
-                                        // "single_LinMap",    sLinMap_m,
-                                        "LinMaps", lmv_m
+                                        "single_LinMap",    sLinMap_m,
+                                        "LinMaps",          lmv_m
                                     );
 
 

@@ -261,10 +261,29 @@ requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_same_v<std::decay_
 void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<Elem>& arr, const std::string& label )
 {
     ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: std::vector<elem> size=" << arr.size() << endl;
-    // Derive prefix (dynamic steering array name) from label before first underscore.
-    std::string prefix = label;
-    auto us_pos = prefix.find('.');
-    if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
+    // Derive namespace from label of the form "array:<ns>.<member>"
+    std::string ns = label;
+    if (ns.rfind("array:", 0) == 0) ns = ns.substr(6);
+    auto dp = ns.find('.');
+    if (dp != std::string::npos) ns = ns.substr(0, dp);
+
+    // Register this array label with ProxyWriter so per-namespace array proxies are generated.
+    // The incoming label is expected to be of the form "array:<ns>.<member>" (constructed in RegisterStructMembers).
+    // Scalar-like element arrays use the generic include() path; ProxyWriter will parse and mark as array.
+    if constexpr (std::is_arithmetic_v<std::decay_t<Elem>>) {
+        // Use the first element as a default if available; otherwise 0.
+        Elem def{};
+        if (!arr.empty()) def = arr.front();
+        proxyWriter.include(def, label);
+    } else if constexpr (std::is_same_v<std::decay_t<Elem>, bool>) {
+        bool def = !arr.empty() ? static_cast<bool>(arr.front()) : false;
+        proxyWriter.includeBool(label, def);
+    } else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) {
+        proxyWriter.includeButton(label);
+    }
+
+    // Inform proxy writer about desired initial size for this array namespace
+    proxyWriter.setArrayInitialSize(ns, arr.size());
 
     // Inform Python pipeline about each label (still needed for backward mapping)
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
@@ -291,10 +310,17 @@ template<typename T, unsigned Dim_v>
 void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label )
 {
     ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: std::vector<Vector<" << typeid(T).name() << "," << Dim_v << ">> size=" << arr.size() << endl;
-    // Derive prefix from label to group arrays into one mesh
-    std::string prefix = label;
-    auto us_pos = prefix.find('.');
-    if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
+    // Derive namespace from label of the form "array:<ns>.<member>"
+    std::string ns = label;
+    if (ns.rfind("array:", 0) == 0) ns = ns.substr(6);
+    auto dp = ns.find('.');
+    if (dp != std::string::npos) ns = ns.substr(0, dp);
+
+    // Register the vector array label with ProxyWriter (parsed as array namespace)
+    proxyWriter.includeVector<T, Dim_v>(label);
+
+    // Inform proxy writer about desired initial size for this array namespace
+    proxyWriter.setArrayInitialSize(ns, arr.size());
 
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
     script_args.append().set_string(label);

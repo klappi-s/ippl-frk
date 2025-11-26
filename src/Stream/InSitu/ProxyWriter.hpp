@@ -12,7 +12,26 @@ namespace ippl {
 template <typename T>
 inline void ProxyWriter::include(const T& defaultValue, const std::string& label) {
   static_assert(std::is_arithmetic_v<T>, "ProxyWriter::include requires a scalar arithmetic type");
-  Channel ch; ch.label = label; ch.defaultValue = static_cast<double>(defaultValue); ch.isVector = false; ch.vecDim = 1;
+  Channel ch; 
+  ch.label = label; 
+  // Parse label for array prefix and namespace; compute propertyName
+  {
+    ch.isArray = false;
+    std::string work = label;
+    if (work.rfind("array:", 0) == 0) { ch.isArray = true; work = work.substr(6); }
+    ch.propertyName = work;
+    auto dp = work.find('.');
+    if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
+  }
+  ch.defaultValue = static_cast<double>(defaultValue); ch.isVector = false; ch.vecDim = 1;
+  // Heuristic: treat button-like labels as buttons (Int checkbox) even if numeric
+  {
+    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+    if (ends_with(ch.propertyName, ".reset_btn") || ends_with(ch.propertyName, "_btn") || ch.propertyName.find("btn") != std::string::npos) {
+      ch.isButton = true;
+      ch.isVector = false;
+    }
+  }
   if (hasConfig_) {
     applyScalarConfig(ch);
   }
@@ -22,7 +41,18 @@ inline void ProxyWriter::include(const T& defaultValue, const std::string& label
 // Vector include (up to 3 components exposed)
 template <typename T, unsigned Dim_v>
 inline void ProxyWriter::includeVector(const std::string& label) {
-  Channel ch; ch.label = label; ch.defaultValue = 1.0; ch.isVector = true; ch.vecDim = (Dim_v > 3 ? 3u : Dim_v);
+  Channel ch; 
+  ch.label = label; 
+  // Parse label for array prefix and namespace; compute propertyName
+  {
+    ch.isArray = false;
+    std::string work = label;
+    if (work.rfind("array:", 0) == 0) { ch.isArray = true; work = work.substr(6); }
+    ch.propertyName = work;
+    auto dp = work.find('.');
+    if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
+  }
+  ch.defaultValue = 1.0; ch.isVector = true; ch.vecDim = (Dim_v > 3 ? 3u : Dim_v);
   if (hasConfig_) {
     applyVectorConfig<Dim_v>(ch);
   }
