@@ -112,20 +112,49 @@ public:
                        std::vector<std::string> preconditioner_params_)
         : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_, preconditioner_params_),
             electric_scale(30),
-            enum_single(PenningTrap),
+            
+            
+            
             double_single(1.0),
             int_single(42),
             bool_single(false),
             button_single(ippl::Button(false)),
-            vector_single(ippl::Vector<double,3>({1.0,2.0,3.0})),
+            double_vector_single1(ippl::Vector<double,1>({1.0})),
+            double_vector_single2(ippl::Vector<double,2>({1.0,2.0})),
+            double_vector_single3(ippl::Vector<double,3>({1.0,2.0,3.0})),
+            int_vector_single1(ippl::Vector<int,1>({1})),
+            int_vector_single2(ippl::Vector<int,2>({1,2})),
+            int_vector_single3(ippl::Vector<int,3>({1,2,3})),
+            enum_single(PenningTrap),
             LinMap_single({0.75, {1,1,1}, {2,2,2}, {3,3,3}}),
             SimParams_single{5, 2.5, false, ippl::Button(false), ippl::Vector<double,3>({9,9,9}), PenningTrap},
-            double_array({1.0,2.0,3.0}),
+            
+            
+            
             double_array_2(),
+            double_array({1.0,2.0,3.0}),
             int_array({1,2,3}),
             bool_array({false,true,false}),
             button_array({ippl::Button(false), ippl::Button(true)}),
-            vector_array({ ippl::Vector<double,3>({1,2,3}), ippl::Vector<double,3>({4,5,6}) }),
+            double_vector_array1({  ippl::Vector<double,1>({1}), 
+                                    ippl::Vector<double,1>({4}) 
+                        }),
+            double_vector_array2({  ippl::Vector<double,2>({1,2}), 
+                                    ippl::Vector<double,2>({4,5}) 
+                        }),
+            double_vector_array3({  ippl::Vector<double,3>({1,2,3}), 
+                                    ippl::Vector<double,3>({4,5,6}) 
+                        }),
+            int_vector_array1({  ippl::Vector<int,1>({1}), 
+                                 ippl::Vector<int,1>({4}) 
+                        }),
+            int_vector_array2({  ippl::Vector<int,2>({1,2}), 
+                                 ippl::Vector<int,2>({4,5}) 
+                        }),
+            int_vector_array3({  ippl::Vector<int,3>({1,2,3}), 
+                                 ippl::Vector<int,3>({4,5,6}) 
+                        }),
+            enum_array({PenningTrap, LandauDamping, UniformPlasma, PenningTrap}),
             LinMap_array({  {1.5,{1,2,3},{4,5,6},{7,8,9}},
                             {2.5,{9,8,7},{6,5,4},{3,2,1}}
                         }),
@@ -144,21 +173,41 @@ private:
 
     double electric_scale;
 
-    experiment_enum         enum_single;
     double                  double_single;
     int                     int_single;
     bool                    bool_single;
     ippl::Button            button_single;
-    ippl::Vector<double, 3> vector_single;
+    
+    ippl::Vector<double, 1> double_vector_single1;
+    ippl::Vector<double, 2> double_vector_single2;
+    ippl::Vector<double, 3> double_vector_single3;
+    ippl::Vector<int, 1>    int_vector_single1;
+    ippl::Vector<int, 2>    int_vector_single2;
+    ippl::Vector<int, 3>    int_vector_single3;
+
+    experiment_enum         enum_single;
     LinMap                  LinMap_single;
     SimParams               SimParams_single;
         
+
+
+
+    std::vector<double>                   double_array_2;//empty
+
     std::vector<double>                   double_array;
-    std::vector<double>                   double_array_2;
     std::vector<int>                      int_array;
     std::vector<bool>                     bool_array;
     std::vector<ippl::Button>             button_array;
-    std::vector<ippl::Vector<double, 3>>  vector_array;
+
+    std::vector<ippl::Vector<double, 1>>    double_vector_array1;
+    std::vector<ippl::Vector<double, 2>>    double_vector_array2;
+    std::vector<ippl::Vector<double, 3>>    double_vector_array3;
+    std::vector<ippl::Vector<int, 1>>       int_vector_array1;
+    std::vector<ippl::Vector<int, 2>>       int_vector_array2;
+    std::vector<ippl::Vector<int, 3>>       int_vector_array3;
+
+
+    std::vector<experiment_enum>          enum_array;
     std::vector<LinMap>                   LinMap_array;
     std::vector<SimParams>                SimpParams_arrays;
     
@@ -299,43 +348,50 @@ public:
             });
 
 
-            //    ippl::VisRegistryRuntime    runtime_steer_registry = ippl::MakeVisRegistryRuntime(
-                            // "experiment",       e_m
-                            // "magnetic",         magnetic_scale,
-                                        // "switch1",          switch_m,
-                                        // "useless_button",   useless_button,
-                                        // "reset_button",     reset_button,
-                                        // "single_LinMap2",   sLinMap2_m,
-                                        // "LinMaps", lm_m            // original SoA registration
-                                        // "single_LinMap",    sLinMap_m,
-                                        // "LinMaps",          lmv_m
+
         std::shared_ptr<ippl::VisRegistryRuntime>  runtime_steer_registry = ippl::MakeVisRegistryRuntimePtr(
                                         "electric",         electric_scale
                                     );
                                     
                                     
 
-                                    // Newly introduced single steerables
-                                    runtime_steer_registry->add("double_single", double_single);
-                                    runtime_steer_registry->add("int_single", int_single);
-                                    runtime_steer_registry->add("bool_single", bool_single);
-                                    runtime_steer_registry->add("button_single", button_single);
-                                    runtime_steer_registry->add("vector_single", vector_single);
-                                    runtime_steer_registry->add("SimParams_single", SimParams_single);
-                                    runtime_steer_registry->add("LinMap_single_extra", LinMap_single);
-                                    runtime_steer_registry->add("enum_single", enum_single);
-                                    // Array-of-struct steerables
-                                    runtime_steer_registry->add("LinMap_array", LinMap_array);
-                                    runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
-                                    // Primitive/basic-type vector steerables (now supported)
-                                    runtime_steer_registry->add("array:double_array",     double_array);
-                                    runtime_steer_registry->add("array:double_array_2",   double_array_2);
-                                    runtime_steer_registry->add("array:int_array",        int_array);
-                                    runtime_steer_registry->add("array:bool_array",       bool_array);
-                                    runtime_steer_registry->add("array:button_array",     button_array);
-                                    runtime_steer_registry->add("array:vector_array",     vector_array);
+                                    // SINGLES
+                                    // runtime_steer_registry->add("double_single", double_single);
+                                    // runtime_steer_registry->add("int_single", int_single);
+                                    // runtime_steer_registry->add("bool_single", bool_single);
+                                    // runtime_steer_registry->add("button_single", button_single);
+                                    
+                                    runtime_steer_registry->add("double_vector_single1", double_vector_single1);
+                                    runtime_steer_registry->add("double_vector_single2", double_vector_single2);
+                                    runtime_steer_registry->add("double_vector_single3", double_vector_single3);
+                                    runtime_steer_registry->add("int_vector_single1",    int_vector_single1);
+                                    runtime_steer_registry->add("int_vector_single2",    int_vector_single2);
+                                    runtime_steer_registry->add("int_vector_single3",    int_vector_single3);
+                                    // runtime_steer_registry->add("SimParams_single", SimParams_single);
+                                    // runtime_steer_registry->add("LinMap_single_extra", LinMap_single);
+                                    // runtime_steer_registry->add("enum_single", enum_single);
+
+
+                                    // ARRAYS
+                                    // runtime_steer_registry->add("LinMap_array", LinMap_array);
+                                    // runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
+                                    // runtime_steer_registry->add("array:double_array",     double_array);
+                                    // runtime_steer_registry->add("array:double_array_2",   double_array_2);
+                                    // runtime_steer_registry->add("array:int_array",        int_array);
+                                    // runtime_steer_registry->add("array:bool_array",       bool_array);
+                                    // runtime_steer_registry->add("array:button_array",     button_array);
+                                    runtime_steer_registry->add("array:double_vector_array1",  double_vector_array1);
+                                    runtime_steer_registry->add("array:double_vector_array2",  double_vector_array2);
+                                    runtime_steer_registry->add("array:double_vector_array3",  double_vector_array3);
+                                    runtime_steer_registry->add("array:int_vector_array1",     int_vector_array1);
+                                    runtime_steer_registry->add("array:int_vector_array2",     int_vector_array2);
+                                    runtime_steer_registry->add("array:int_vector_array3",     int_vector_array3);
                                     // LinMaps (SoA) or other compound arrays can be added similarly when needed
                                 
+
+
+
+
                                     // ippl::VisRegistryRuntime runtime_vis_registry   = ippl::MakeVisRegistryRuntime(
             std::shared_ptr<ippl::VisRegistryRuntime> runtime_vis_registry   = ippl::MakeVisRegistryRuntimePtr(
                 "density",          this->fcontainer_m->getRho()

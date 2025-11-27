@@ -534,13 +534,29 @@ void CatalystAdaptor::AddSteerableChannel( const ippl::Vector<T, Dim_v>& steerab
     fnode["topology"].set_string("sMesh_topo");
     fnode["volume_dependent"].set_string("false");
 
-    const double vx = (Dim_v >= 1) ? static_cast<double>(steerable_vec_forwardpass[0]) : 0.0;
-    const double vy = (Dim_v >= 2) ? static_cast<double>(steerable_vec_forwardpass[1]) : 0.0;
-    const double vz = (Dim_v >= 3) ? static_cast<double>(steerable_vec_forwardpass[2]) : 0.0;
-
-    fnode["values/x"].set(vx);
-    fnode["values/y"].set(vy);
-    fnode["values/z"].set(vz);
+    if constexpr (std::is_integral_v<T>) {
+        const int vx = static_cast<int>(steerable_vec_forwardpass[0]);
+        fnode["values/x"].set(vx);
+        if constexpr (Dim_v >= 2) {
+            const int vy = static_cast<int>(steerable_vec_forwardpass[1]);
+            fnode["values/y"].set(vy);
+        }
+        if constexpr (Dim_v >= 3) {
+            const int vz = static_cast<int>(steerable_vec_forwardpass[2]);
+            fnode["values/z"].set(vz);
+        }
+    } else {
+        const double vx = static_cast<double>(steerable_vec_forwardpass[0]);
+        fnode["values/x"].set(vx);
+        if constexpr (Dim_v >= 2) {
+            const double vy = static_cast<double>(steerable_vec_forwardpass[1]);
+            fnode["values/y"].set(vy);
+        }
+        if constexpr (Dim_v >= 3) {
+            const double vz = static_cast<double>(steerable_vec_forwardpass[2]);
+            fnode["values/z"].set(vz);
+        }
+    }
 }
 
 
@@ -626,15 +642,35 @@ void CatalystAdaptor::AddSteerableChannel( const std::vector<ippl::Vector<T, Dim
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
-    std::vector<double> vx, vy, vz; vx.reserve(N); vy.reserve(N); vz.reserve(N);
-    for (const auto& v : arr) {
-        vx.push_back(static_cast<double>(v[0]));
-        if constexpr (Dim_v >= 2) vy.push_back(static_cast<double>(v[1])); else vy.push_back(0.0);
-        if constexpr (Dim_v >= 3) vz.push_back(static_cast<double>(v[2])); else vz.push_back(0.0);
+    if constexpr (std::is_integral_v<T>) {
+        std::vector<int32_t> vx; vx.reserve(N);
+        for (const auto& v : arr) vx.push_back(static_cast<int32_t>(v[0]));
+        f["values/x"].set(vx);
+        if constexpr (Dim_v >= 2) {
+            std::vector<int32_t> vy; vy.reserve(N);
+            for (const auto& v : arr) vy.push_back(static_cast<int32_t>(v[1]));
+            f["values/y"].set(vy);
+        }
+        if constexpr (Dim_v >= 3) {
+            std::vector<int32_t> vz; vz.reserve(N);
+            for (const auto& v : arr) vz.push_back(static_cast<int32_t>(v[2]));
+            f["values/z"].set(vz);
+        }
+    } else {
+        std::vector<double> vx; vx.reserve(N);
+        for (const auto& v : arr) vx.push_back(static_cast<double>(v[0]));
+        f["values/x"].set(vx);
+        if constexpr (Dim_v >= 2) {
+            std::vector<double> vy; vy.reserve(N);
+            for (const auto& v : arr) vy.push_back(static_cast<double>(v[1]));
+            f["values/y"].set(vy);
+        }
+        if constexpr (Dim_v >= 3) {
+            std::vector<double> vz; vz.reserve(N);
+            for (const auto& v : arr) vz.push_back(static_cast<double>(v[2]));
+            f["values/z"].set(vz);
+        }
     }
-    f["values/x"].set(vx);
-    f["values/y"].set(vy);
-    f["values/z"].set(vz);
 }
 
 

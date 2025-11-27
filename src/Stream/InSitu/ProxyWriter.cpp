@@ -73,22 +73,27 @@ namespace ippl {
 // -------------------------------- Initialization ---------------------------------
 
 void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
-                             double rangeMin,
-                             double rangeMax,
                              std::string prototypeLabel) {
   outPath_ = std::move(xmlOutputPath);
-  rangeMin_ = rangeMin;
-  rangeMax_ = rangeMax;
   prototypeLabel_ = std::move(prototypeLabel);
   resetStreams();
+  // Attempt to load default config from the output folder.
+  std::filesystem::path baseDir = outPath_.parent_path();
+  std::filesystem::path cfg1 = baseDir / "proxys_default_config.yaml";
+  std::filesystem::path cfg2 = baseDir / "proxy_default_config.yaml";
+  if (std::filesystem::exists(cfg1)) {
+    loadConfigFromYamlFile(cfg1.string());
+  } else if (std::filesystem::exists(cfg2)) {
+    loadConfigFromYamlFile(cfg2.string());
+  }
 }
 
 void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
                              const std::string& configYamlPath,
-                             double rangeMin,
-                             double rangeMax,
                              std::string prototypeLabel) {
-  initialize(std::move(xmlOutputPath), rangeMin, rangeMax, std::move(prototypeLabel));
+  outPath_ = std::move(xmlOutputPath);
+  prototypeLabel_ = std::move(prototypeLabel);
+  resetStreams();
   if (!configYamlPath.empty()) {
     loadConfigFromYamlFile(configYamlPath);
   }
@@ -96,34 +101,9 @@ void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
 
 // Convenience overload: only output path and YAML config path.
 // Uses existing defaults for rangeMin_/rangeMax_ and prototypeLabel_.
-void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
-                             const std::string& configYamlPath) {
-  // Keep previously configured or default ranges/label
-  outPath_ = std::move(xmlOutputPath);
-  resetStreams();
-  if (!configYamlPath.empty()) {
-    // Heuristic: if string looks like YAML content (contains newlines or typical keys),
-    // treat as YAML text; otherwise treat as a file path.
-    bool looksLikeYaml = (configYamlPath.find('\n') != std::string::npos) ||
-                         (configYamlPath.find("type_defaults:") != std::string::npos) ||
-                         (configYamlPath.find("steer_params:") != std::string::npos) ||
-                         (configYamlPath.find(":") != std::string::npos && configYamlPath.size() > 20);
-    if (looksLikeYaml) {
-      loadConfigFromYamlString(configYamlPath);
-    } else {
-      loadConfigFromYamlFile(configYamlPath);
-    }
-  }
-}
+// removed legacy overload
 
-void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
-                             const conduit_cpp::Node configNode,
-                             double rangeMin,
-                             double rangeMax,
-                             std::string prototypeLabel) {
-  initialize(std::move(xmlOutputPath), rangeMin, rangeMax, std::move(prototypeLabel));
-  setConfigNode(configNode);
-}
+// removed legacy overload taking conduit node
 
 // --------------------------------- Inclusions ------------------------------------
 
@@ -138,7 +118,7 @@ void ProxyWriter::includeBool(const std::string& label, bool defaultValue) {
     auto dp = work.find('.');
     if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
   }
-  ch.defaultValue = defaultValue ? 1.0 : 0.0; ch.isVector = false; ch.isBool = true; ch.vecDim = 1;
+  ch.defaultValue = defaultValue ? 1 : 0; ch.isVector = false; ch.isBool = true; ch.vecDim = 1;
   channels_.emplace_back(std::move(ch));
 }
 
@@ -278,8 +258,7 @@ void ProxyWriter::appendSourceProxy(const Channel& ch) {
            << "                                  number_of_elements_per_command='1'\n"
            << "                                  repeat_command='1'\n"
            << "                                  panel_widget='DoubleRange'>\n";
-  sources_ << "              <DoubleRangeDomain name='range' min='" << (ch.hasScalarRange ? ch.scalarMin : rangeMin_)
-           << "' max='" << (ch.hasScalarRange ? ch.scalarMax : rangeMax_) << "'/>\n";
+  // Per requirements: no DoubleRangeDomain in the SOURCE section
   sources_ << "            </DoubleVectorProperty>\n\n";
   if(!ch.isBool){
     sources_ << "            <PropertyGroup label='SteerableParameters' panel_widget='PropertyCollection'>\n";
@@ -307,38 +286,79 @@ void ProxyWriter::appendPrototype() {
   };
   for (const auto& ch : channels_) {
     if (ch.isBool || ch.isButton || ch.isEnum) continue;
-    // Exclude any array-based entries from the collective numerics prototype
     if (ch.isArray) continue;
-    // Exclude struct members (ns.member) from collective numerics; they'll be in per-namespace prototypes
     if (ch.propertyName.find('.') != std::string::npos) continue;
-    if (isLinMapComponent(ch.label)) continue; // exclude LinMap parts from Numerics prototype
+    if (isLinMapComponent(ch.label)) continue;
     if (ch.isVector) {
       const double d0 = ch.hasVectorRanges ? ch.vecDefaults[0] : ch.defaultValue;
       const double d1 = ch.hasVectorRanges ? ch.vecDefaults[1] : ch.defaultValue;
       const double d2 = ch.hasVectorRanges ? ch.vecDefaults[2] : ch.defaultValue;
-      const double vmin = ch.hasVectorRanges ? ch.vecMin : rangeMin_;
-      const double vmax = ch.hasVectorRanges ? ch.vecMax : rangeMax_;
-  misc_ << "        <DoubleVectorProperty name='vec3_" << ch.label << "' label='" << ch.label << "' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
-  misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-      misc_ << "          <Hints>\n";
-      misc_ << "            <ShowComponentLabels>\n";
-  misc_ << "              <ComponentLabel component='0' label='X'/>\n";
-  misc_ << "              <ComponentLabel component='1' label='Y'/>\n";
-  misc_ << "              <ComponentLabel component='2' label='Z'/>\n";
-      misc_ << "            </ShowComponentLabels>\n";
-      misc_ << "          </Hints>\n";
-      misc_ << "        </DoubleVectorProperty>\n";
+      unsigned dim = ch.vecDim;
+      std::string def;
+      if (ch.isInteger) {
+        int i0 = static_cast<int>(d0);
+        int i1 = static_cast<int>(d1);
+        int i2 = static_cast<int>(d2);
+        if (dim == 1) def = std::to_string(i0);
+        else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
+        else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
+        misc_ << "        <IntVectorProperty name='vec" << dim << "_" << ch.label << "' label='" << ch.label << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        // Include IntRangeDomain only if config defines ranges for this label
+        auto itIV = labelVectorCfg_.find(ch.label);
+        if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+          const VectorCfg& vc = itIV->second;
+          int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
+          int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
+          misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+        }
+        misc_ << "        </IntVectorProperty>\n";
+      } else {
+        if (dim == 1) def = std::to_string(d0);
+        else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
+        else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
+        misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << ch.label << "' label='" << ch.label << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        // Prefer vector ranges; fallback to scalar ranges if present for this label
+        double vminOut; double vmaxOut; bool haveRange = false;
+        auto itV = labelVectorCfg_.find(ch.label);
+        if (itV != labelVectorCfg_.end() && itV->second.has) {
+          const VectorCfg& vc = itV->second;
+          if (vc.uniform) { vminOut = vc.umin; vmaxOut = vc.umax; haveRange = true; }
+          else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vminOut = vc.comp[i].min; vmaxOut = vc.comp[i].max; haveRange = true; break; } }
+        } else {
+          auto itS = labelScalarCfg_.find(ch.label);
+          if (itS != labelScalarCfg_.end() && itS->second.has) { vminOut = itS->second.min; vmaxOut = itS->second.max; haveRange = true; }
+        }
+        if (haveRange) {
+          misc_ << "          <DoubleRangeDomain name='range' min='" << vminOut << "' max='" << vmaxOut << "'/>\n";
+        }
+        misc_ << "        </DoubleVectorProperty>\n";
+      }
+      if (!ch.isInteger && dim == 3) {
+        misc_ << "          <Hints>\n";
+        misc_ << "            <ShowComponentLabels>\n";
+        misc_ << "              <ComponentLabel component='0' label='X'/>\n";
+        misc_ << "              <ComponentLabel component='1' label='Y'/>\n";
+        misc_ << "              <ComponentLabel component='2' label='Z'/>\n";
+        misc_ << "            </ShowComponentLabels>\n";
+        misc_ << "          </Hints>\n";
+      }
     } else {
       const double sdef = ch.defaultValue;
       if (ch.isInteger) {
-        // Integer scalar in numerics prototype
         misc_ << "        <IntVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+        // Include IntRangeDomain only if config defines ranges for this label
+        auto itIS = labelScalarCfg_.find(ch.label);
+        if (itIS != labelScalarCfg_.end() && itIS->second.has) {
+          misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+        }
         misc_ << "        </IntVectorProperty>\n";
       } else {
-        const double smin = ch.hasScalarRange ? ch.scalarMin : rangeMin_;
-        const double smax = ch.hasScalarRange ? ch.scalarMax : rangeMax_;
-        misc_ << "        <DoubleVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
-        misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+        misc_ << "        <DoubleVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << sdef << "'>\n";
+        // Include DoubleRangeDomain only if config defines ranges for this specific label
+        auto itS = labelScalarCfg_.find(ch.label);
+        if (itS != labelScalarCfg_.end() && itS->second.has) {
+          misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+        }
         misc_ << "        </DoubleVectorProperty>\n";
       }
     }
@@ -389,10 +409,11 @@ void ProxyWriter::appendPrototype() {
           misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleLineEdit'>\n";
           misc_ << "        </DoubleVectorProperty>\n";
         } else {
-          const double smin = ct->hasScalarRange ? ct->scalarMin : rangeMin_;
-          const double smax = ct->hasScalarRange ? ct->scalarMax : rangeMax_;
-          misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
-          misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+          misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "'>\n";
+          auto itS = labelScalarCfg_.find(ct->label);
+          if (itS != labelScalarCfg_.end() && itS->second.has) {
+            misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+          }
           misc_ << "        </DoubleVectorProperty>\n";
         }
       }
@@ -401,33 +422,99 @@ void ProxyWriter::appendPrototype() {
         const double d0 = cx->hasVectorRanges ? cx->vecDefaults[0] : cx->defaultValue;
         const double d1 = cx->hasVectorRanges ? cx->vecDefaults[1] : cx->defaultValue;
         const double d2 = cx->hasVectorRanges ? cx->vecDefaults[2] : cx->defaultValue;
-        const double vmin = cx->hasVectorRanges ? cx->vecMin : rangeMin_;
-        const double vmax = cx->hasVectorRanges ? cx->vecMax : rangeMax_;
-        misc_ << "        <DoubleVectorProperty name='vec3_" << base << "_x_row' label='" << base << "_x_row' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
-        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-        misc_ << "        </DoubleVectorProperty>\n";
+  // Prototype range only if per-label config exists
+        unsigned dim = cx->vecDim;
+        std::string def;
+        if (cx->isInteger) {
+          int i0 = static_cast<int>(d0);
+          int i1 = static_cast<int>(d1);
+          int i2 = static_cast<int>(d2);
+          if (dim == 1) def = std::to_string(i0);
+          else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
+          else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
+          misc_ << "        <IntVectorProperty name='vec" << dim << "_" << base << "_x_row' label='" << base << "_x_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+          misc_ << "        </IntVectorProperty>\n";
+        } else {
+          if (dim == 1) def = std::to_string(d0);
+          else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
+          else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
+          misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << base << "_x_row' label='" << base << "_x_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+          auto itVx = labelVectorCfg_.find(cx->label);
+          if (itVx != labelVectorCfg_.end() && itVx->second.has) {
+            double vmin = 0, vmax = 0; const VectorCfg& vc = itVx->second;
+            if (vc.uniform) { vmin = vc.umin; vmax = vc.umax; }
+            else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vmin = vc.comp[i].min; vmax = vc.comp[i].max; break; } }
+            misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+          }
+          misc_ << "        </DoubleVectorProperty>\n";
+        }
+        
       }
       // Y rowumn
       if (const Channel* cy = findChannelByLabel(base + "_y_row")) {
         const double d0 = cy->hasVectorRanges ? cy->vecDefaults[0] : cy->defaultValue;
         const double d1 = cy->hasVectorRanges ? cy->vecDefaults[1] : cy->defaultValue;
         const double d2 = cy->hasVectorRanges ? cy->vecDefaults[2] : cy->defaultValue;
-        const double vmin = cy->hasVectorRanges ? cy->vecMin : rangeMin_;
-        const double vmax = cy->hasVectorRanges ? cy->vecMax : rangeMax_;
-        misc_ << "        <DoubleVectorProperty name='vec3_" << base << "_y_row' label='" << base << "_y_row' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
-        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-        misc_ << "        </DoubleVectorProperty>\n";
+  // Prototype range only if per-label config exists
+        unsigned dim = cy->vecDim;
+        std::string def;
+        if (cy->isInteger) {
+          int i0 = static_cast<int>(d0);
+          int i1 = static_cast<int>(d1);
+          int i2 = static_cast<int>(d2);
+          if (dim == 1) def = std::to_string(i0);
+          else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
+          else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
+          misc_ << "        <IntVectorProperty name='vec" << dim << "_" << base << "_y_row' label='" << base << "_y_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+          misc_ << "        </IntVectorProperty>\n";
+        } else {
+          if (dim == 1) def = std::to_string(d0);
+          else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
+          else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
+          misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << base << "_y_row' label='" << base << "_y_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+          auto itVy = labelVectorCfg_.find(cy->label);
+          if (itVy != labelVectorCfg_.end() && itVy->second.has) {
+            double vmin = 0, vmax = 0; const VectorCfg& vc = itVy->second;
+            if (vc.uniform) { vmin = vc.umin; vmax = vc.umax; }
+            else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vmin = vc.comp[i].min; vmax = vc.comp[i].max; break; } }
+            misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+          }
+          misc_ << "        </DoubleVectorProperty>\n";
+        }
+        
       }
       // Z rowumn
       if (const Channel* cz = findChannelByLabel(base + "_z_row")) {
         const double d0 = cz->hasVectorRanges ? cz->vecDefaults[0] : cz->defaultValue;
         const double d1 = cz->hasVectorRanges ? cz->vecDefaults[1] : cz->defaultValue;
         const double d2 = cz->hasVectorRanges ? cz->vecDefaults[2] : cz->defaultValue;
-        const double vmin = cz->hasVectorRanges ? cz->vecMin : rangeMin_;
-        const double vmax = cz->hasVectorRanges ? cz->vecMax : rangeMax_;
-        misc_ << "        <DoubleVectorProperty name='vec3_" << base << "_z_row' label='" << base << "_z_row' number_of_elements='3' default_values='" << d0 << " " << d1 << " " << d2 << "'>\n";
-        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-        misc_ << "        </DoubleVectorProperty>\n";
+  // Prototype range only if per-label config exists
+        unsigned dim = cz->vecDim;
+        std::string def;
+        if (cz->isInteger) {
+          int i0 = static_cast<int>(d0);
+          int i1 = static_cast<int>(d1);
+          int i2 = static_cast<int>(d2);
+          if (dim == 1) def = std::to_string(i0);
+          else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
+          else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
+          misc_ << "        <IntVectorProperty name='vec" << dim << "_" << base << "_z_row' label='" << base << "_z_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+          misc_ << "        </IntVectorProperty>\n";
+        } else {
+          if (dim == 1) def = std::to_string(d0);
+          else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
+          else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
+          misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << base << "_z_row' label='" << base << "_z_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+          auto itVz = labelVectorCfg_.find(cz->label);
+          if (itVz != labelVectorCfg_.end() && itVz->second.has) {
+            double vmin = 0, vmax = 0; const VectorCfg& vc = itVz->second;
+            if (vc.uniform) { vmin = vc.umin; vmax = vc.umax; }
+            else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vmin = vc.comp[i].min; vmax = vc.comp[i].max; break; } }
+            misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+          }
+          misc_ << "        </DoubleVectorProperty>\n";
+        }
+        
       }
       // (time already printed above)
     }
@@ -470,24 +557,50 @@ void ProxyWriter::appendPrototype() {
           const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
           const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
           const double d2 = c->hasVectorRanges ? c->vecDefaults[2] : c->defaultValue;
-          const double vmin = c->hasVectorRanges ? c->vecMin : rangeMin_;
-          const double vmax = c->hasVectorRanges ? c->vecMax : rangeMax_;
-          misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='3' default_values='" 
-                << d0 << " " << d1 << " " << d2 << "'>\n";
-          misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-          misc_ << "        </DoubleVectorProperty>\n";
+          unsigned dim = c->vecDim;
+          std::string def = (dim == 1 ? std::to_string(d0) : dim == 2 ? (std::to_string(d0) + " " + std::to_string(d1)) : (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2)));
+          if (c->isInteger) {
+            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" 
+                  << def << "'>\n";
+            // Add IntRangeDomain only if config provides a range for this label
+            auto itIV = labelVectorCfg_.find(c->label);
+            if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+              const VectorCfg& vc = itIV->second;
+              int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
+              int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
+              misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+            }
+            misc_ << "        </IntVectorProperty>\n";
+          } else {
+            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" 
+                  << def << "'>\n";
+            // Only include range if provided in config
+            auto itV = labelVectorCfg_.find(c->label);
+            if (itV != labelVectorCfg_.end() && itV->second.has) {
+              double vmin = itV->second.uniform ? itV->second.umin : itV->second.comp[0].min;
+              double vmax = itV->second.uniform ? itV->second.umax : itV->second.comp[0].max;
+              misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+            }
+            misc_ << "        </DoubleVectorProperty>\n";
+          }
         } else {
           const double sdef = c->defaultValue;
           if (c->isInteger) {
             misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
                   << static_cast<int>(sdef) << "'>\n";
+            // Only include range if provided in config
+            auto itIS = labelScalarCfg_.find(c->label);
+            if (itIS != labelScalarCfg_.end() && itIS->second.has) {
+              misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+            }
             misc_ << "        </IntVectorProperty>\n";
           } else {
-            const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-            const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
-            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
-                  << sdef << "' panel_widget='DoubleRange'>\n";
-            misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+        misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
+          << sdef << "'>\n";
+        auto itS = labelScalarCfg_.find(c->label);
+        if (itS != labelScalarCfg_.end() && itS->second.has) {
+      misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+        }
             misc_ << "        </DoubleVectorProperty>\n";
           }
         }
@@ -529,19 +642,56 @@ void ProxyWriter::appendPrototype() {
           const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
           const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
           const double d2 = c->hasVectorRanges ? c->vecDefaults[2] : c->defaultValue;
-          const double vmin = c->hasVectorRanges ? c->vecMin : rangeMin_;
-          const double vmax = c->hasVectorRanges ? c->vecMax : rangeMax_;
-          misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='3' default_values='"
-                << d0 << " " << d1 << " " << d2 << "'>\n";
-          misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-          misc_ << "        </DoubleVectorProperty>\n";
+          unsigned dim = c->vecDim;
+          std::string def;
+          if (c->isInteger) {
+            int i0 = static_cast<int>(d0);
+            int i1 = static_cast<int>(d1);
+            int i2 = static_cast<int>(d2);
+            if (dim == 1) def = std::to_string(i0);
+            else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
+            else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
+            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+            // Add IntRangeDomain only if config provides a range for this label
+            auto itIV = labelVectorCfg_.find(c->label);
+            if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+              const VectorCfg& vc = itIV->second;
+              int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
+              int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
+              misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+            }
+            misc_ << "        </IntVectorProperty>\n";
+          } else {
+            if (dim == 1) def = std::to_string(d0);
+            else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
+            else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
+            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+            // Only include range if provided in config
+            auto itV = labelVectorCfg_.find(c->label);
+            if (itV != labelVectorCfg_.end() && itV->second.has) {
+              double vmin = itV->second.uniform ? itV->second.umin : itV->second.comp[0].min;
+              double vmax = itV->second.uniform ? itV->second.umax : itV->second.comp[0].max;
+              misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+            }
+            misc_ << "        </DoubleVectorProperty>\n";
+          }
         } else {
           const double sdef = c->defaultValue;
-          const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-          const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
-          misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
-          misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
-          misc_ << "        </DoubleVectorProperty>\n";
+          if (c->isInteger) {
+            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+            auto itIS = labelScalarCfg_.find(c->label);
+            if (itIS != labelScalarCfg_.end() && itIS->second.has) {
+              misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+            }
+            misc_ << "        </IntVectorProperty>\n";
+          } else {
+            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << sdef << "'>\n";
+            auto itS = labelScalarCfg_.find(c->label);
+            if (itS != labelScalarCfg_.end() && itS->second.has) {
+              misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+            }
+            misc_ << "        </DoubleVectorProperty>\n";
+          }
         }
       }
       misc_ << "      </Proxy>\n";
@@ -576,26 +726,60 @@ void ProxyWriter::appendPrototype() {
         }
         misc_ << "          </EnumerationDomain>\n";
         misc_ << "        </IntVectorProperty>\n";
-      } else if (c->isVector) {
-        const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
-        const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
-        const double d2 = c->hasVectorRanges ? c->vecDefaults[2] : c->defaultValue;
-        const double vmin = c->hasVectorRanges ? c->vecMin : rangeMin_;
-        const double vmax = c->hasVectorRanges ? c->vecMax : rangeMax_;
-        misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='3' default_values='"
-              << d0 << " " << d1 << " " << d2 << "'>\n";
-        misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+    } else if (c->isVector) {
+      const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
+      const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
+      const double d2 = c->hasVectorRanges ? c->vecDefaults[2] : c->defaultValue;
+      unsigned dim = c->vecDim;
+      std::string def;
+      if (c->isInteger) {
+        int i0 = static_cast<int>(d0);
+        int i1 = static_cast<int>(d1);
+        int i2 = static_cast<int>(d2);
+        if (dim == 1) def = std::to_string(i0);
+        else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
+        else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
+        misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        // Include IntRangeDomain only if config provides one for this array label
+        auto itIV = labelVectorCfg_.find(name);
+        if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+          const VectorCfg& vc = itIV->second;
+          int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
+          int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
+          misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+        }
+        misc_ << "        </IntVectorProperty>\n";
+      } else {
+        if (dim == 1) def = std::to_string(d0);
+        else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
+        else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
+        misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        // Include a range ONLY if the config provides one for this label
+        auto itV = labelVectorCfg_.find(name);
+        if (itV != labelVectorCfg_.end() && itV->second.has) {
+          double vmin = itV->second.uniform ? itV->second.umin : itV->second.comp[0].min;
+          double vmax = itV->second.uniform ? itV->second.umax : itV->second.comp[0].max;
+          misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+        }
         misc_ << "        </DoubleVectorProperty>\n";
+      }
         } else {
           const double sdef = c->defaultValue;
           if (c->isInteger) {
             misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+            // Include IntRangeDomain only if the config provides one for this array label
+            auto itIS = labelScalarCfg_.find(name);
+            if (itIS != labelScalarCfg_.end() && itIS->second.has) {
+              misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+            }
             misc_ << "        </IntVectorProperty>\n";
           } else {
-            const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-            const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
-            misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleRange'>\n";
-            misc_ << "          <DoubleRangeDomain name='range' min='" << smin << "' max='" << smax << "'/>\n";
+            misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "'>\n";
+            // Include a range ONLY if the config provides one for this label
+            auto itS = labelScalarCfg_.find(name);
+            if (itS != labelScalarCfg_.end() && itS->second.has) {
+              misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+            }
             misc_ << "        </DoubleVectorProperty>\n";
           }
         }
@@ -694,22 +878,47 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
       const double d0 = ch.hasVectorRanges ? ch.vecDefaults[0] : ch.defaultValue;
       const double d1 = ch.hasVectorRanges ? ch.vecDefaults[1] : ch.defaultValue;
       const double d2 = ch.hasVectorRanges ? ch.vecDefaults[2] : ch.defaultValue;
-      sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
-               << "                                  command='SetTuple3Double'\n"
+      unsigned dim = ch.vecDim;
+      std::string cmd;
+      if (ch.isInteger) cmd = (dim == 1 ? "SetTuple1Int" : dim == 2 ? "SetTuple2Int" : "SetTuple3Int");
+      else cmd = (dim == 1 ? "SetTuple1Double" : dim == 2 ? "SetTuple2Double" : "SetTuple3Double");
+      std::string def;
+      if (ch.isInteger) {
+        // format integer defaults without decimals
+        int i0 = static_cast<int>(d0);
+        int i1 = static_cast<int>(d1);
+        int i2 = static_cast<int>(d2);
+        def = (dim == 1 ? std::to_string(i0)
+                        : dim == 2 ? (std::to_string(i0) + " " + std::to_string(i1))
+                                   : (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2)));
+      } else {
+        def = (dim == 1 ? std::to_string(d0)
+                        : dim == 2 ? (std::to_string(d0) + " " + std::to_string(d1))
+                                   : (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2)));
+      }
+      if (ch.isInteger) {
+        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+               << "                                  command='" << cmd << "'\n"
                << "                                  use_index='1'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
-               << "                                  default_values='" << d0 << " " << d1 << " " << d2 << "'\n"
-               << "                                  number_of_elements_per_command='3'\n"
+               << "                                  default_values='" << def << "'\n"
+               << "                                  number_of_elements='" << dim << "'\n"
+               << "                                  number_of_elements_per_command='" << dim << "'\n"
                << "                                  repeat_command='1'>\n"
-               << "              <Hints>\n"
-               << "                <ShowComponentLabels>\n"
-               << "                  <ComponentLabel component='0' label='X'/>\n"
-               << "                  <ComponentLabel component='1' label='Y'/>\n"
-               << "                  <ComponentLabel component='2' label='Z'/>\n"
-               << "                </ShowComponentLabels>\n"
-               << "              </Hints>\n"
+               << "            </IntVectorProperty>\n\n";
+      } else {
+        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+               << "                                  command='" << cmd << "'\n"
+               << "                                  use_index='1'\n"
+               << "                                  clean_command='Clear'\n"
+               << "                                  initial_string='steerable_field_b_" << L << "'\n"
+               << "                                  default_values='" << def << "'\n"
+               << "                                  number_of_elements='" << dim << "'\n"
+               << "                                  number_of_elements_per_command='" << dim << "'\n"
+               << "                                  repeat_command='1'>\n"
                << "            </DoubleVectorProperty>\n\n";
+      }
     }
   }
 
@@ -752,7 +961,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
       if (ends_with(ch.label, "_x_row") || ends_with(ch.label, "_y_row") || ends_with(ch.label, "_z_row") || ends_with(ch.label, "_time")) continue;
       if (ch.propertyName.find('.') != std::string::npos) continue; // already grouped by struct
       if (ch.isVector) {
-        sources_ << "                <Property name='" << ch.propertyName << "' function='vec3_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
+        sources_ << "                <Property name='" << ch.propertyName << "' function='vec" << ch.vecDim << "_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
       } else {
         sources_ << "                <Property name='" << ch.propertyName << "' function='scaleFactor_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
       }
@@ -922,26 +1131,42 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
       const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
       const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
       const double d2 = c->hasVectorRanges ? c->vecDefaults[2] : c->defaultValue;
-      const double vmin = c->hasVectorRanges ? c->vecMin : rangeMin_;
-      const double vmax = c->hasVectorRanges ? c->vecMax : rangeMax_;
-  sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
-               << "                                  command='SetTuple3Double'\n"
+      unsigned dim = c->vecDim;
+      std::string cmd;
+      if (c->isInteger) cmd = (dim == 1 ? "SetTuple1Int" : dim == 2 ? "SetTuple2Int" : "SetTuple3Int");
+      else cmd = (dim == 1 ? "SetTuple1Double" : dim == 2 ? "SetTuple2Double" : "SetTuple3Double");
+      auto writeDef = [&](unsigned count){
+        for (unsigned i=0;i<count;++i) {
+          if (dim == 1) sources_ << d0;
+          else if (dim == 2) sources_ << d0 << " " << d1;
+          else sources_ << d0 << " " << d1 << " " << d2;
+          if (i+1<count) sources_ << " ";
+        }
+      };
+      if (c->isInteger) {
+        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+               << "                                  command='" << cmd << "'\n"
                << "                                  use_index='1'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
-      if (initLen > 0) {
-        for (unsigned i=0;i<initLen;++i) {
-          sources_ << d0 << " " << d1 << " " << d2;
-          if (i+1<initLen) sources_ << " ";
-        }
       } else {
-        sources_ << d0 << " " << d1 << " " << d2;
+        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+               << "                                  command='" << cmd << "'\n"
+               << "                                  use_index='1'\n"
+               << "                                  clean_command='Clear'\n"
+               << "                                  initial_string='steerable_field_b_" << L << "'\n"
+               << "                                  default_values='";
       }
-  sources_ << "'\n"
-               << "                                  number_of_elements_per_command='3'\n"
-               << "                                  repeat_command='1'>\n"
-               << "            </DoubleVectorProperty>\n\n";
+      if (initLen > 0) { writeDef(initLen); } else { writeDef(1); }
+      sources_ << "'\n"
+               << "                                  number_of_elements_per_command='" << dim << "'\n"
+               << "                                  repeat_command='1'>\n";
+      if (c->isInteger) {
+        sources_ << "            </IntVectorProperty>\n\n";
+      } else {
+        sources_ << "            </DoubleVectorProperty>\n\n";
+      }
     } else {
       const double sdef = c->defaultValue;
       if (c->isInteger) {
@@ -1090,14 +1315,15 @@ bool ProxyWriter::loadConfigFromYamlFile(const std::string& path) {
 }
 
 bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
-  // Reset caches
+  // Reset caches to only track per-label ranges
   hasConfig_ = false;
+  // Drop support for type defaults and steer_params; keep only label ranges
   typeDefaultScalar_ = {};
   typeDefaultVectorComp_ = {};
   labelScalarCfg_.clear();
   labelVectorCfg_.clear();
 
-  enum class Mode { None, TypeDefaults, TypeVector, SteerParams, Label, Components };
+  enum class Mode { None, Ranges };
   Mode mode = Mode::None;
   std::string currentLabel;
 
@@ -1110,81 +1336,49 @@ bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
     int indent = leading_spaces(line);
     std::string t = trim(line);
 
-    if (indent == 0 && t == "type_defaults:") { mode = Mode::TypeDefaults; continue; }
-    if (indent == 0 && t == "steer_params:") { mode = Mode::SteerParams; currentLabel.clear(); continue; }
+    // Only consider the 'ranges:' section
+    if (indent == 0 && t == "ranges:") { mode = Mode::Ranges; currentLabel.clear(); continue; }
+    if (mode != Mode::Ranges) continue;
 
-    // type_defaults subtree
-    if (mode == Mode::TypeDefaults) {
-      if (indent == 2 && starts_with(t, "scalar:")) {
-        // inline map expected on same line
-        auto pos = t.find(':');
-        std::string rest = (pos != std::string::npos) ? trim(t.substr(pos+1)) : std::string();
-        bool has=false; double mn=0,mx=0,df=0;
-        parse_inline_map_into(rest, has, mn, mx, df);
-        if (has) { typeDefaultScalar_.has = true; typeDefaultScalar_.min = mn; typeDefaultScalar_.max = mx; typeDefaultScalar_.def = df; hasConfig_ = true; }
-        continue;
-      }
-      if (indent == 2 && starts_with(t, "vector:")) { mode = Mode::TypeVector; continue; }
-      // fallthrough for other lines
+    // simple ranges: label keys under 'ranges:' with min/max pairs
+    if (indent == 2) {
+      auto pos = t.find(':'); if (pos == std::string::npos) continue;
+      currentLabel = unquote(t.substr(0, pos));
+      continue;
     }
-    if (mode == Mode::TypeVector) {
-      if (indent == 4 && starts_with(t, "component_defaults:")) {
-        auto pos = t.find(':'); std::string rest = (pos != std::string::npos) ? trim(t.substr(pos+1)) : std::string();
-        bool has=false; double mn=0,mx=0,df=0;
-        parse_inline_map_into(rest, has, mn, mx, df);
-        if (has) { typeDefaultVectorComp_.has = true; typeDefaultVectorComp_.min = mn; typeDefaultVectorComp_.max = mx; typeDefaultVectorComp_.def = df; hasConfig_ = true; }
-        continue;
-      }
-      // If we dedent back to 0, we're out
-      if (indent == 0) { mode = Mode::None; }
-    }
+    if (indent == 4) {
+      // inside label map: accept one key per line or inline multiple keys
+      if (currentLabel.empty()) continue;
+      bool minPresent=false, maxPresent=false, defPresent=false;
+      double mn=0.0, mx=0.0, df=0.0, tmp=0.0;
+      // Inline parse (handles e.g. "{ min: -1, max: 1 }")
+      bool any=false; parse_inline_map_into("{" + t + "}", any, mn, mx, df);
+      // Explicit single-key parsing (overrides inline if specific)
+      if (starts_with(t, "min:")) { if (extract_number(t, "min", tmp)) { mn = tmp; minPresent = true; } }
+      if (starts_with(t, "max:")) { if (extract_number(t, "max", tmp)) { mx = tmp; maxPresent = true; } }
+      if (starts_with(t, "default:")) { if (extract_number(t, "default", tmp)) { df = tmp; defPresent = true; } }
+      // If inline map contained keys but not detected as single-key lines, infer presence
+      if (any && !minPresent && t.find("min:") != std::string::npos) minPresent = true;
+      if (any && !maxPresent && t.find("max:") != std::string::npos) maxPresent = true;
+      if (any && !defPresent && t.find("default:") != std::string::npos) defPresent = true;
 
-    // steer_params subtree
-    if (mode == Mode::SteerParams) {
-      if (indent == 2) {
-        // label: maybe inline map
-        auto pos = t.find(':'); if (pos == std::string::npos) continue;
-        std::string key = unquote(t.substr(0, pos));
-        std::string rest = trim(t.substr(pos+1));
-        currentLabel = key;
-        if (!rest.empty() && rest.find('{') != std::string::npos) {
-          bool has=false; double mn=0,mx=0,df=0;
-          parse_inline_map_into(rest, has, mn, mx, df);
-          if (has) {
-            // store both scalar and vector-uniform for this label; the include() / includeVector() will pick appropriately
-            ScalarCfg sc; sc.has = true; sc.min = mn; sc.max = mx; sc.def = df;
-            labelScalarCfg_[key] = sc;
+      if (minPresent || maxPresent || defPresent) {
+        ScalarCfg& sc = labelScalarCfg_[currentLabel]; sc.has = true;
+        if (minPresent) sc.min = mn;
+        if (maxPresent) sc.max = mx;
+        if (defPresent) sc.def = df;
 
-            VectorCfg vc; vc.has = true; vc.uniform = true; vc.umin = mn; vc.umax = mx; vc.udef = df;
-            labelVectorCfg_[key] = vc;
-            hasConfig_ = true;
-          }
-        }
-        continue;
+        VectorCfg& vc = labelVectorCfg_[currentLabel]; vc.has = true; vc.uniform = true;
+        if (minPresent) vc.umin = mn;
+        if (maxPresent) vc.umax = mx;
+        if (defPresent) vc.udef = df;
+
+        hasConfig_ = true;
       }
-      if (indent == 4 && t == "components:") {
-        // Expect following lines at indent 6: x:, y:, z:
-        // We'll keep mode and rely on indent checks below
-        continue;
-      }
-      if (indent == 6) {
-        auto pos = t.find(':'); if (pos == std::string::npos) continue;
-        std::string comp = unquote(t.substr(0, pos));
-        std::string rest = trim(t.substr(pos+1));
-        int idx = (comp == "x" ? 0 : comp == "y" ? 1 : comp == "z" ? 2 : -1);
-        if (idx >= 0) {
-          bool has=false; double mn=0,mx=0,df=0;
-          parse_inline_map_into(rest, has, mn, mx, df);
-          if (has) {
-            VectorCfg& vc = labelVectorCfg_[currentLabel];
-            vc.has = true; vc.uniform = false; // per-component
-            vc.comp[idx].has = true; vc.comp[idx].min = mn; vc.comp[idx].max = mx; vc.comp[idx].def = df;
-            hasConfig_ = true;
-          }
-        }
-        continue;
-      }
+      continue;
     }
+    // If we dedent back to 0, we're out of ranges
+    if (indent == 0) { mode = Mode::None; }
   }
 
   return hasConfig_;

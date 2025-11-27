@@ -82,29 +82,14 @@ public:
 
   // ---------------------------- Public API (decls) ------------------------------
 
-  // Initialize without external config
+  // Initialize WITHOUT explicit config: attempts to load default YAML (proxys_default_config.yaml or proxy_default_config.yaml).
+  // No ranges are emitted by default; ranges will only be included in the prototype if the config provides them.
   void initialize(std::filesystem::path xmlOutputPath,
-                  double rangeMin,
-                  double rangeMax,
                   std::string prototypeLabel);
 
-  // Initialize using a YAML file path (optional). If load fails, proceeds without config.
-  // Convenience overload: only path + yaml config path, use current defaults for range and prototype label
-  void initialize(std::filesystem::path xmlOutputPath,
-                  const std::string& configYamlPath);
-
-  // Initialize using a YAML file path (optional) with explicit range and label
+  // Initialize WITH explicit config YAML path. If load fails, proceeds without ranges.
   void initialize(std::filesystem::path xmlOutputPath,
                   const std::string& configYamlPath,
-                  double rangeMin,
-                  double rangeMax,
-                  std::string prototypeLabel);
-
-  // Initialize using an already-constructed Conduit node (deep-copied via YAML)
-  void initialize(std::filesystem::path xmlOutputPath,
-                  const conduit_cpp::Node configNode,
-                  double rangeMin,
-                  double rangeMax,
                   std::string prototypeLabel);
 
   // Register steerable controls
@@ -182,8 +167,9 @@ private:
 
   // ------------------------------ Data members ---------------------------------
   std::filesystem::path outPath_{};
-  double rangeMin_{-99};
-  double rangeMax_{99};
+  // Global range defaults are no longer used for emission; kept only for backward compatibility if needed.
+  double rangeMin_{0};
+  double rangeMax_{0};
   std::string prototypeLabel_{"SteerableParameters"};
 
   std::vector<Channel> channels_{};
@@ -206,23 +192,3 @@ private:
 // Provide template definitions (keep at global scope to avoid injecting std headers into namespace ippl)
 #include "ProxyWriter.hpp"
 
-
-
-
-
-
-
-  // // Register a LinMap group under a single base label. This creates:
-  // //  - three vector channels: base_x_row, base_y_row, base_z_row
-  // //  - one scalar channel: base_time (rendered as a text box)
-  // // Defaults and ranges are pulled from current config caches when present.
-  // void includeLinMap(const std::string& baseLabel, double timeDefault = 0.0);
-
-  // // Register LinMap with explicit per-component defaults for vectors and time.
-  // // This ensures the GUI shows the current simulation values initially.
-  // void includeLinMapWithDefaults(
-  //     const std::string& baseLabel,
-  //     const std::array<double,3>& xDefaults,
-  //     const std::array<double,3>& yDefaults,
-  //     const std::array<double,3>& zDefaults,
-  //     double timeDefault);
