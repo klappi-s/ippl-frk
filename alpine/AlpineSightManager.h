@@ -375,17 +375,17 @@ public:
                                     // ARRAYS
                                     // runtime_steer_registry->add("LinMap_array", LinMap_array);
                                     // runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
-                                    // runtime_steer_registry->add("array:double_array",     double_array);
-                                    // runtime_steer_registry->add("array:double_array_2",   double_array_2);
-                                    // runtime_steer_registry->add("array:int_array",        int_array);
-                                    // runtime_steer_registry->add("array:bool_array",       bool_array);
-                                    // runtime_steer_registry->add("array:button_array",     button_array);
-                                    runtime_steer_registry->add("array:double_vector_array1",  double_vector_array1);
-                                    runtime_steer_registry->add("array:double_vector_array2",  double_vector_array2);
-                                    runtime_steer_registry->add("array:double_vector_array3",  double_vector_array3);
-                                    runtime_steer_registry->add("array:int_vector_array1",     int_vector_array1);
-                                    runtime_steer_registry->add("array:int_vector_array2",     int_vector_array2);
-                                    runtime_steer_registry->add("array:int_vector_array3",     int_vector_array3);
+                                    // runtime_steer_registry->add("double_array",     double_array);
+                                    // runtime_steer_registry->add("double_array_2",   double_array_2);
+                                    // runtime_steer_registry->add("int_array",        int_array);
+                                    // runtime_steer_registry->add("bool_array",       bool_array);
+                                    // runtime_steer_registry->add("button_array",     button_array);
+                                    runtime_steer_registry->add("double_vector_array1",  double_vector_array1);
+                                    runtime_steer_registry->add("double_vector_array2",  double_vector_array2);
+                                    runtime_steer_registry->add("double_vector_array3",  double_vector_array3);
+                                    runtime_steer_registry->add("int_vector_array1",     int_vector_array1);
+                                    runtime_steer_registry->add("int_vector_array2",     int_vector_array2);
+                                    runtime_steer_registry->add("int_vector_array3",     int_vector_array3);
                                     // LinMaps (SoA) or other compound arrays can be added similarly when needed
                                 
 

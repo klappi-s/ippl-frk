@@ -20,31 +20,40 @@ namespace ippl {
     requires(!is_allowed_shared_ptr<typename std::decay<T>::type>::value)
     void VisRegistryRuntime::add(const std::string& label, T& value) {
         using DecayT = std::decay_t<T>;
-        Entry e; e.label = label;
+        // Canonicalize label for std::vector entries: ensure 'array:' prefix
+        std::string effectiveLabel = label;
+        if constexpr (is_std_vector_v<DecayT>) {
+            if (effectiveLabel.rfind("array:", 0) != 0) {
+                effectiveLabel = std::string("array:") + effectiveLabel;
+            }
+        }
+        Entry e; e.label = effectiveLabel;
+        // Convenience alias for closures
+        const std::string& L = e.label;
 
         // Visualization types (fields/particles)
         if constexpr (AllowedVisType_v<T>) {
-            e.do_init = [&value, label](InitVisitor_t& v) { v(label, value); };
-            e.do_exec = [&value, label](ExecuteVisitor_t& v) { v(label, value); };
+            e.do_init = [&value, L](InitVisitor_t& v) { v(L, value); };
+            e.do_exec = [&value, L](ExecuteVisitor_t& v) { v(L, value); };
             entries_.push_back(std::move(e));
-            index_exec_[label] = entries_.size() - 1;
+            index_exec_[L] = entries_.size() - 1;
             return;
         }
 
         // Standard steerables (scalars, vectors, buttons, enums, etc.)
         if constexpr (AllowedSteerType_v<T>) {
-            e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { v(label, value); };
-            e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v) { v(label, value); };
-            e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)   { v(label, value); };
+            e.do_steer_init  = [&value, L](SteerInitVisitor_t& v)    { v(L, value); };
+            e.do_steer_fwd   = [&value, L](SteerForwardVisitor_t& v) { v(L, value); };
+            e.do_steer_fetch = [&value, L](SteerFetchVisitor_t& v)   { v(L, value); };
             entries_.push_back(std::move(e));
             return; // no execute index for pure steerables
         }
 
         // Registered user struct (simple steering aggregation)
         if (ippl::detail::StructMeta<DecayT>::registered) {
-            e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<DecayT>::do_init(v, value, label); };
-            e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v) { ippl::detail::StructMeta<DecayT>::do_fwd(v, value, label); };
-            e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)   { ippl::detail::StructMeta<DecayT>::do_fetch(v, value, label); };
+            e.do_steer_init  = [&value, L](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<DecayT>::do_init(v, value, L); };
+            e.do_steer_fwd   = [&value, L](SteerForwardVisitor_t& v) { ippl::detail::StructMeta<DecayT>::do_fwd(v, value, L); };
+            e.do_steer_fetch = [&value, L](SteerFetchVisitor_t& v)   { ippl::detail::StructMeta<DecayT>::do_fetch(v, value, L); };
             entries_.push_back(std::move(e));
             return;
         }
@@ -55,10 +64,9 @@ namespace ippl {
             std::cout << "is_std_vector" << std::endl;
             if (ippl::detail::StructMeta<ElemT>::registered) {
                 std::cout << "is_registered ..." << std::endl;
-
-                e.do_steer_init  = [&value, label](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<ElemT>::do_init_vec(v, value, label); };
-                e.do_steer_fwd   = [&value, label](SteerForwardVisitor_t& v){ ippl::detail::StructMeta<ElemT>::do_fwd_vec(v, value, label); };
-                e.do_steer_fetch = [&value, label](SteerFetchVisitor_t& v)  { ippl::detail::StructMeta<ElemT>::do_fetch_vec(v, value, label); };
+                e.do_steer_init  = [&value, L](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<ElemT>::do_init_vec(v, value, L); };
+                e.do_steer_fwd   = [&value, L](SteerForwardVisitor_t& v){ ippl::detail::StructMeta<ElemT>::do_fwd_vec(v, value, L); };
+                e.do_steer_fetch = [&value, L](SteerFetchVisitor_t& v)  { ippl::detail::StructMeta<ElemT>::do_fetch_vec(v, value, L); };
                 entries_.push_back(std::move(e));
                 return;
             }

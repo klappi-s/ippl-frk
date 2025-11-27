@@ -231,35 +231,30 @@ if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
     except Exception as e:
         print_info_(f"Could not hide steerable_channel_0D_mesh: {e}")
 
-# if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
-#     # Hide legacy shared 1D mesh (if still present) and any per-array forward meshes
-#     try:
-#         legacy = paraview.simple.FindSource("steerable_channel_1D_mesh")
-#         if legacy is not None:
-#             print_info_("Hiding legacy steerable_channel_1D_mesh from GUI")
-#             paraview.simple.Delete(legacy)
-#     except Exception as e:
-#         print_info_(f"Could not hide legacy steerable_channel_1D_mesh: {e}")
+    # Additionally hide any per-array forward meshes inferred from steer_channel_names
+    try:
+        if parsed.steer_channel_names:
+            for sname in parsed.steer_channel_names:
+                # Deduce forward mesh registration name for std::vector-based steerables
+                # Labels are normalized on the C++ side to start with 'array:' for vectors.
+                reg_name = None
+                if isinstance(sname, str) and sname.startswith("array:"):
+                    # namespace prefix before first '.' (e.g., 'array:LinMaps.time' -> 'LinMaps')
+                    # ns = sname[6:]
+                    ns = sname
 
-#     # Dynamically hide all per-array meshes matching prefix pattern
-#     try:
-#         pm2 = servermanager.ProxyManager()
-#         sources_group = pm2.GetProxyGroup("sources")
-#         if sources_group is not None:
-#             for i in range(sources_group.GetNumberOfProxies()):
-#                 proxy = sources_group.GetProxy(i)
-#                 if not proxy: continue
-#                 pname = pm2.GetProxyName("sources", proxy)
-#                 if pname.startswith("steerable_channel_1D_mesh_"):
-#                     try:
-#                         src = paraview.simple.FindSource(pname)
-#                         if src is not None:
-#                             print_info_(f"Hiding per-array forward mesh '{pname}' from GUI")
-#                             paraview.simple.Delete(src)
-#                     except Exception as _e:
-#                         print_info_(f"Could not hide forward mesh '{pname}': {_e}")
-#     except Exception as e:
-#         print_info_(f"Error while scanning for per-array forward meshes: {e}")
+                    dot = ns.find('.')
+                    if dot != -1:
+                        ns = ns[:dot]
+                    reg_name = f"steerable_channel_1D_mesh_{ns}"
+
+                if reg_name:
+                    src_arr = paraview.simple.FindSource(reg_name)
+                    if src_arr is not None:
+                                print_info_(f"Hiding per-array forward mesh '{reg_name}' from GUI")
+                                paraview.simple.Delete(src_arr)
+    except Exception as e:
+        print_info_(f"Error while hiding inferred per-array forward meshes: {e}")
 
 
 
@@ -418,8 +413,8 @@ steer_channel_senders = {}
 steer_channels = {}
 
 if parsed.steer == "ON":
-#     if parsed.steer_channel_names :
-#         print_info_("===CREATING STEERABLES============="[0:40]+"|0")
+    if parsed.steer_channel_names :
+        print_info_("===CREATING STEERABLES============="[0:40]+"|0")
 
 #         # ------------------------------------------------------------------------------
 #         # forward / incoming steering channels
@@ -441,12 +436,8 @@ if parsed.steer == "ON":
 #             for sname in parsed.steer_channel_names:
 #                 print_info_(f"(hidden) {sname}")
 #                 steer_channel_readers[sname] = None
-#     else:
-#         print_info_("No channel names provided in parsed.channel_names.")
-
-    # EG: but not needed...
-    # steerable_field_in_magnetic = PVTrivialProducer(registrationName='steerable_channel_forward_magnetic')
-
+    else:
+        print_info_("No channel names provided in parsed.channel_names.")
 
 
     # ------------------------------------------------------------------------------
@@ -510,42 +501,6 @@ if parsed.steer == "ON":
             else:
                 print_info_(f"[DEBUG] Created struct array sender '{ns}'", level=2)
 
-
-  
-
-
-
-
-
-        # Classification + routing with debug output
-        # for sname in parsed.steer_channel_names:
-        #     matched = False
-        #     route_desc = "?"
-        #     # Hard-coded struct array routing for simpVec members
-        #     if sname.startswith('simpVec_') and 'simpVec' in struct_array_senders and struct_array_senders['simpVec'] is not None:
-        #         steer_channel_senders[sname] = struct_array_senders['simpVec']
-        #         matched = True
-        #         route_desc = "struct-array[simpVec]"
-        #     if not matched:
-        #         # Distinguish SimParams scalar struct members (simp.) vs LinMaps/others
-        #         if sname.startswith('simp.'):
-        #             steer_channel_senders[sname] = sender_all2 if sender_all2 is not None else sender_all
-        #             route_desc = "SimParams-scalar"
-        #         else:
-        #             steer_channel_senders[sname] = sender_all
-        #             route_desc = "generic"
-        #     print_info_(f"[DEBUG] Routed '{sname}' -> {route_desc}", level=2)
-        
-        # EG:
-        # steerable_parameters_magnetic =  CreateSteerableParameters(
-        #                             steerable_proxy_type_name           = "SteerableParameters_magnetic",
-        #                             steerable_proxy_registration_name   = "SteeringParameters_magnetic",
-        #                             result_mesh_name                    = "steerable_channel_backward_magnetic"
-        #                         )
-        # if steerable_parameters_magnetic is None:
-        #     print_info_("Error: SteerableParameters_magnetic proxy not found (CreateSteerableParameters returned None).")
-        # else:
-        #     print_info_("SteerableParameters_magnetic loaded successfully.")
     except Exception as e:
         print_info_(f"Exception while loading (backward) SteerableParameters: {e}")
     

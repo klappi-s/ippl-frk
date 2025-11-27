@@ -291,9 +291,11 @@ template<typename Elem>
 requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<Elem>& arr, const std::string& label )
 {
-    ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: std::vector<elem> size=" << arr.size() << endl;
-    // Derive namespace from label of the form "array:<ns>.<member>"
-    std::string ns = label;
+    // Normalize: ensure 'array:' prefix for any std::vector steerable labels (user shouldn't add it)
+    const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
+    ca_m << "::Initialize()::InitSteerableChannel(" << alabel << "):  | Type: std::vector<elem> size=" << arr.size() << endl;
+    // Derive namespace from canonical label of the form "array:<ns>.<member>"
+    std::string ns = alabel;
     if (ns.rfind("array:", 0) == 0) ns = ns.substr(6);
     auto dp = ns.find('.');
     if (dp != std::string::npos) ns = ns.substr(0, dp);
@@ -305,28 +307,28 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<E
         // Use the first element as a default if available; otherwise 0.
         Elem def{};
         if (!arr.empty()) def = arr.front();
-        proxyWriter.include(def, label);
+        proxyWriter.include(def, alabel);
     } else if constexpr (std::is_enum_v<std::decay_t<Elem>>) {
         // Enum arrays: register as enum with choices; default from first element if present
         int def = !arr.empty() ? static_cast<int>(arr.front()) : 0;
         // Prefer label-scoped choices, then type-scoped, else fallback to a checkbox
-        auto it = enumChoices_.find(label);
+        auto it = enumChoices_.find(alabel);
         if (it != enumChoices_.end()) {
-            proxyWriter.includeEnum(label, it->second, def);
+            proxyWriter.includeEnum(alabel, it->second, def);
         } else {
             auto itt = enumChoicesByType_.find(std::type_index(typeid(Elem)));
             if (itt != enumChoicesByType_.end()) {
-                proxyWriter.includeEnum(label, itt->second, def);
+                proxyWriter.includeEnum(alabel, itt->second, def);
             } else {
                 // No choices registered; use a checkbox as a minimal fallback UI
-                proxyWriter.includeBool(label, false);
+                proxyWriter.includeBool(alabel, false);
             }
         }
     } else if constexpr (std::is_same_v<std::decay_t<Elem>, bool>) {
         bool def = !arr.empty() ? static_cast<bool>(arr.front()) : false;
-        proxyWriter.includeBool(label, def);
+        proxyWriter.includeBool(alabel, def);
     } else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) {
-        proxyWriter.includeButton(label);
+        proxyWriter.includeButton(alabel);
     }
 
     // Inform proxy writer about desired initial size for this array namespace
@@ -334,7 +336,7 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<E
 
     // Inform Python pipeline about each label (still needed for backward mapping)
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
-    script_args.append().set_string(label);
+    script_args.append().set_string(alabel);
 
     // Create a dedicated forward mesh channel for this struct array prefix, once.
     // std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
@@ -356,21 +358,23 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<E
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label )
 {
-    ca_m << "::Initialize()::InitSteerableChannel(" << label << "):  | Type: std::vector<Vector<" << typeid(T).name() << "," << Dim_v << ">> size=" << arr.size() << endl;
-    // Derive namespace from label of the form "array:<ns>.<member>"
-    std::string ns = label;
+    // Normalize: ensure 'array:' prefix for any std::vector steerable labels
+    const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
+    ca_m << "::Initialize()::InitSteerableChannel(" << alabel << "):  | Type: std::vector<Vector<" << typeid(T).name() << "," << Dim_v << ">> size=" << arr.size() << endl;
+    // Derive namespace from canonical label of the form "array:<ns>.<member>"
+    std::string ns = alabel;
     if (ns.rfind("array:", 0) == 0) ns = ns.substr(6);
     auto dp = ns.find('.');
     if (dp != std::string::npos) ns = ns.substr(0, dp);
 
     // Register the vector array label with ProxyWriter (parsed as array namespace)
-    proxyWriter.includeVector<T, Dim_v>(label);
+    proxyWriter.includeVector<T, Dim_v>(alabel);
 
     // Inform proxy writer about desired initial size for this array namespace
     proxyWriter.setArrayInitialSize(ns, arr.size());
 
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
-    script_args.append().set_string(label);
+    script_args.append().set_string(alabel);
 
     // std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
     // auto steerable_channel = node[std::string("catalyst/channels/") + mesh_name];
@@ -565,9 +569,11 @@ template<typename Elem>
 requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::AddSteerableChannel( const std::vector<Elem>& arr, const std::string& label )
 {
-    ca_m << "::Execute()::AddSteerableChannel(vector<elem>) " << label << " | N=" << arr.size() << endl;
+    // Normalize: ensure 'array:' prefix so downstream pipeline/proxies match
+    const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
+    ca_m << "::Execute()::AddSteerableChannel(vector<elem>) " << alabel << " | N=" << arr.size() << endl;
     // Group by dynamic array prefix: everything before first underscore.
-    std::string prefix = label;
+    std::string prefix = alabel;
     auto us_pos = prefix.find('.');
     if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
     std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
@@ -590,7 +596,7 @@ void CatalystAdaptor::AddSteerableChannel( const std::vector<Elem>& arr, const s
         steerable_data["topologies/sMesh_topo/elements/connectivity"].set(conn);
     }
 
-    auto f = steerable_data[std::string("fields/steerable_field_f_") + label];
+    auto f = steerable_data[std::string("fields/steerable_field_f_") + alabel];
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
@@ -614,8 +620,10 @@ void CatalystAdaptor::AddSteerableChannel( const std::vector<Elem>& arr, const s
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::AddSteerableChannel( const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label )
 {
-    ca_m << "::Execute()::AddSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << label << " | N=" << arr.size() << endl;
-    std::string prefix = label;
+    // Normalize: ensure 'array:' prefix so downstream pipeline/proxies match
+    const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
+    ca_m << "::Execute()::AddSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << alabel << " | N=" << arr.size() << endl;
+    std::string prefix = alabel;
     auto us_pos = prefix.find('.');
     if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
     std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
@@ -638,7 +646,7 @@ void CatalystAdaptor::AddSteerableChannel( const std::vector<ippl::Vector<T, Dim
         steerable_data["topologies/sMesh_topo/elements/connectivity"].set(conn);
     }
 
-    auto f = steerable_data[std::string("fields/steerable_field_f_") + label];
+    auto f = steerable_data[std::string("fields/steerable_field_f_") + alabel];
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
@@ -810,11 +818,13 @@ template<typename Elem>
 requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const std::string& label)
 {
-    ca_m << "::Execute()::FetchSteerableChannel(vector<elem>) " << label << endl;
+    // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
+    const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
+    ca_m << "::Execute()::FetchSteerableChannel(vector<elem>) " << alabel << endl;
     const std::string path = std::string("catalyst/steerable_channel_backward_all/fields/") +
-                             "steerable_field_b_" + label + "/values";
+                             "steerable_field_b_" + alabel + "/values";
     if (!results.has_path(path)) {
-        ca_m << "  no backward array for '" << label << "'" << endl;
+        ca_m << "  no backward array for '" << alabel << "'" << endl;
         return;
     }
     conduit_cpp::Node vals = results[path];
@@ -863,10 +873,10 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const 
             success = true;
         }
     } catch (const std::exception &e) {
-        ca_m << "  [DEBUG] direct pointer read failed for '" << label << "': " << e.what() << endl;
+        ca_m << "  [DEBUG] direct pointer read failed for '" << alabel << "': " << e.what() << endl;
         success = false;
     } catch (...) {
-        ca_m << "  [DEBUG] direct pointer read failed for '" << label << "' (unknown error)" << endl;
+        ca_m << "  [DEBUG] direct pointer read failed for '" << alabel << "' (unknown error)" << endl;
         success = false;
     }
 
@@ -879,7 +889,7 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const 
             assign_from_double(i, results[child_path].to_double());
         } else {
             // If even this fails, leave default value and warn
-            ca_m << "  [WARN] Could not read element " << i << " of '" << label << "' via fallback" << endl;
+            ca_m << "  [WARN] Could not read element " << i << " of '" << alabel << "' via fallback" << endl;
         }
     }
 }
@@ -888,9 +898,11 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const 
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::Vector<T, Dim_v>>& out, const std::string& label)
 {
-    ca_m << "::Execute()::FetchSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << label << endl;
+    // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
+    const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
+    ca_m << "::Execute()::FetchSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << alabel << endl;
     const std::string root = std::string("catalyst/steerable_channel_backward_all/fields/") +
-                             "steerable_field_b_" + label + "/values";
+                             "steerable_field_b_" + alabel + "/values";
     
     
     
@@ -907,7 +919,7 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::Vector<T, Di
     // Prefer named component arrays x/y/z
     bool has_xyz = results.has_path(root + "/0") && results.has_path(root + "/1") && results.has_path(root + "/2");
     if (!has_xyz) {
-        ca_m << "  no backward vector array for '" << label << "' (expected 0/1/2)" << endl;
+        ca_m << "  no backward vector array for '" << alabel << "' (expected 0/1/2)" << endl;
         return;
     }
     conduit_cpp::Node xn = results[root + "/0"]; 
