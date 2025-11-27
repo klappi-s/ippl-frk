@@ -278,17 +278,10 @@ void ProxyWriter::appendSourceProxy(const Channel& ch) {
 void ProxyWriter::appendPrototype() {
   // Prototype for numeric steerables (scalars and vectors)
   misc_ << "      <Proxy name='SteerableNumericsPrototype' label=' Numerics-Collective-Prototype (do not cancel [x] or add new [+]!!)'> \n";
-  auto isLinMapComponent = [](const std::string& L){
-    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
-    // Support both legacy underscore and current dot-separated suffixes
-    return ends_with(L, "_x_row") || ends_with(L, "_y_row") || ends_with(L, "_z_row") || ends_with(L, "_time")
-        || ends_with(L, ".x_row") || ends_with(L, ".y_row") || ends_with(L, ".z_row") || ends_with(L, ".time");
-  };
   for (const auto& ch : channels_) {
     if (ch.isBool || ch.isButton || ch.isEnum) continue;
     if (ch.isArray) continue;
     if (ch.propertyName.find('.') != std::string::npos) continue;
-    if (isLinMapComponent(ch.label)) continue;
     if (ch.isVector) {
       const double d0 = ch.hasVectorRanges ? ch.vecDefaults[0] : ch.defaultValue;
       const double d1 = ch.hasVectorRanges ? ch.vecDefaults[1] : ch.defaultValue;
@@ -379,147 +372,7 @@ void ProxyWriter::appendPrototype() {
   }
   misc_ << "      </Proxy>\n";
 
-  // Prototype for LinMap steerables (group time + 3 vectors under a base label)
-  // Detect LinMap bases by presence of labels with suffixes _x_row, _y_row, _z_row (time optional)
-  auto findChannelByLabel = [this](const std::string& L) -> const Channel* {
-    for (const auto& ch : channels_) if (ch.label == L) return &ch; return nullptr;
-  };
-  std::map<std::string, std::array<bool,4>> lmPresence; // {base : [x,y,z,time]}
-  for (const auto& ch : channels_) {
-    const std::string& L = ch.label;
-    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
-    if (ends_with(L, "_x_row")) { lmPresence[L.substr(0, L.size()-6)][0] = true; }
-    else if (ends_with(L, "_y_row")) { lmPresence[L.substr(0, L.size()-6)][1] = true; }
-    else if (ends_with(L, "_z_row")) { lmPresence[L.substr(0, L.size()-6)][2] = true; }
-    else if (ends_with(L, "_time"))  { lmPresence[L.substr(0, L.size()-5)][3] = true; }
-  }
-  bool hasLinMap = false;
-  for (auto it = lmPresence.begin(); it != lmPresence.end(); ) {
-    const auto& flags = it->second;
-    if (!(flags[0] && flags[1] && flags[2])) it = lmPresence.erase(it); else { hasLinMap = true; ++it; }
-  }
-  if (hasLinMap) {
-    misc_ << "      <Proxy name='LinMapPrototype' label='LinMap Prototype'>\n";
-    for (const auto& kv : lmPresence) {
-      const std::string& base = kv.first;
-      // Time (optional scalar) - render as text box (no slider) and place on top
-      if (const Channel* ct = findChannelByLabel(base + "_time")) {
-        const double sdef = ct->defaultValue;
-        if (ct->scalarAsTextBox) {
-          misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "' panel_widget='DoubleLineEdit'>\n";
-          misc_ << "        </DoubleVectorProperty>\n";
-        } else {
-          misc_ << "        <DoubleVectorProperty name='scaleFactor_" << base << "_time' label='" << base << "_time' number_of_elements='1' default_values='" << sdef << "'>\n";
-          auto itS = labelScalarCfg_.find(ct->label);
-          if (itS != labelScalarCfg_.end() && itS->second.has) {
-            misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
-          }
-          misc_ << "        </DoubleVectorProperty>\n";
-        }
-      }
-      // X rowumn
-      if (const Channel* cx = findChannelByLabel(base + "_x_row")) {
-        const double d0 = cx->hasVectorRanges ? cx->vecDefaults[0] : cx->defaultValue;
-        const double d1 = cx->hasVectorRanges ? cx->vecDefaults[1] : cx->defaultValue;
-        const double d2 = cx->hasVectorRanges ? cx->vecDefaults[2] : cx->defaultValue;
-  // Prototype range only if per-label config exists
-        unsigned dim = cx->vecDim;
-        std::string def;
-        if (cx->isInteger) {
-          int i0 = static_cast<int>(d0);
-          int i1 = static_cast<int>(d1);
-          int i2 = static_cast<int>(d2);
-          if (dim == 1) def = std::to_string(i0);
-          else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
-          else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
-          misc_ << "        <IntVectorProperty name='vec" << dim << "_" << base << "_x_row' label='" << base << "_x_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
-          misc_ << "        </IntVectorProperty>\n";
-        } else {
-          if (dim == 1) def = std::to_string(d0);
-          else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
-          else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
-          misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << base << "_x_row' label='" << base << "_x_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
-          auto itVx = labelVectorCfg_.find(cx->label);
-          if (itVx != labelVectorCfg_.end() && itVx->second.has) {
-            double vmin = 0, vmax = 0; const VectorCfg& vc = itVx->second;
-            if (vc.uniform) { vmin = vc.umin; vmax = vc.umax; }
-            else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vmin = vc.comp[i].min; vmax = vc.comp[i].max; break; } }
-            misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-          }
-          misc_ << "        </DoubleVectorProperty>\n";
-        }
-        
-      }
-      // Y rowumn
-      if (const Channel* cy = findChannelByLabel(base + "_y_row")) {
-        const double d0 = cy->hasVectorRanges ? cy->vecDefaults[0] : cy->defaultValue;
-        const double d1 = cy->hasVectorRanges ? cy->vecDefaults[1] : cy->defaultValue;
-        const double d2 = cy->hasVectorRanges ? cy->vecDefaults[2] : cy->defaultValue;
-  // Prototype range only if per-label config exists
-        unsigned dim = cy->vecDim;
-        std::string def;
-        if (cy->isInteger) {
-          int i0 = static_cast<int>(d0);
-          int i1 = static_cast<int>(d1);
-          int i2 = static_cast<int>(d2);
-          if (dim == 1) def = std::to_string(i0);
-          else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
-          else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
-          misc_ << "        <IntVectorProperty name='vec" << dim << "_" << base << "_y_row' label='" << base << "_y_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
-          misc_ << "        </IntVectorProperty>\n";
-        } else {
-          if (dim == 1) def = std::to_string(d0);
-          else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
-          else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
-          misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << base << "_y_row' label='" << base << "_y_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
-          auto itVy = labelVectorCfg_.find(cy->label);
-          if (itVy != labelVectorCfg_.end() && itVy->second.has) {
-            double vmin = 0, vmax = 0; const VectorCfg& vc = itVy->second;
-            if (vc.uniform) { vmin = vc.umin; vmax = vc.umax; }
-            else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vmin = vc.comp[i].min; vmax = vc.comp[i].max; break; } }
-            misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-          }
-          misc_ << "        </DoubleVectorProperty>\n";
-        }
-        
-      }
-      // Z rowumn
-      if (const Channel* cz = findChannelByLabel(base + "_z_row")) {
-        const double d0 = cz->hasVectorRanges ? cz->vecDefaults[0] : cz->defaultValue;
-        const double d1 = cz->hasVectorRanges ? cz->vecDefaults[1] : cz->defaultValue;
-        const double d2 = cz->hasVectorRanges ? cz->vecDefaults[2] : cz->defaultValue;
-  // Prototype range only if per-label config exists
-        unsigned dim = cz->vecDim;
-        std::string def;
-        if (cz->isInteger) {
-          int i0 = static_cast<int>(d0);
-          int i1 = static_cast<int>(d1);
-          int i2 = static_cast<int>(d2);
-          if (dim == 1) def = std::to_string(i0);
-          else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
-          else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
-          misc_ << "        <IntVectorProperty name='vec" << dim << "_" << base << "_z_row' label='" << base << "_z_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
-          misc_ << "        </IntVectorProperty>\n";
-        } else {
-          if (dim == 1) def = std::to_string(d0);
-          else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
-          else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
-          misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << base << "_z_row' label='" << base << "_z_row' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
-          auto itVz = labelVectorCfg_.find(cz->label);
-          if (itVz != labelVectorCfg_.end() && itVz->second.has) {
-            double vmin = 0, vmax = 0; const VectorCfg& vc = itVz->second;
-            if (vc.uniform) { vmin = vc.umin; vmax = vc.umax; }
-            else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vmin = vc.comp[i].min; vmax = vc.comp[i].max; break; } }
-            misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
-          }
-          misc_ << "        </DoubleVectorProperty>\n";
-        }
-        
-      }
-      // (time already printed above)
-    }
-    misc_ << "      </Proxy>\n";
-  }
+  // (Removed legacy LinMap prototype; LinMap-like labels are now handled by generic prototypes.)
 
   // Prototypes per struct namespace for single (non-array) members (numeric / bool / enum / button)
   // For each ns where channels contain 'ns.member' and not isArray, create a prototype named '<ns>Prototype'
@@ -931,7 +784,6 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
   for (const auto& ch : channels_) {
     if (ch.isArray) continue;
     // include bool, enum, button and numerics in struct groups
-    if (ends_with(ch.label, "_x_row") || ends_with(ch.label, "_y_row") || ends_with(ch.label, "_z_row") || ends_with(ch.label, "_time")) continue; // skip LinMap parts
     if (ch.propertyName.find('.') != std::string::npos) {
       structMembers[ch.ns].push_back(&ch);
     } else {
@@ -958,7 +810,6 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
     sources_ << "                </Hints>\n";
     for (const auto& ch : channels_) {
       if (ch.isArray || ch.isBool || ch.isButton || ch.isEnum) continue;
-      if (ends_with(ch.label, "_x_row") || ends_with(ch.label, "_y_row") || ends_with(ch.label, "_z_row") || ends_with(ch.label, "_time")) continue;
       if (ch.propertyName.find('.') != std::string::npos) continue; // already grouped by struct
       if (ch.isVector) {
         sources_ << "                <Property name='" << ch.propertyName << "' function='vec" << ch.vecDim << "_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
@@ -969,41 +820,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
     sources_ << "            </PropertyGroup>\n\n";
   }
 
-  // LinMap Property Group: label 'static Maps type 1'
-  // Re-run presence detection
-  {
-    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
-    std::map<std::string, std::array<bool,4>> lmPresence;
-    for (const auto& ch : channels_) {
-      const std::string& L = ch.label;
-      if (ends_with(L, "_x_row")) { lmPresence[L.substr(0, L.size()-6)][0] = true; }
-      else if (ends_with(L, "_y_row")) { lmPresence[L.substr(0, L.size()-6)][1] = true; }
-      else if (ends_with(L, "_z_row")) { lmPresence[L.substr(0, L.size()-6)][2] = true; }
-      else if (ends_with(L, "_time"))  { lmPresence[L.substr(0, L.size()-5)][3] = true; }
-    }
-    // filter bases requiring x,y,z
-    std::vector<std::string> bases;
-    for (auto& kv : lmPresence) if (kv.second[0] && kv.second[1] && kv.second[2]) bases.push_back(kv.first);
-    if (!bases.empty()) {
-      sources_ << "            <PropertyGroup label='static Maps type 1' panel_widget='PropertyCollection'>\n";
-      sources_ << "                <Hints>\n";
-      sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='LinMapPrototype' />\n";
-      sources_ << "                </Hints>\n";
-      int mapIndex = 1;
-      for (const auto& base : bases) {
-        std::string mapPrefix = std::string("Map# ") + std::to_string(mapIndex) + " (" + base + ") - ";
-        // time first (if present)
-        bool hasTime = lmPresence[base][3];
-        if (hasTime) sources_ << "                <Property name='" << base << "_time' function='scaleFactor_" << base << "_time' label='" << mapPrefix << base << "_time'/>\n";
-        // then the three rows
-        sources_ << "                <Property name='" << base << "_x_row' function='vec3_" << base << "_x_row' label='" << mapPrefix << base << "_x_row'/>\n";
-        sources_ << "                <Property name='" << base << "_y_row' function='vec3_" << base << "_y_row' label='" << mapPrefix << base << "_y_row'/>\n";
-        sources_ << "                <Property name='" << base << "_z_row' function='vec3_" << base << "_z_row' label='" << mapPrefix << base << "_z_row'/>\n";
-        ++mapIndex;
-      }
-      sources_ << "            </PropertyGroup>\n\n";
-    }
-  }
+  // Removed legacy LinMap Property Group; generic grouping applies now.
 
   bool hasEnums = false;
   for (const auto& ch : channels_) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isEnum && !ch.enumEntries.empty()) { hasEnums = true; break; } }
