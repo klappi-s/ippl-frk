@@ -27,9 +27,9 @@ namespace ippl {
                 effectiveLabel = std::string("array:") + effectiveLabel;
             }
         }
-        Entry e; e.label = effectiveLabel;
-        // Convenience alias for closures
-        const std::string& L = e.label;
+    // Materialize label as an owned copy for safe capture in lambdas
+    std::string L = effectiveLabel;
+    Entry e; e.label = L;
 
         // Visualization types (fields/particles)
         if constexpr (AllowedVisType_v<T>) {

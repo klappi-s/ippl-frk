@@ -145,14 +145,19 @@ public:
      */
     bool for_one(const std::string label, ExecuteVisitor_t& v) const {
         auto it = index_exec_.find(label);
-        // if (it == index_exec_.end()){
-            // return false;
-        // // }
+            if (it == index_exec_.end()) {
+                // Label not found among executable entries; emit a small diagnostic once
+                std::cerr << "VisRegistryRuntime::for_one: label not found: '" << label << "'\n";
+                std::cerr << "  Available exec labels (" << index_exec_.size() << "):" << std::endl;
+                for (const auto& kv : index_exec_) std::cerr << " " << kv.first << std::endl;
+                std::cerr << std::endl;
+                return false;
+        }
         const auto& e = entries_[it->second];
+        if (!e.do_exec) {
+            // Entry exists but has no execute callback (e.g., steer-only)
 
-
-        // const auto& e = entries_[index_exec_[label]];
-        if (!e.do_exec){
+            std::cout << "for_one: No execute CallBack" << std::endl;
             return false;
         }
         e.do_exec(v);

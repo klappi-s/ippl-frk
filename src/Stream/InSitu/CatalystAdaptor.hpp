@@ -1113,18 +1113,25 @@ void CatalystAdaptor::InitializeRuntime(
 
 
 void CatalystAdaptor::Remember_now(const std::string label){
+    // Validate inputs and state
     auto it  = forceHostCopy.find(label);
     if (it == forceHostCopy.end()){
-            // return false;
-            throw IpplException("Stream::InSitu::CatalystAdaptor::Remember_now", "Label not present in Visualisation Registry: " + label);
+        throw IpplException("Stream::InSitu::CatalystAdaptor::Remember_now", "Label not present in Visualisation Registry: " + label);
     }
+    if (!visRegistry) {
+        throw IpplException("Stream::InSitu::CatalystAdaptor::Remember_now", "Visualization registry is not initialized (nullptr)");
+    }
+
+    // Temporarily force a host copy for this label during one execute
     bool tmp = it->second;
     forceHostCopy[label] = true;
-    
     ExecuteVisitor execV{*this};
-    visRegistry->for_one(label, execV); 
-
+    const bool ok = visRegistry->for_one(label, execV);
+    // Restore prior state regardless of outcome
     forceHostCopy[label] = tmp;
+    if (!ok) {
+        throw IpplException("Stream::InSitu::CatalystAdaptor::Remember_now", "Label not found in executable entries or has no execute callback: " + label);
+    }
 
 }
 

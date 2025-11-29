@@ -367,25 +367,29 @@ public:
                                     runtime_steer_registry->add("int_vector_single1",    int_vector_single1);
                                     runtime_steer_registry->add("int_vector_single2",    int_vector_single2);
                                     runtime_steer_registry->add("int_vector_single3",    int_vector_single3);
-                                    // runtime_steer_registry->add("SimParams_single", SimParams_single);
-                                    // runtime_steer_registry->add("LinMap_single_extra", LinMap_single);
-                                    // runtime_steer_registry->add("enum_single", enum_single);
+
+                                    runtime_steer_registry->add("enum_single", enum_single);
+                                    runtime_steer_registry->add("SimParams_single", SimParams_single);
+                                    runtime_steer_registry->add("LinMap_single_extra", LinMap_single);
 
 
                                     // ARRAYS
-                                    // runtime_steer_registry->add("LinMap_array", LinMap_array);
-                                    // runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
-                                    // runtime_steer_registry->add("double_array",     double_array);
-                                    // runtime_steer_registry->add("double_array_2",   double_array_2);
-                                    // runtime_steer_registry->add("int_array",        int_array);
-                                    // runtime_steer_registry->add("bool_array",       bool_array);
-                                    // runtime_steer_registry->add("button_array",     button_array);
+                                    runtime_steer_registry->add("double_array",     double_array);
+                                    runtime_steer_registry->add("double_array_2",   double_array_2);
+                                    runtime_steer_registry->add("int_array",        int_array);
+                                    runtime_steer_registry->add("bool_array",       bool_array);
+                                    runtime_steer_registry->add("button_array",     button_array);
                                     runtime_steer_registry->add("double_vector_array1",  double_vector_array1);
                                     runtime_steer_registry->add("double_vector_array2",  double_vector_array2);
                                     runtime_steer_registry->add("double_vector_array3",  double_vector_array3);
                                     runtime_steer_registry->add("int_vector_array1",     int_vector_array1);
                                     runtime_steer_registry->add("int_vector_array2",     int_vector_array2);
                                     runtime_steer_registry->add("int_vector_array3",     int_vector_array3);
+                                    
+                                    
+                                    runtime_steer_registry->add("enum_array", enum_array);
+                                    runtime_steer_registry->add("LinMap_array", LinMap_array);
+                                    runtime_steer_registry->add("SimpParams_arrays", SimpParams_arrays);
                                     // LinMaps (SoA) or other compound arrays can be added similarly when needed
                                 
 
@@ -397,10 +401,10 @@ public:
                 "density",          this->fcontainer_m->getRho()
             );
 
-                                        //   "ions",             *this->pcontainer_m
-                                        //   "ions",             this->pcontainer_m
-                                        // , "potential",        this->fcontainer_m->getRho()
-                                        // , "electrostatic",    this->fcontainer_m->getE()
+                                        // runtime_vis_registry->add("ions",             *this->pcontainer_m );
+                                        runtime_vis_registry->add("ions",             this->pcontainer_m );
+                                        runtime_vis_registry->add("potential",        this->fcontainer_m->getRho() );
+                                        runtime_vis_registry->add("electrostatic",    this->fcontainer_m->getE() );
                                         
             /* Register enum choices globally for experiment_enum */
             // Labels 'experiment' and 'enum_single' will now pick up choices from type-based registry
