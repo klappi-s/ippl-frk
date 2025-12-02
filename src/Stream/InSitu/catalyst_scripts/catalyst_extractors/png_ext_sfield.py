@@ -60,108 +60,25 @@ from paraview import print_info
 import argparse
 import math
 
+from paraview import print_info
+
+from paraview import servermanager as sm
+from vtkmodules.vtkParallelCore import vtkCommunicator, vtkMultiProcessController
 # ----------------------------------------------------------------
 # helpers used for adaptive visualization
 # ----------------------------------------------------------------
-
-def nice_bounds(vmin, vmax):
-    if vmin == vmax:
-        return vmin, vmax
-    order = math.floor(math.log10(max(abs(vmin), abs(vmax), 1e-10)))
-    scale = 10 ** order
-    nice_min = math.floor(vmin / scale) * scale
-    nice_max = math.ceil(vmax / scale) * scale
-    return nice_min, nice_max
-
-
-
-def nice_bounds_sym(vmin, vmax):
-    if vmin == vmax:
-        return vmin, vmax
-    order = math.floor(math.log10(max(abs(vmin), abs(vmax), 1e-10)))
-    scale = 10 ** order
-    nice_min = math.floor(vmin / scale) * scale
-    nice_max = math.ceil(vmax / scale) * scale
-    if -nice_min > nice_max:
-        nice_max = -nice_min
-    else: 
-        nice_min = -nice_max
-
-    return nice_min, nice_max
-
-
-# Helper function to set the camera
-def set_camera(view, position=None, focal_point=None, view_up=None, parallel_scale=None):
-    if position is not None:
-        view.CameraPosition = position
-    if focal_point is not None:
-        view.CameraFocalPoint = focal_point
-        #  maybe default better ....
-        view.CenterOfRotation = focal_point
-    if view_up is not None:
-        view.CameraViewUp = view_up
-    if parallel_scale is not None:
-        view.CameraParallelScale = parallel_scale
-
-# Helper function to auto-adjust the camera based on bounds
-def auto_camera_from_bounds(view, bounds):
-    center = [
-        0.5 * (bounds[0] + bounds[1]),
-        0.5 * (bounds[2] + bounds[3]),
-        0.5 * (bounds[4] + bounds[5])
-    ]
-    dx = bounds[1] - bounds[0]
-    dy = bounds[3] - bounds[2]
-    dz = bounds[5] - bounds[4]
-    diagonal = math.sqrt(dx * dx + dy * dy + dz * dz)
-
-    # # "Nice" rounding for center and diagonal
-    # def nice_value(val):
-    #     if val == 0:
-    #         return 0
-    #     order = math.floor(math.log10(abs(val)))
-    #     scale = 10 ** order
-    #     if val > 0:
-    #         return math.ceil(val / scale) * scale
-    #     else:
-    #         return math.floor(val / scale) * scale
-
-    # nice_center = [nice_value(c) for c in center]
-    # nice_diagonal = nice_value(diagonal)
-
-    nice_center = center
-    nice_diagonal = diagonal
-
-
-    # Camera position: look from a diagonal direction
-    direction = [1, 1.3, 0.6]
-    norm = math.sqrt(sum(d * d for d in direction))
-    direction = [d / norm for d in direction]
-    distance = 1.3 * nice_diagonal
-    cam_pos = [
-        nice_center[0] + direction[0] * distance,
-        nice_center[1] + direction[1] * distance,
-        nice_center[2] + direction[2] * distance
-    ]
-
-    set_camera(
-        view,
-        position=cam_pos,
-        focal_point=nice_center,
-        view_up=[0, 0, 1],  # z-up
-        parallel_scale=0.6 * nice_diagonal
-    )
-
-
-
-
+from catalystSubroutines import (
+    nice_bounds_sym,
+    auto_camera_from_bounds,
+    get_global_spatial_bounds,
+    get_global_range,
+    # print_info_,
+)
 
 def print_info_(s, level=0):
     global verbosity
     if verbosity>level:
         print_info(s)
-
-
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 paraview.simple._DisableFirstRenderCameraReset()
@@ -186,7 +103,94 @@ print_info_("_global__scope__()::" + parsed.channel_name)
 # ----------------------------------------------------------------
 # create a new 'XML Partitioned Dataset Reader'
 # ----------------------------------------------------------------
-ippl_scalar = PVTrivialProducer(registrationName = parsed.channel_name)
+cname = parsed.channel_name
+ippl_scalar_p = PVTrivialProducer(registrationName = cname)
+associate = "CELLS"
+
+dinfo = ippl_scalar_p.GetDataInformation()
+cinfo = dinfo.GetCellDataInformation()
+ghost_info = cinfo.GetArrayInformation("vtkGhostType") if cinfo else None
+
+
+ippl_scalar = ippl_scalar_p
+
+# # === FIX START ===
+# # Filter to strip ghost arrays so the "cut out" stripe is rendered.
+# # Check if the filter exists in your version, otherwise use RenameArrays.
+# try:
+#     ippl_scalar = RemoveGhostInformation(registrationName='NoGhosts', Input=ippl_scalar_p)
+# except NameError:
+#     # Fallback if RemoveGhostInformation is not loaded by default
+#     print("RemoveGhostInformation not found, passing original data.")
+#     ippl_scalar = ippl_scalar_p
+# # === FIX END ===
+
+# ippl_scalar = GhostCells(Input=ippl_scalar_p)
+
+
+
+# ippl_scalar_renamed = RenameArrays(registrationName='HideGhosts', Input=ippl_scalar_p)
+# # Map 'vtkGhostType' (the standard name) to 'IgnoredGhosts' (junk name)# Rename Cell Data ghost array (Most likely the one you need)
+# ippl_scalar_renamed.CellArrays = ['vtkGhostType', 'IgnoredGhosts']
+# ippl_scalar = ippl_scalar_renamed
+
+
+
+# ippl_scalar = Threshold(registrationName='Threshold1', Input=ippl_scalar_p)
+# ippl_scalar.Scalars = ['CELLS', 'vtkGhostType']
+
+
+# # create a new 'Threshold'
+# ippl_scalar_t = Threshold(registrationName='Threshold1', Input=ippl_scalar_p)
+# ippl_scalar_t.Scalars = ['CELLS', 'vtkGhostType']
+
+# ippl_scalar_t.ComponentMode = 'Any'
+# # 'Selected'
+# # 'Any'
+# # 'All'
+
+# ippl_scalar_t.ThresholdMethod = 'Below Lower Threshold'
+# # ippl_scalar_t.ThresholdMethod = 'Between'
+# # ippl_scalar_t.ThresholdMethod = 'Above Upper Threshold'
+
+
+# ippl_scalar_t.LowerThreshold = 0.1
+# # ippl_scalar_t.UpperThreshold = 0.0
+
+# ippl_scalar_t.AllScalars = 0
+
+
+# # Set the method to keep only cells where GhostType is exactly 0
+# ippl_scalar_t.ThresholdMethod = 'Between'
+# ippl_scalar_t.LowerThreshold = 0.0
+# ippl_scalar_t.UpperThreshold = 0.0
+
+# ippl_scalar_t.AllScalars = 1
+# """ ??? """
+
+
+
+# if ghost_info:
+#     ippl_scalar_t = Threshold(registrationName='KeepRealCells', Input=ippl_scalar_p)
+#     ippl_scalar_t.Scalars = ['CELLS', 'vtkGhostType']
+#     ippl_scalar_t.AllScalars = 0                 # only use selected array
+#     ippl_scalar_t.ComponentMode = 'Selected'     # scalar, single component
+#     ippl_scalar_t.SelectedComponent = 0
+#     ippl_scalar_t.ThresholdMethod = 'Between'
+#     ippl_scalar_t.LowerThreshold = 0.0
+#     ippl_scalar_t.UpperThreshold = 0.0
+#     ippl_scalar = ippl_scalar_t
+# else:
+#     print_info_("vtkGhostType not found; skipping ghost filtering", level=1)
+#     ippl_scalar = ippl_scalar_p
+
+
+# ippl_scalar = GhostCells(Input=ippl_scalar_p)
+
+
+
+# ippl_scalar = CellDatatoPointData(registrationName=cname[12:]+'_Cell2Point', Input=ippl_scalar_p)
+# associate = "POINTS"
 # ----------------------------------------------------------------
 # setup visualisation view for extraction pipeline in renderView1
 # ----------------------------------------------------------------
@@ -208,13 +212,17 @@ SetActiveView(renderView1)
 # ----------------------------------------------------------------
 # Initial adaptive Camera set
 # ----------------------------------------------------------------
-scalar_info = ippl_scalar.GetDataInformation()
-bounds = scalar_info.GetBounds()
-auto_camera_from_bounds(renderView1, bounds)
+scalar_info = ippl_scalar_p.GetDataInformation()
+
+# scalar_info = ippl_scalar.GetDataInformation()
+local_bounds = scalar_info.GetBounds()
+
+global_bounds = get_global_spatial_bounds(local_bounds)
+auto_camera_from_bounds(renderView1, global_bounds)
 # ----------------------------------------------------------------
 # choose Data to visualize and show in renderView1
 # ----------------------------------------------------------------
-ippl_scalarDisplay = Show(ippl_scalar, renderView1, 'UniformGridRepresentation')
+ippl_scalarDisplay = Show(ippl_scalar, renderView1)
 # ----------------------------------------------------------------
 # setup initial transfer function for colouring and opacity
 # ----------------------------------------------------------------
@@ -224,7 +232,10 @@ densityTF2D.Range = [-2.00, 2.00, 0.0, 1.0]
 densityTF2D.ScalarRangeInitialized = 1
 # get color transfer function/color map for label
 densityLUT = GetColorTransferFunction(label)
+
 densityLUT.TransferFunction2D = densityTF2D
+
+
 densityLUT.RGBPoints = [-2.00, 0.231373, 0.298039, 0.752941, 
                          0.00, 0.865003, 0.865003, 0.865003, 
                          2.00, 0.705882, 0.0156863, 0.14902]
@@ -259,10 +270,16 @@ ippl_scalarDisplay.Assembly = 'Hierarchy'
 ippl_scalarDisplay.ScaleFactor = 2.0
 ippl_scalarDisplay.GaussianRadius = 0.1
 ippl_scalarDisplay.DataAxesGrid = 'Grid Axes Representation'
+
+
 ippl_scalarDisplay.TransferFunction2D = densityTF2D
-ippl_scalarDisplay.ColorArrayName = ['CELLS', label]
-ippl_scalarDisplay.ColorArray2Name = ['CELLS', label]
-ippl_scalarDisplay.OpacityArrayName = ['CELLS', label]
+
+
+
+
+ippl_scalarDisplay.ColorArrayName = [associate, label]
+ippl_scalarDisplay.ColorArray2Name = [associate, label]
+ippl_scalarDisplay.OpacityArrayName = [associate, label]
 ippl_scalarDisplay.OpacityTransferFunction = 'Piecewise Function'
 ippl_scalarDisplay.ScalarOpacityUnitDistance = 4.00
 ippl_scalarDisplay.ScalarOpacityFunction = densityPWF
@@ -307,7 +324,7 @@ def catalyst_execute(info):
     # print_info_((parsed.channel_name+"::%s::catalyst_execute()")[0:50], __name__)
     print_info_("catalyst_execute()::"+parsed.channel_name)
 
-    global ippl_scalar
+    global ippl_scalar, ippl_scalar_p
     global densityLUT
     global densityPWF
 
@@ -316,24 +333,35 @@ def catalyst_execute(info):
     if info.cycle % 10 == 0:
     # if info.cycle % 10 + 1 == 10:
         # Get scalar field bounds
-        scalar_info = ippl_scalar.GetDataInformation()
-        bounds = scalar_info.GetBounds()
+        scalar_info = ippl_scalar_p.GetDataInformation()
+        local_bounds = scalar_info.GetBounds()
         cell_data_info = scalar_info.GetCellDataInformation()
         density_array_info = cell_data_info.GetArrayInformation(label)
         # print(bounds)
         # print(cell_data_info)
 
+
+        local_vmin, local_vmax = density_array_info.GetComponentRange(-1)
+
+        # --------------------------------------------------------
+        # 2. PERFORM MPI REDUCTION (New Logic)
+        # --------------------------------------------------------
+        global_bounds = get_global_spatial_bounds(local_bounds)
+        global_vmin, global_vmax = get_global_range(local_vmin, local_vmax)
+        # --------------------------------------------------------
+
+        nice_min, nice_max = nice_bounds_sym(global_vmin, global_vmax)
+
+
         # if for any reason this changes, but unlikely...
         # bounds for fields dont vary normally...
         # Adjust camera dynamically;
-        auto_camera_from_bounds(renderView1, bounds)
+        auto_camera_from_bounds(renderView1, global_bounds)
         # Adjust grid bounds dynamically, should happen automaically..
         # renderView1.AxesGrid.UseCustomBounds = 1
         # renderView1.AxesGrid.CustomBounds = bounds
         
 
-        vmin, vmax = density_array_info.GetComponentRange(-1)
-        nice_min, nice_max = nice_bounds_sym(vmin, vmax)
         # Update color and opacity transfer function
         # print_info_("==RESCALING COLOUR AND OPACITY BAR")
         densityLUT.RescaleTransferFunction(nice_min, nice_max)

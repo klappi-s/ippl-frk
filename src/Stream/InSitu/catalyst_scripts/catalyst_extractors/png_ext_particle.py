@@ -51,88 +51,22 @@ from paraview.simple import (
     SetActiveView,
     SetActiveSource
 )
+
+from paraview.simple import *
 from paraview import print_info
 import argparse
 import math
-
 # ----------------------------------------------------------------
 # helpers used for adaptive visualization
 # ----------------------------------------------------------------
-
-def nice_bounds(vmin, vmax):
-    # Avoid zero range
-    if vmin == vmax:
-        return vmin, vmax
-    # Find order of magnitude
-    order = math.floor(math.log10(max(abs(vmin), abs(vmax), 1e-10)))
-    scale = 10 ** order
-    # Round down min, up max
-    nice_min = math.floor(vmin / scale) * scale
-    nice_max = math.ceil(vmax / scale) * scale
-    return nice_min, nice_max
-
-
-
-def set_camera(view, position=None, focal_point=None, view_up=None, parallel_scale=None):
-    if position is not None:
-        view.CameraPosition = position
-    if focal_point is not None:
-        view.CameraFocalPoint = focal_point
-    if view_up is not None:
-        view.CameraViewUp = view_up
-    if parallel_scale is not None:
-        view.CameraParallelScale = parallel_scale
-
-
-def auto_camera_from_bounds(view, bounds):
-    # bounds: (xmin, xmax, ymin, ymax, zmin, zmax)
-            
-    # we forced nice bounds via cpp passing additional dummy field
-    # marking domain corners
-    # def nice_pair(vmin, vmax):
-    #     return nice_bounds(vmin, vmax)
-    # x0, x1 = nice_pair(bounds[0], bounds[1])
-    # y0, y1 = nice_pair(bounds[2], bounds[3])
-    # z0, z1 = nice_pair(bounds[4], bounds[5])
-
-
-    x0, x1, y0, y1, z0, z1 = bounds
-
-    # Center and diagonal based on nice bounds
-    center = [
-        0.5 * (x0 + x1),
-        0.5 * (y0 + y1),
-        0.5 * (z0 + z1)
-    ]
-    dx = x1 - x0
-    dy = y1 - y0
-    dz = z1 - z0
-    diagonal = math.sqrt(dx*dx + dy*dy + dz*dz)
-
-    # Camera direction: from a diagonal (e.g., [1,1,1])
-    direction = [1, 1.3, 0.6]
-    norm = math.sqrt(sum(d*d for d in direction))
-    direction = [d / norm for d in direction]
-
-    # Camera position: center + direction * (distance)
-    distance = 1.8 * diagonal  # adjust multiplier as needed
-    cam_pos = [
-        center[0] + direction[0] * distance,
-        center[1] + direction[1] * distance,
-        center[2] + direction[2] * distance
-    ]
-    set_camera(
-        view,
-        position=cam_pos,
-        focal_point=center,
-        view_up=[0, 0, 1],  # z-up
-        parallel_scale=0.6 * diagonal
-    )
-    view.AxesGrid.UseCustomBounds = 1
-    view.AxesGrid.CustomBounds = [x0, x1, y0, y1, z0, z1]
-
-
-
+from catalystSubroutines import (
+    nice_bounds,
+    auto_camera_from_bounds,
+    compute_bounding_box_scale,
+    get_global_spatial_bounds,
+    get_global_range,
+    # print_info_
+)
 def print_info_(s, level=0):
     global verbosity
     if verbosity>level:
@@ -160,7 +94,107 @@ print_info_("_global__scope__()::" + parsed.channel_name)
 # ----------------------------------------------------------------
 # create a new 'XML Partitioned Dataset Reader'
 # ----------------------------------------------------------------
-ippl_particle = PVTrivialProducer(registrationName = parsed.channel_name)
+
+# ----------------------------------------------------------------
+# 1. The Source
+# ----------------------------------------------------------------
+ippl_producer = PVTrivialProducer(registrationName=parsed.channel_name)
+
+# ----------------------------------------------------------------
+# 2. Extract ONLY the parts you want
+# ----------------------------------------------------------------
+# Use ExtractBlock to filter down to the specific conduit node/block
+# ippl_merged = MergeBlocks(registrationName='Merged_Subset', Input=ippl_producer)
+# ippl_merged.MergePartitionsOnly = 0
+
+# subset_extractor
+# subset_extractor = ExtractBlock(registrationName='Selected_Parts', Input=ippl_producer)
+# subset_extractor.Selectors = ['//block_main'] 
+# ippl_particle = MergeBlocks(registrationName='Merged_Subset', Input=subset_extractor)
+# ippl_particle.MergePartitionsOnly = 0
+
+
+
+
+
+
+
+
+cname = parsed.channel_name
+ippl_particle_p = PVTrivialProducer(registrationName = cname)
+
+data_info = ippl_particle_p.GetDataInformation()
+# print(data_info.__dict__.keys())
+# print(data_info.DataInformation)
+# print(data_info.Proxy)
+# print(data_info.Idx)
+p_info = data_info.GetPointDataInformation()
+f_info = data_info.GetFieldDataInformation()
+# print(p_info)
+# print(f_info)
+
+
+# ippl_particle_e = ExtractBlock(
+#                 registrationName=f"{cname[15:]}_bunch_png_ext",
+#                 Input=ippl_particle_p,
+#                 Assembly = 'Hierarchy',
+#                 # Selectors=['//block_main']
+#                 Selectors=['//main']
+#                 # Selectors=['/Root/block_main']
+#                 # Selectors=['/Root/main']
+#             )
+# ippl_particle_e.UpdatePipeline()
+
+# ippl_particle_m = MergeBlocks(registrationName=cname[12:]+'_MergedBlocks',
+#                                  Input=ippl_particle_p)
+# ippl_particle_m.MergePartitionsOnly = 1
+
+
+# ippl_particle_m.UpdatePipeline()
+
+
+
+ippl_particle_bunch = ExtractBlock(
+                registrationName=f"{cname[15:]}_bunch_png_ext",
+                Input=ippl_particle_p,
+                Assembly = 'Hierarchy',
+                Selectors=['//block_main']
+                # Selectors=['//main']
+                # Selectors=['/Root/block_main']
+                # Selectors=['/Root/main']
+            )
+
+ippl_particle_box = ExtractBlock(
+                registrationName=f"{cname[15:]}_box_png_ext",
+                Input=ippl_particle_p,
+                Assembly = 'Hierarchy',
+                Selectors=['//block_help']
+                # Selectors=['//main']
+                # Selectors=['/Root/block_main']
+                # Selectors=['/Root/main']
+            )
+
+# ippl_particle_e.UpdatePipeline()
+
+
+# Apply Threshold on 'velocity' (Magnitude)
+# We set the range to essentially "All valid numbers"
+# ippl_particle_t = Threshold(registrationName='Filter_Particles', Input=ippl_particle_m)
+# ippl_particle_t.Scalars = ['POINTS', 'velocity']
+# ippl_particle_t.ThresholdMethod = 'Above Upper Threshold' # Or 'Between'
+# ippl_particle_t.UpperThreshold = -1.0 # Velocity magnitude is always >= 0, so this keeps everything valid
+# Note: In newer ParaView versions (5.10+), properties might be:
+# ippl_particle.ThresholdRange = [-1.0, 999999999.9]
+
+
+
+
+
+
+ippl_particle = ippl_particle_bunch
+
+
+
 # ----------------------------------------------------------------
 # setup visualisation view for extraction pipeline in renderview1
 # ----------------------------------------------------------------
@@ -188,8 +222,9 @@ SetActiveView(renderView1)
 # ----------------------------------------------------------------
 # Initial adaptive Camera set
 # ----------------------------------------------------------------
-particle_info = ippl_particle.GetDataInformation()
-bounds = particle_info.GetBounds()
+particle_info = ippl_particle_p.GetDataInformation()
+local_bounds = particle_info.GetBounds()
+bounds = get_global_spatial_bounds(local_bounds)
 # print(particle_info.__dict__.keys())
 # print(particle_info.Idx)
 # print(particle_info.Proxy)
@@ -201,6 +236,7 @@ auto_camera_from_bounds(renderView1, bounds)
 # choose Data to visualize and show in renderView1
 # ----------------------------------------------------------------
 ippl_particleDisplay = Show(ippl_particle, renderView1, 'UnstructuredGridRepresentation')
+# ippl_particleDisplay = Show(ippl_particle, renderView1, 'GeometryRepresentation')
 # ----------------------------------------------------------------
 # setup initial transfer function for colouring and opacity
 # ----------------------------------------------------------------
@@ -213,6 +249,7 @@ velocityLUT.RGBPoints = [0.050641224585373915, 0.231373, 0.298039, 0.752941,
 # ----------------------------------------------------------------
 # configure displayed data
 # ----------------------------------------------------------------
+# ippl_particleDisplay.Representation = 'Points'
 ippl_particleDisplay.Representation = 'Point Gaussian'
 ippl_particleDisplay.LookupTable = velocityLUT
 # point size ...
@@ -225,6 +262,26 @@ velocityLUTColorBar.Title = 'velocity'
 velocityLUTColorBar.ComponentTitle = 'Magnitude'
 velocityLUTColorBar.Visibility = 1
 ippl_particleDisplay.SetScalarBarVisibility(renderView1, True)
+
+# ----------------------------------------------------------------
+# visualize helper box as yellow outline
+# ----------------------------------------------------------------
+# ----------------------------------------------------------------
+# visualize helper box as yellow outline
+# ----------------------------------------------------------------
+ippl_particle_boxDisplay = Show(ippl_particle_box, renderView1, 'GeometryRepresentation')
+ippl_particle_boxDisplay.Representation = 'Outline'
+ippl_particle_boxDisplay.AmbientColor = [1.0, 1.0, 0.0]
+ippl_particle_boxDisplay.DiffuseColor = [1.0, 1.0, 0.0]
+ippl_particle_boxDisplay.LineWidth = 2.0
+ippl_particle_boxDisplay.Opacity = 0.1
+
+# Correct way to set Solid Color mode in ParaView Python
+# This tells ParaView "Don't use any array, just use DiffuseColor"
+ippl_particle_boxDisplay.ColorArrayName = ['POINTS', ''] 
+
+# Remove explicit LookupTable manipulation and Bar Visibility calls.
+# Since we set it to Solid Color above, ParaView automatically hides the bar.
 # --------------------------------------------------------------
 # setup extractors
 # --------------------------------------------------------------
@@ -263,24 +320,29 @@ def catalyst_execute(info):
     # print(info)
     # print(info.__dict__.keys())
 
+    ippl_particle.UpdatePipeline()
 
-    if info.cycle % 10 == 0:
+    if info.cycle % 1 == 0:
+        particle_info = ippl_particle_p.GetDataInformation()
 
-        particle_info = ippl_particle.GetDataInformation()
         point_data_info = particle_info.GetPointDataInformation()
+        # point_data_info = particle_info.GetFieldDataInformation()
+        # print(point_data_info)
 
         vel_array_info = point_data_info.GetArrayInformation('velocity')
         pos_array_info = point_data_info.GetArrayInformation('position')
 
         if vel_array_info:
-            vmin, vmax = vel_array_info.GetComponentRange(-1)
-            nice_min, nice_max = nice_bounds(vmin, vmax)
+            local_vmin, local_vmax = vel_array_info.GetComponentRange(-1)
+            gmin, gmax = get_global_range(local_vmin, local_vmax)
+            nice_min, nice_max = nice_bounds(gmin, gmax)
             vel_lut = GetColorTransferFunction('velocity')
             vel_lut.RescaleTransferFunction(nice_min, nice_max)
         else:
             print_info_("Velocity array not found!")
         if pos_array_info:
-            bounds = particle_info.GetBounds()
+            local_bounds = particle_info.GetBounds()
+            bounds = get_global_spatial_bounds(local_bounds)
             auto_camera_from_bounds(renderView1, bounds)
             # print(bounds)
 
@@ -293,10 +355,7 @@ def catalyst_execute(info):
             x0, x1 = nice_pair(bounds[0], bounds[1])
             y0, y1 = nice_pair(bounds[2], bounds[3])
             z0, z1 = nice_pair(bounds[4], bounds[5])
-            dx = x1 - x0
-            dy = y1 - y0
-            dz = z1 - z0
-            diagonal = math.sqrt(dx*dx + dy*dy + dz*dz)
+            diagonal = compute_bounding_box_scale(bounds)
             """ size """
             ippl_particleDisplay.GaussianRadius = diagonal/500
 

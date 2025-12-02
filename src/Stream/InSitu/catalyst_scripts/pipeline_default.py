@@ -166,6 +166,69 @@ def print_info_(s, level=0):
         print_info(s)
 
 
+
+
+
+#### disable automatic camera rest on 'Show'
+# paraview.simple._DisableFirstRenderCameraReset()
+
+# view = CreateRenderView()
+# view.UseColorPaletteForBackground = 0
+# view.Background = [1,1,1]
+
+
+
+# generalSettings = GetSettingsProxy('GeneralSettings')
+# iOSettings = GetSettingsProxy('IOSettings')
+# renderViewInteractionSettings = GetSettingsProxy('RenderViewInteractionSettings')
+# renderViewSettings = GetSettingsProxy('RenderViewSettings')
+# representedArrayListSettings = GetSettingsProxy('RepresentedArrayListSettings')
+colorPalette = GetSettingsProxy('ColorPalette')
+
+# print(colorPalette.__dict__)
+# {'Observed': None, 'ObserverTag': -1, '_Proxy__Properties': 
+# {'BackgroundColor': <weakref at 0x7f0972576b10; dead>, 
+#  'BackgroundColor2': <weakref at 0x7f0972576bb0; dead>, ''
+#  'BackgroundColorMode': <weakref at 0x7f0972577060; dead>, 
+#  'BorderColor': <weakref at 0x7f0972576c50; dead>, 
+#  'EdgeColor': <weakref at 0x7f0972576cf0; dead>, 
+#  'ForegroundColor': <weakref at 0x7f0972576ac0; dead>, 
+#  'InteractiveSelectionColor': <weakref at 0x7f0972576d40; dead>, 
+#  'InteractiveWidgetColor': <weakref at 0x7f0972576de0; dead>, ''
+#  'LoadPalette': <weakref at 0x7f0972576ed0; dead>, 
+#  'SelectionColor': <weakref at 0x7f0972576e30; dead>, 
+#  'SurfaceColor': <weakref at 0x7f0972576ca0; dead>, 
+#  'TextAnnotationColor': <weakref at 0x7f0972576f70; dead>, 
+#  'WidgetColor': <weakref at 0x7f0972577010; dead>}, 
+
+
+
+
+# also changes colour of rendered texts... ...
+# LoadPalette(paletteName='WhiteBackground')
+colorPalette.BackgroundColorMode = 'Gradient'
+
+# colorPalette.Background = [0.0, 0.8, 1.0]
+# colorPalette.Background = [0.3333333333333333, 1.0, 1.0]
+colorPalette.Background = [0.0, 0.0, 0.0]
+
+
+colorPalette.Background2 = [0.9, 0.9, 0.9]
+# colorPalette.Background2 = [0.97, 0.97, 0.97]
+
+# # Properties modified on colorPalette
+colorPalette.Foreground = [0.8, 0.0, 0.0]
+colorPalette.Edges = [1.0, 0.0, 0.0]
+colorPalette.Surface = [1.0, 0.0, 0.0]
+
+
+# # 1. Set default representation to "Points"
+# renderViewSettings.DefaultRepresentation = 'Points'
+# colorPalette.Surface = [1.0, 0.0, 0.0]  # [R, G, B] for Red
+# renderViewSettings.DefaultPointSize = 10
+# renderViewSettings.DefaultRenderPointsAsSpheres = 1  # 1 means True
+
+
 # ----------------------------------------------------------------
 # Parse arguments received via conduit node
 # ----------------------------------------------------------------
@@ -491,7 +554,7 @@ if parsed.steer == "ON":
         for ns in sorted(detected_namespaces):
             sender = CreateSteerableParameters(
                 steerable_proxy_type_name         = f"SteerableParameters_{ns}",
-                steerable_proxy_registration_name = f"Steering{ns}",
+                steerable_proxy_registration_name = f"Steering_{ns}",
                 result_mesh_name                  = "steerable_channel_backward_all"
             )
             struct_array_senders[ns] = sender

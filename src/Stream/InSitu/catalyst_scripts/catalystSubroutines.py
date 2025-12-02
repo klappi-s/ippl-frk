@@ -11,6 +11,15 @@ scripts in this package.
 from paraview import servermanager
 from paraview.simple import CreateExtractor
 import sys
+import math
+from vtkmodules.vtkParallelCore import vtkCommunicator, vtkMultiProcessController
+
+
+
+from paraview import print_info
+
+
+
 # create extractor (PD=partitioned dataset...)
 def create_VTPD_extractor(name, object, fr = 10):
 
@@ -21,6 +30,117 @@ def create_VTPD_extractor(name, object, fr = 10):
     vTPD.Writer.FileName = 'ippl_'+name+'_{timestep:06d}.vtpd'
     return vTPD
     
+
+# --- Common visualization helpers (shared by PNG extractor scripts) ---
+
+def nice_bounds(vmin, vmax):
+    """Return 'nice' min/max covering [vmin, vmax]."""
+    if vmin == vmax:
+        return vmin, vmax
+    order = math.floor(math.log10(max(abs(vmin), abs(vmax), 1e-10)))
+    scale = 10 ** order
+    nice_min = math.floor(vmin / scale) * scale
+    nice_max = math.ceil(vmax / scale) * scale
+    return nice_min, nice_max
+
+
+def nice_bounds_sym(vmin, vmax):
+    """Symmetric 'nice' range around zero that covers [vmin, vmax]."""
+    if vmin == vmax:
+        return vmin, vmax
+    order = math.floor(math.log10(max(abs(vmin), abs(vmax), 1e-10)))
+    scale = 10 ** order
+    nice_min = math.floor(vmin / scale) * scale
+    nice_max = math.ceil(vmax / scale) * scale
+    if -nice_min > nice_max:
+        nice_max = -nice_min
+    else:
+        nice_min = -nice_max
+    return nice_min, nice_max
+
+
+def set_camera(view, position=None, focal_point=None, view_up=None, parallel_scale=None):
+    """Convenience to set camera properties if provided."""
+    if position is not None:
+        view.CameraPosition = position
+    if focal_point is not None:
+        view.CameraFocalPoint = focal_point
+        # Keep rotation centered on focal point
+        try:
+            view.CenterOfRotation = focal_point
+        except Exception:
+            pass
+    if view_up is not None:
+        view.CameraViewUp = view_up
+    if parallel_scale is not None:
+        view.CameraParallelScale = parallel_scale
+
+
+def auto_camera_from_bounds(view, bounds, distance_factor=1.5, parallel_factor=0.6):
+    """Position camera looking from a diagonal direction based on bounds."""
+    cx = 0.5 * (bounds[0] + bounds[1])
+    cy = 0.5 * (bounds[2] + bounds[3])
+    cz = 0.5 * (bounds[4] + bounds[5])
+    dx = bounds[1] - bounds[0]
+    dy = bounds[3] - bounds[2]
+    dz = bounds[5] - bounds[4]
+    diagonal = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+    direction = [1.0, 1.3, 0.6]
+    norm = math.sqrt(sum(d*d for d in direction))
+    direction = [d / norm for d in direction]
+    distance = distance_factor * diagonal
+    cam_pos = [
+        cx + direction[0] * distance,
+        cy + direction[1] * distance,
+        cz + direction[2] * distance,
+    ]
+    set_camera(
+        view,
+        position=cam_pos,
+        focal_point=[cx, cy, cz],
+        view_up=[0, 0, 1],
+        parallel_scale=parallel_factor * diagonal,
+    )
+
+
+def compute_bounding_box_scale(bounds):
+    """Return diagonal length of the bounds box."""
+    dx = bounds[1] - bounds[0]
+    dy = bounds[3] - bounds[2]
+    dz = bounds[5] - bounds[4]
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+
+
+def get_global_range(local_min, local_max):
+    """Reduce local min/max across ranks; falls back to local in serial."""
+    controller = vtkMultiProcessController.GetGlobalController()
+    if not controller or controller.GetNumberOfProcesses() == 1:
+        return local_min, local_max
+
+    g_min = [0.0]
+    g_max = [0.0]
+    controller.AllReduce([local_min], g_min, 1, vtkCommunicator.MIN_OP)
+    controller.AllReduce([local_max], g_max, 1, vtkCommunicator.MAX_OP)
+    return g_min[0], g_max[0]
+
+
+def get_global_spatial_bounds(local_bounds):
+    """Reduce [xmin, xmax, ymin, ymax, zmin, zmax] across ranks; serial-safe."""
+    controller = vtkMultiProcessController.GetGlobalController()
+    if not controller or controller.GetNumberOfProcesses() == 1:
+        return local_bounds
+
+    gb = [0.0] * 6
+    for i in (0, 2, 4):
+        tmp = [0.0]
+        controller.AllReduce([local_bounds[i]], tmp, 1, vtkCommunicator.MIN_OP)
+        gb[i] = tmp[0]
+    for i in (1, 3, 5):
+        tmp = [0.0]
+        controller.AllReduce([local_bounds[i]], tmp, 1, vtkCommunicator.MAX_OP)
+        gb[i] = tmp[0]
+    return tuple(gb)
 
 
 
@@ -83,22 +203,22 @@ def print_proxy_overview():
 
 
 
-def load_state_module(module_path_or_name: str):
-    """Import a Catalyst state module and auto-register its PNG extractors."""
-    import importlib, sys, os
-    mod = None
-    try:
-        if module_path_or_name.endswith('.py') and os.path.exists(module_path_or_name):
-            # import by path
-            dirname = os.path.dirname(module_path_or_name)
-            fname = os.path.splitext(os.path.basename(module_path_or_name))[0]
-            if dirname not in sys.path:
-                sys.path.append(dirname)
-            mod = importlib.import_module(fname)
-        else:
-            mod = importlib.import_module(module_path_or_name)
-        register_png_extractor(mod)
-        return mod
-    except Exception as e:
-        _log(f"[REGISTER][ERROR] Failed to load/register module '{module_path_or_name}': {e}", "ERROR")
-        return None
+# def load_state_module(module_path_or_name: str):
+#     """Import a Catalyst state module and auto-register its PNG extractors."""
+#     import importlib, sys, os
+#     mod = None
+#     try:
+#         if module_path_or_name.endswith('.py') and os.path.exists(module_path_or_name):
+#             # import by path
+#             dirname = os.path.dirname(module_path_or_name)
+#             fname = os.path.splitext(os.path.basename(module_path_or_name))[0]
+#             if dirname not in sys.path:
+#                 sys.path.append(dirname)
+#             mod = importlib.import_module(fname)
+#         else:
+#             mod = importlib.import_module(module_path_or_name)
+#         register_png_extractor(mod)
+#         return mod
+#     except Exception as e:
+#         _log(f"[REGISTER][ERROR] Failed to load/register module '{module_path_or_name}': {e}", "ERROR")
+#         return None

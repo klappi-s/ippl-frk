@@ -59,99 +59,23 @@ from paraview.simple import (
 from paraview import print_info
 import argparse
 import math
-
 # ----------------------------------------------------------------
 # helpers used for adaptive visualization
 # ----------------------------------------------------------------
-
-def nice_bounds(vmin, vmax):
-    if vmin == vmax:
-        return vmin, vmax
-    order = math.floor(math.log10(max(abs(vmin), abs(vmax), 1e-10)))
-    scale = 10 ** order
-    nice_min = math.floor(vmin / scale) * scale
-    nice_max = math.ceil(vmax / scale) * scale
-    return nice_min, nice_max
-
-def compute_bounding_box_scale(bounds):
-    dx = bounds[1] - bounds[0]
-    dy = bounds[3] - bounds[2]
-    dz = bounds[5] - bounds[4]
-    diagonal = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return diagonal
-
-# Helper function to set the camera
-def set_camera(view, position=None, focal_point=None, view_up=None, parallel_scale=None):
-    if position is not None:
-        view.CameraPosition = position
-    if focal_point is not None:
-        view.CameraFocalPoint = focal_point
-        renderView1.CameraFocalDisk = 1.0
-        #  maybe default better ....
-        view.CenterOfRotation = focal_point
-    if view_up is not None:
-        view.CameraViewUp = view_up
-    if parallel_scale is not None:
-        view.CameraParallelScale = parallel_scale
-
-# Helper function to auto-adjust the camera based on bounds
-def auto_camera_from_bounds(view, bounds):
-    center = [
-        0.5 * (bounds[0] + bounds[1]),
-        0.5 * (bounds[2] + bounds[3]),
-        0.5 * (bounds[4] + bounds[5])
-    ]
-    dx = bounds[1] - bounds[0]
-    dy = bounds[3] - bounds[2]
-    dz = bounds[5] - bounds[4]
-    diagonal = math.sqrt(dx * dx + dy * dy + dz * dz)
-
-    # # "Nice" rounding for center and diagonal
-    # def nice_value(val):
-    #     if val == 0:
-    #         return 0
-    #     order = math.floor(math.log10(abs(val)))
-    #     scale = 10 ** order
-    #     if val > 0:
-    #         return math.ceil(val / scale) * scale
-    #     else:
-    #         return math.floor(val / scale) * scale
-
-    # nice_center = [nice_value(c) for c in center]
-    # nice_diagonal = nice_value(diagonal)
-
-    nice_center = center
-    nice_diagonal = diagonal
-
-    # Camera position: look from a diagonal direction
-    direction = [1, 1.3, 0.6]
-    norm = math.sqrt(sum(d * d for d in direction))
-    direction = [d / norm for d in direction]
-    distance = 1.3 * nice_diagonal
-    cam_pos = [
-        nice_center[0] + direction[0] * distance,
-        nice_center[1] + direction[1] * distance,
-        nice_center[2] + direction[2] * distance
-    ]
-
-    set_camera(
-        view,
-        position=cam_pos,
-        focal_point=nice_center,
-        view_up=[0, 0, 1],  # z-up
-        parallel_scale=0.6 * nice_diagonal
-    )
-
-
-
+from catalystSubroutines import (
+    nice_bounds,
+    set_camera,
+    auto_camera_from_bounds,
+    compute_bounding_box_scale,
+    get_global_range,
+    get_global_spatial_bounds,
+    # print_info_
+)
 
 def print_info_(s, level=0):
     global verbosity
     if verbosity>level:
         print_info(s)
-
-
-
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 paraview.simple._DisableFirstRenderCameraReset()
@@ -198,10 +122,11 @@ SetActiveView(renderView1)
 # Initial adaptive Camera set
 # ----------------------------------------------------------------
 ippl_vector_info = ippl_vector_field.GetDataInformation()
-bounds = ippl_vector_info.GetBounds()
-auto_camera_from_bounds(renderView1, bounds)
-# needed for glyph scale ...
-diag = compute_bounding_box_scale(bounds)
+local_bounds = ippl_vector_info.GetBounds()
+global_bounds = get_global_spatial_bounds(local_bounds)
+auto_camera_from_bounds(renderView1, global_bounds)
+# needed for glyph scale ... use global diagonal
+diag = compute_bounding_box_scale(global_bounds)
 # ----------------------------------------------------------------
 # setup the data processing pipelines, create filter for 
 # Vector Field from Vector data
@@ -305,18 +230,20 @@ def catalyst_execute(info):
 
     if info.cycle % 10 == 0:
         vector_info = ippl_vector_field.GetDataInformation()
-        bounds = vector_info.GetBounds()
+        local_bounds = vector_info.GetBounds()
+        global_bounds = get_global_spatial_bounds(local_bounds)
         cell_data_info = vector_info.GetCellDataInformation()
         fieldStrength_array_info = cell_data_info.GetArrayInformation(label)
 
 
-        # bounds for fields dont vary normally,butmight ...-> Adjust camera dynamically;
-        auto_camera_from_bounds(renderView1, bounds)
+        # Adjust camera dynamically using global bounds
+        auto_camera_from_bounds(renderView1, global_bounds)
         # Adjust grid bounds dynamically, should happen automaically even if there are changes??...
         # renderView1.AxesGrid.UseCustomBounds = 1
         # renderView1.AxesGrid.CustomBounds = bounds
-        vmin, vmax = fieldStrength_array_info.GetComponentRange(-1) # magnitude ...
-        nice_min, nice_max = nice_bounds(vmin, vmax)
+        local_vmin, local_vmax = fieldStrength_array_info.GetComponentRange(-1) # magnitude ...
+        gmin, gmax = get_global_range(local_vmin, local_vmax)
+        nice_min, nice_max = nice_bounds(gmin, gmax)
         # # Update color and opacity transfer function
         fieldStrengthLUT.RescaleTransferFunction(nice_min, nice_max)
         fieldStrengthPWF.RescaleTransferFunction(nice_min, nice_max)
