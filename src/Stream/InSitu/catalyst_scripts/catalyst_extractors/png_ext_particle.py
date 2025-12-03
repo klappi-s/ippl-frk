@@ -65,6 +65,7 @@ from catalystSubroutines import (
     compute_bounding_box_scale,
     get_global_spatial_bounds,
     get_global_range,
+    hide_source_from_gui
     # print_info_
 )
 def print_info_(s, level=0):
@@ -154,6 +155,8 @@ f_info = data_info.GetFieldDataInformation()
 
 
 
+# fetch proxy from live script instead of creating its own...?...
+# might break the pipeline when selected so lets leave it like this ... 
 ippl_particle_bunch = ExtractBlock(
                 registrationName=f"{cname[15:]}_bunch_png_ext",
                 Input=ippl_particle_p,
@@ -163,6 +166,7 @@ ippl_particle_bunch = ExtractBlock(
                 # Selectors=['/Root/block_main']
                 # Selectors=['/Root/main']
             )
+hide_source_from_gui(ippl_particle_bunch)
 
 ippl_particle_box = ExtractBlock(
                 registrationName=f"{cname[15:]}_box_png_ext",
@@ -173,6 +177,7 @@ ippl_particle_box = ExtractBlock(
                 # Selectors=['/Root/block_main']
                 # Selectors=['/Root/main']
             )
+hide_source_from_gui(ippl_particle_box)
 
 # ippl_particle_e.UpdatePipeline()
 
@@ -198,6 +203,8 @@ ippl_particle = ippl_particle_bunch
 # ----------------------------------------------------------------
 # setup visualisation view for extraction pipeline in renderview1
 # ----------------------------------------------------------------
+view_name = f"View_{cname}"
+# renderView1 = CreateView('RenderView', registrationName=view_name)
 renderView1 = CreateView('RenderView')
 renderView1.ViewSize = [2000, 1500]
 renderView1.AxesGrid = 'GridAxes3DActor'
@@ -285,8 +292,8 @@ ippl_particle_boxDisplay.ColorArrayName = ['POINTS', '']
 # --------------------------------------------------------------
 # setup extractors
 # --------------------------------------------------------------
-pNG1 = CreateExtractor('PNG', renderView1, registrationName='PNG1')
-pNG1.Trigger = 'TimeStep'
+pNG1 = CreateExtractor('PNG', renderView1, registrationName='PNG_'+ cname)
+pNG1.Trigger = 'Time Step'
 pNG1.Writer.FileName = label+'_Particles_{timestep:06d}{camera}.png'
 pNG1.Writer.ImageResolution = [2000, 1500]
 pNG1.Writer.TransparentBackground = 0
@@ -297,9 +304,9 @@ SetActiveSource(pNG1)
 # ------------------------------------------------------------------------------
 from paraview import catalyst
 options = catalyst.Options()
-options.GlobalTrigger = 'TimeStep'
+options.GlobalTrigger = 'Time Step'
 options.EnableCatalystLive = 1
-options.CatalystLiveTrigger = 'TimeStep'
+options.CatalystLiveTrigger = 'Time Step'
 options.ExtractsOutputDirectory = 'data_png_extracts_' + exp_string
 # ------------------------------------------------------------------------------
 if __name__ == '__main__':
@@ -315,12 +322,23 @@ if __name__ == '__main__':
 # ------------------------------------------------------------------------------
 def catalyst_execute(info):
     print_info_("catalyst_execute()::"+parsed.channel_name)
+
+    global ippl_particle_bunch
+    global ippl_particle_box
     global ippl_particle
+    global ippl_particle_p
     global renderView1
+    global pNG1
+
+    ippl_particle_p.UpdatePipeline()
+    # ippl_particle_bunch
+    # ippl_particle_box
+    # ippl_particle
+
+    # SetActiveView(renderView1)
     # print(info)
     # print(info.__dict__.keys())
 
-    ippl_particle.UpdatePipeline()
 
     if info.cycle % 1 == 0:
         particle_info = ippl_particle_p.GetDataInformation()

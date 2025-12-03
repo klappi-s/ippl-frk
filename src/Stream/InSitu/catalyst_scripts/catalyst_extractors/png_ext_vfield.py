@@ -69,7 +69,7 @@ from catalystSubroutines import (
     compute_bounding_box_scale,
     get_global_range,
     get_global_spatial_bounds,
-    # print_info_
+    hide_source_from_gui 
 )
 
 def print_info_(s, level=0):
@@ -95,15 +95,19 @@ parsed = parser.parse_args(arg_list)
 label = parsed.label
 exp_string = parsed.experiment_name
 verbosity = parsed.verbosity
+cname  = parsed.channel_name
 print_info_("_global__scope__()::" + parsed.channel_name)
 # ----------------------------------------------------------------
 # create a new 'XML Partitioned Dataset Reader'
 # ----------------------------------------------------------------
 ippl_vector_field = PVTrivialProducer(registrationName = parsed.channel_name)
+hide_source_from_gui(ippl_vector_field)
 # ----------------------------------------------------------------
 # setup visualisation view for extraction pipeline in renderview1
 # ----------------------------------------------------------------
-renderView1 = CreateView('RenderView')
+view_name = f"View_{cname}"
+renderView1 = CreateView('RenderView', registrationName=view_name)
+# renderView1 = CreateView('RenderView')
 renderView1.ViewSize = [2000, 1500]
 renderView1.BackEnd = 'OSPRay raycaster'
 renderView1.StereoType = 'Crystal Eyes'
@@ -132,6 +136,7 @@ diag = compute_bounding_box_scale(global_bounds)
 # Vector Field from Vector data
 # ----------------------------------------------------------------
 glyph1 = Glyph(registrationName='Glyph1', Input=ippl_vector_field, GlyphType='Arrow')
+hide_source_from_gui(glyph1)
 glyph1.OrientationArray = ['CELLS', label]
 glyph1.GlyphTransform = 'Transform2'
 glyph1.ScaleFactor = diag/30
@@ -192,12 +197,12 @@ glyph1Display.SetScalarBarVisibility(renderView1, True)
 # # ------------------------------------------------------------
 # setup extractors
 # --------------------------------------------------------------
-pNG3 = CreateExtractor('PNG', renderView1, registrationName='PNG3')
-pNG3.Trigger = 'Time Step'
-pNG3.Trigger.Frequency = 1
-pNG3.Writer.FileName = 'VectorField_{timestep:06d}{camera}.png'
-pNG3.Writer.ImageResolution = [1247, 1176]
-pNG3.Writer.Format = 'PNG'
+pNG1 = CreateExtractor('PNG', renderView1, registrationName='pNG_'+cname)
+pNG1.Trigger = 'Time Step'
+pNG1.Trigger.Frequency = 1
+pNG1.Writer.FileName = 'VectorField_{timestep:06d}{camera}.png'
+pNG1.Writer.ImageResolution = [1247, 1176]
+pNG1.Writer.Format = 'PNG'
 SetActiveSource(glyph1)
 # ----------------------------------------------------------------
 # Catalyst options
@@ -214,18 +219,22 @@ if __name__ == '__main__':
     # Code for non in-situ environments; if executing in post-processing
     # i.e. non-Catalyst mode, let's generate extracts using Catalyst options
     SaveExtractsUsingCatalystOptions(options)
-
-
 # ------------------------------------------------------------------------------
 def catalyst_execute(info):
     print_info_("catalyst_execute()::"+parsed.channel_name)
 
-
+    global glyph1
     global ippl_vector_field
-    global renderView1
     global fieldStrengthLUT
     global fieldStrengthPWF
+    global renderView1
+    global pNG1
 
+    ippl_vector_field.UpdatePipeline()
+    # glyph1.UpdatePipeline()
+    
+    # SetActiveView(renderView1)
+    # pNG1.UpdateVTKObjects()
 
 
     if info.cycle % 10 == 0:

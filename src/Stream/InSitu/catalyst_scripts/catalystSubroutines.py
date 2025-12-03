@@ -13,12 +13,34 @@ from paraview.simple import CreateExtractor
 import sys
 import math
 from vtkmodules.vtkParallelCore import vtkCommunicator, vtkMultiProcessController
+import array
 
 
 
 from paraview import print_info
 
+def hide_source_from_gui(proxy):
+    """
+    Removes the proxy from the 'sources' registration group.
+    It remains valid in the script but disappears from the GUI Pipeline Browser.
+    """
+    # pxm = servermanager.ProxyManager()
+    # # Find the name this proxy is registered under
+    # name = pxm.GetProxyName("sources", proxy.SMProxy)
+    # if name:
+    #     pxm.UnRegisterProxy("sources", name, proxy.SMProxy)
+    # pass
 
+def hide_extractor_from_gui(proxy):
+    """
+    Extractors live in the 'extractors' group, not 'sources'.
+    We must unregister them from there to hide them in the GUI.
+    """
+    # pxm = servermanager.ProxyManager()
+    # name = pxm.GetProxyName("extractors", proxy.SMProxy)
+    # if name:
+    #     pxm.UnRegisterProxy("extractors", name, proxy.SMProxy)
+    pass
 
 # create extractor (PD=partitioned dataset...)
 def create_VTPD_extractor(name, object, fr = 10):
@@ -27,7 +49,7 @@ def create_VTPD_extractor(name, object, fr = 10):
     vTPD = CreateExtractor('VTPD', object, registrationName='VTPD_'+ name)
     # vTPD2.Trigger = 'TimeStep'  """ not needed"""
     vTPD.Trigger.Frequency = fr
-    vTPD.Writer.FileName = 'ippl_'+name+'_{timestep:06d}.vtpd'
+    vTPD.Writer.FileName = name+'_{timestep:06d}.vtpd'
     return vTPD
     
 
@@ -87,14 +109,35 @@ def auto_camera_from_bounds(view, bounds, distance_factor=1.5, parallel_factor=0
     diagonal = math.sqrt(dx*dx + dy*dy + dz*dz)
 
     direction = [1.0, 1.3, 0.6]
+    # direction = [1.0, 0,0]
+    direction = [0,1,0]
+
+
     norm = math.sqrt(sum(d*d for d in direction))
     direction = [d / norm for d in direction]
     distance = distance_factor * diagonal
+
     cam_pos = [
         cx + direction[0] * distance,
         cy + direction[1] * distance,
         cz + direction[2] * distance,
     ]
+
+    cam_pos = [
+        10,
+        cy + direction[1] * distance,
+        0,
+    ]
+
+
+
+    # cam_pos = [
+    #     cx + direction[0] * distance,
+    #     0,
+    #     0
+    # ]
+
+
     set_camera(
         view,
         position=cam_pos,
@@ -131,16 +174,41 @@ def get_global_spatial_bounds(local_bounds):
     if not controller or controller.GetNumberOfProcesses() == 1:
         return local_bounds
 
+    # Use typed double arrays to avoid ambiguous overload selection in wrappers
     gb = [0.0] * 6
     for i in (0, 2, 4):
-        tmp = [0.0]
-        controller.AllReduce([local_bounds[i]], tmp, 1, vtkCommunicator.MIN_OP)
-        gb[i] = tmp[0]
+        send = array.array('d', [float(local_bounds[i])])
+        recv = array.array('d', [0.0])
+        controller.AllReduce(send, recv, 1, vtkCommunicator.MIN_OP)
+        gb[i] = float(recv[0])
     for i in (1, 3, 5):
-        tmp = [0.0]
-        controller.AllReduce([local_bounds[i]], tmp, 1, vtkCommunicator.MAX_OP)
-        gb[i] = tmp[0]
+        send = array.array('d', [float(local_bounds[i])])
+        recv = array.array('d', [0.0])
+        controller.AllReduce(send, recv, 1, vtkCommunicator.MAX_OP)
+        gb[i] = float(recv[0])
     return tuple(gb)
+
+
+# def get_global_extent(local_extent):
+#     """Reduce integer extent [imin, imax, jmin, jmax, kmin, kmax] across ranks."""
+#     controller = vtkMultiProcessController.GetGlobalController()
+#     # Ensure integer tuple in serial
+#     if not controller or controller.GetNumberOfProcesses() == 1:
+#         return tuple(int(x) for x in local_extent)
+
+#     ge = [0] * 6
+#     # Use typed int arrays to avoid ambiguous overload selection in wrappers
+#     for i in (0, 2, 4):
+#         send = array.array('i', [int(local_extent[i])])
+#         recv = array.array('i', [0])
+#         controller.AllReduce(send, recv, 1, vtkCommunicator.MIN_OP)
+#         ge[i] = int(recv[0])
+#     for i in (1, 3, 5):
+#         send = array.array('i', [int(local_extent[i])])
+#         recv = array.array('i', [0])
+#         controller.AllReduce(send, recv, 1, vtkCommunicator.MAX_OP)
+#         ge[i] = int(recv[0])
+#     return tuple(ge)
 
 
 
@@ -196,6 +264,19 @@ def print_proxy_overview():
         _log(f"   - Properties:", "INFO")
         for prop_name in proxy.ListProperties():
             _log(f"     - {prop_name}", "INFO")
+
+
+    # _log("Available 'extractors' proxies:", "INFO")
+    # for (proxy_name, _), proxy_id in pm.GetProxiesInGroup("extractors").items():
+    #     proxy = pm.GetProxy("extractors", proxy_name)
+    #     _log(f" - ProxyPrint: {proxy})", "INFO")
+    #     _log(f" - Proxy Name: {proxy_name}", "INFO")
+    #     _log(f"   - XML Label: {proxy.GetXMLLabel()}", "INFO")
+    #     _log(f"   - XML Group: {proxy.GetXMLGroup()}", "INFO")
+    #     _log(f"   - Class Name: {proxy.GetXMLName()}", "INFO")
+    #     _log(f"   - Properties:", "INFO")
+    #     for prop_name in proxy.ListProperties():
+    #         _log(f"     - {prop_name}", "INFO")
 
 
 
