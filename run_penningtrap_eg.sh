@@ -45,13 +45,12 @@ export IPPL_CATALYST_VTK=OFF
 #                       if CATALYST_PROXY_PATH is not set) and runs simulation
 export IPPL_CATALYST_PROXY_OPTION=ON
 
-
-#######################################################################
-# DON'T CHANGE FOR NOW
-
 # "ON":                 <-> masking GHOST_MASKS <-> not finally tested 
 #  any/"OFF": (default) <-> cutting GHOST_MASKS <->  works
 export IPPL_CATALYST_GHOST_MASKS=OFF
+
+#######################################################################
+# DON'T CHANGE FOR NOW
 
 # any/"element" (default)
 # "vertex"

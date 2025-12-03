@@ -37,6 +37,27 @@ Designed to orchestrate the per-channel extractor scripts in catalyst_extractors
 #  - Colouring in GUI
 # - currently png extractors rely on velocity attribute
 #  - currently extractor scriots rely on velocity attribute ...
+#  - i we don't use show like in the png ext scripts proxies wont appear
+# if pv client is opened befor simulation start, but if is opened after
+# the scripts are called they are all shown in pipeline browser
+# but we can hide them specificallys
+
+# also the png extractors will also be shown in the pipelin
+# and break the actualy png extraction now sure how to avoid
+# this bug
+
+# maybe we want to use resample to image data like in 
+# png extraction seems to be better render once figureed 
+# out how to properly configurethe filter ...
+
+# try to see pvpython script (generated with trace) to see how we 
+# might be able to colour etc our life filter ...
+
+# remove element associate option can do this direct in python
+
+# switch yaml to json range options 
+
+# instead of many env variables work with json file and maybe json catalyst pipeline like example ...
 ########################################################
 ########################################################
 
@@ -430,10 +451,15 @@ for cname in parsed.channel_names:
             cell2point = CellDatatoPointData(registrationName=cname[12:]+'_Cell2Point', 
                                              Input=merged)
             Show(cell2point)
+            # use resample to ImageData
+            # maybe merge destroys regularity switches to other data strucutre like threshhold 
+            # filter... we can just reample back to image (will look correct with the right configuration)   
+            # just duplicate behaviour from sfield pnf extraction
+
 
             # cell2point.CellDataArraytoprocess = ['RankID', 'density']
             _filters[cname[12:]+"_merge"] = merged
-            _filters[cname[12:]+"_glyph"] = merged
+            _filters[cname[12:]+"_c2p"] = merged
 
         if parsed.VTKextract == "ON":
             # _log(f"Attaching VTPD extractor to proxy '{cname}'")
