@@ -1,17 +1,15 @@
 #!/bin/bash
 
 cd build
+make AlpineSight  -j
 # make PenningTrap LandauDamping BumponTailInstability -j
-make PenningTrap  -j
-# make LandauDamping -j 
-# make BumponTailInstability -j 
 
 # Report linkage
 echo "Linked libs (MPI/Catalyst/Python):"
-ldd alpine/PenningTrap | grep -E "libmpi|libmpicxx|libcatalyst|libpython|libascent" || true
+ldd alpine/AlpineSight | grep -E "libmpi|libmpicxx|libcatalyst|libpython|libascent" || true
 
 # check for multiple MPI versions
-mpi_libs=$(ldd alpine/PenningTrap | grep -o 'libmpi\.[^ ]*' | sort -u)
+mpi_libs=$(ldd alpine/AlpineSight | grep -o 'libmpi\.[^ ]*' | sort -u)
 mpi_lib_count=$(echo "${mpi_libs}" | wc -l)
 
 if [ "${mpi_lib_count}" -gt 1 ]; then

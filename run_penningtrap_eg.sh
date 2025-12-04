@@ -1,20 +1,27 @@
 #!/bin/bash
 
-# export IPPL_DIR=./ippl-frk
+export IPPL_DIR=${PWD}
 export PENNINGTRAP_BINDIR=./build/alpine
 
-# These two needed env Variables will be automatically  be set when loading module on 
-# julich system. When running everything locally they need to be set manually.
-# PV_PREFIX="/.../ParaView-5.12.0-MPI-Linux-Python3.10-x86_64"
-#export CATALYST_IMPLEMENTATION_PATHS="${PV_PREFIX}/lib/catalyst"
-#export CATALYST_IMPLEMENTATION_NAME="paraview"
+# #####################################################################
+#  (Important) CONFIGURE PARAVIEW CATALYST VERSION
+# #####################################################################
 
-# echo $CATALYST_IMPLEMENTATION_PATHS on jureca eg. should be something simlar to: 
+# These two !!needed!! environment Variables will be automatically set when loading modules on 
+# julich system. When running elsewhere they need to be set manually most of the time.
+
+PV_PREFIX="/.../ParaView-5.XX.X-MPI-Linux-Python3.10-x86_64"
+
+export CATALYST_IMPLEMENTATION_PATHS="${PV_PREFIX}/lib/catalyst"
+export CATALYST_IMPLEMENTATION_NAME="paraview"
+
+# on jureca eg. after loading modules succesfully should result to something like:: 
+# echo $CATALYST_IMPLEMENTATION_PATHS 
 # /p/software/jurecadc/stages/2024/software/ParaView/5.12.0-RC2-gpsmpi-2023a/lib64/catalyst
 
 
 # #####################################################################
-#  CONFIGURE CATALYST OPTIONS
+#  (Optional) CONFIGURE CATALYST OPTIONS
 # #####################################################################
 # any invalid input will switch to default case, check output during initialisation for parsed settings
 # TODO overwrite proxy path:
@@ -51,6 +58,7 @@ export IPPL_CATALYST_GHOST_MASKS=OFF
 
 #######################################################################
 # DON'T CHANGE FOR NOW
+# TODO: remove option...
 
 # any/"element" (default)
 # "vertex"
@@ -60,17 +68,17 @@ export IPPL_CATALYST_ASSOCIATE="element"
 
 #######################################################################
 # DON'T USE FOR NOW:
-
 # #####################################################################
-# Catalyst Adaptor will try to fetch paths from environment else switch to
-# harcoded preconfigured defaults inside IPPL src directory (helped via cmake)
+# Catalyst Adaptor will try to fetch paths via these environment variables
+#  else switch to # harcoded preconfigured defaults inside IPPL src directory
+#  (helped via cmake environment options)
 # #####################################################################
 
-# overwrites catalyst main script/pipeline:
+# overwrites catalyst main script/pipeline (for Live vis and vtk file extractor):
 # export CATALYST_PIPELINE_PATH=${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/pipeline_default.py
 
 # overwrites catalyst script (png extraction) for arbitrary vis channels
-# export CATALYST_EXTRACTOR_SCRIPT_" +label
+# export CATALYST_EXTRACTOR_SCRIPT_<registry_label>
 
 # overwrite steering proxies completeley by referencing different file:
 # export CATALYST_PROXYS_PATH = 
@@ -96,7 +104,7 @@ rm -rd data
 mkdir data
 
 #####################################################################################
-# when running locally with MPI this might(?) be needed to guarantee compatibility (openMPI vs MPIch)
+# when running with MPI this might be needed to guarantee compatibility (openMPI vs MPIch)
 # export MPIEXEC=$PV_PREFIX/lib/mpiexec
 # exec $MPIEXEC -np 1 ...
 #####################################################################################
@@ -105,8 +113,15 @@ mkdir data
 # ###################################################################################
 
 
-# ./PenningTrap 4 4 4 512 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-./PenningTrap 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
+./AlpineSight 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
+
+
+# ###################################################################################
+# Configuraion for Catalyst has been removed, AlpineSight as main Alpine exampl for vis.
+# ###################################################################################
+
+# # ./PenningTrap 4 4 4 512 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
+# ./PenningTrap 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
 
 # ./BumponTailInstability 4 4 4 512  20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
 # ./BumponTailInstability 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5

@@ -39,11 +39,11 @@
 // #include "Stream/InSitu/VisBaseAdaptor.h"
 
 
-/* catalyst header defined the following for free use ... */
-//   CATALYST_EXPORT enum catalyst_status catalyst_initialize(const conduit_node* params);
-//   CATALYST_EXPORT enum catalyst_status catalyst_finalize(const conduit_node* params);
-//   CATALYST_EXPORT enum catalyst_status catalyst_about(conduit_node* params);
-//   CATALYST_EXPORT enum catalyst_status catalyst_results(conduit_node* params);
+/* catalyst header defined the following: */
+//   catalyst_status catalyst_initialize(const conduit_node* params);
+//   catalyst_status catalyst_finalize(const conduit_node* params);
+//   catalyst_status catalyst_about(conduit_node* params);
+//   catalyst_status catalyst_results(conduit_node* params);
 
 
 // ############################################
@@ -60,42 +60,25 @@
 // - extend and test for multirank (MPI 2 rank local works)
 // - at least avoid regenerating the same ghost data by caching logic
 // - use same channel for all steerable channels backwards and forwards
+// - improved versatile sttering
 // 
 // NEXT: 
 // - test 2D
+// - test GPU
 // - use same channel (topology and mesh) for all vis fields?
-//
-// - inquire jens about 
-//           improved versatile sttering
-//          strucutural mesh multirank bug...
-// 
+// SoA supprt (currently only Array of Structs ...)
+// - figure outs: multi-mesh multirank bugs...(not as easy to use a simple mesh...)
 // 
 // MAYBE:
-// - keep node structure and only reset data ... 
-//   but more than initialially thought needs to eb reset every iteration anew...
-// - move exece_entry purely to the visitor structure???
+// - move exec_entry purely to the visitor structure???
 // - test no copy visualisation
-// 
-//
-// UNLIKELY:
-// 
-// 
-// - ability to initialize new objects or reinitialize 
-//   with completely new set of objects
-//
 // 
 // ############################################
 
-
-/* are passing const references through functions faster than having 
-member variables ... maybe not ...*/
-
 namespace ippl{
 
-    /* FORWARD DECLARATION */
+/* FORWARD DECLARATION */
 class VisRegistryRuntime;
-
-
 
 
 
@@ -232,15 +215,8 @@ class CatalystAdaptor {
     // Optional enum metadata: type -> list of (text,value) choices (for reuse across labels)
     // std::unordered_map<std::type_index, std::vector<std::pair<std::string,int>>> enumChoicesByType_;
 
-
-    // conduit_cpp::Node node_forward;
-    // conduit_cpp::Node node_backward;
-
-
-
+    
     /* taken from environemnt can be const... */
-    
-    
     const char* catalyst_vis  ;
     const char* catalyst_steer;
     const char* catalyst_png  ;
@@ -804,42 +780,3 @@ public:
 
 #endif
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // LinMap grouped steering (3 vectors + time)
-    // void InitSteerableChannel( const ippl::LinMap& lm, const std::string& label );
-    // LinMaps dynamic-list steering (N maps: struct-of-arrays)
-    // void InitSteerableChannel( const ippl::LinMaps& lms, const std::string& label );
-    // AoS alternative: std::vector<LinMap> (converted internally to LinMaps for identical GUI behavior)
-    // void InitSteerableChannel( const std::vector<ippl::LinMap>& lm_vec, const std::string& label );
-
-
-    // // LinMap grouped steering (3 vectors + time)
-    // void AddSteerableChannel(const ippl::LinMap& lm, const std::string& steerable_suffix);
-    // // LinMaps dynamic-list steering (N maps: struct-of-arrays)
-    // void AddSteerableChannel(const ippl::LinMaps& lms, const std::string& steerable_suffix);
-    // // AoS alternative forward pass: std::vector<LinMap>
-    // void AddSteerableChannel(const std::vector<ippl::LinMap>& lm_vec, const std::string& steerable_suffix);
-
-
-    // LinMap grouped fetch
-    // void FetchSteerableChannelValue( ippl::LinMap& lm, const std::string& label);
-    // LinMaps dynamic-list fetch
-    // void FetchSteerableChannelValue( ippl::LinMaps& lms, const std::string& label);
-    // AoS alternative fetch
-    // void FetchSteerableChannelValue( std::vector<ippl::LinMap>& lm_vec, const std::string& label);
-    // Generic std::vector elements (arithmetic/bool/Button) fetch
