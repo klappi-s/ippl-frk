@@ -15,6 +15,9 @@
 #include "Random/Randn.h"
 
 
+#include <chrono>
+#include <thread>
+
 
 #ifdef IPPL_ENABLE_CATALYST
 #include "Stream/InSitu/CatalystAdaptor.h"
@@ -27,6 +30,8 @@
 #endif
 
 using view_type = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
+using namespace std::chrono_literals;
+
 
 enum experiment_enum {
     PenningTrap,
@@ -674,8 +679,12 @@ public:
 
 
 
-        std::cout << "PTManager: sleeping a second..." << std::endl;
-        sleep(1);
+        // std::cout << "PTManager: sleeping a second..." << std::endl;
+        // sleep(1);
+        std::cout << "PTManager: sleeping a quarter second..." << std::endl;
+        // sleep(1); only takes int
+        std::this_thread::sleep_for(250ms);
+
     }
 
     void dump() override {

@@ -484,8 +484,8 @@ public:
         ippl::Comm->barrier();
         IpplTimings::stopTimer(PTimer);
         
-        std::cout << "PTManager: sleeping a quarter second..." << std::endl;
-        sleep(0.25);
+        // std::cout << "PTManager: sleeping a quarter second..." << std::endl;
+        // sleep(0.25);
     }
 
     void dump() override {
