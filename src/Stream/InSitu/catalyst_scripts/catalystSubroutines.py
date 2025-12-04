@@ -24,11 +24,11 @@ def hide_source_from_gui(proxy):
     Removes the proxy from the 'sources' registration group.
     It remains valid in the script but disappears from the GUI Pipeline Browser.
     """
-    # pxm = servermanager.ProxyManager()
-    # # Find the name this proxy is registered under
-    # name = pxm.GetProxyName("sources", proxy.SMProxy)
-    # if name:
-    #     pxm.UnRegisterProxy("sources", name, proxy.SMProxy)
+    pxm = servermanager.ProxyManager()
+    # Find the name this proxy is registered under
+    name = pxm.GetProxyName("sources", proxy.SMProxy)
+    if name:
+        pxm.UnRegisterProxy("sources", name, proxy.SMProxy)
     # pass
 
 def hide_extractor_from_gui(proxy):
@@ -110,7 +110,7 @@ def auto_camera_from_bounds(view, bounds, distance_factor=1.5, parallel_factor=0
 
     direction = [1.0, 1.3, 0.6]
     # direction = [1.0, 0,0]
-    direction = [0,1,0]
+    # direction = [0,1,0]
 
 
     norm = math.sqrt(sum(d*d for d in direction))
@@ -122,15 +122,11 @@ def auto_camera_from_bounds(view, bounds, distance_factor=1.5, parallel_factor=0
         cy + direction[1] * distance,
         cz + direction[2] * distance,
     ]
-
-    cam_pos = [
-        10,
-        cy + direction[1] * distance,
-        0,
-    ]
-
-
-
+    # cam_pos = [
+    #     10,
+    #     cy + direction[1] * distance,
+    #     0,
+    # ]
     # cam_pos = [
     #     cx + direction[0] * distance,
     #     0,
@@ -188,7 +184,7 @@ def get_global_spatial_bounds(local_bounds):
         gb[i] = float(recv[0])
     return tuple(gb)
 
-
+# not meaningful for extent definitions ...
 # def get_global_extent(local_extent):
 #     """Reduce integer extent [imin, imax, jmin, jmax, kmin, kmax] across ranks."""
 #     controller = vtkMultiProcessController.GetGlobalController()
@@ -278,28 +274,3 @@ def print_proxy_overview():
     #     for prop_name in proxy.ListProperties():
     #         _log(f"     - {prop_name}", "INFO")
 
-
-
-
-
-
-
-# def load_state_module(module_path_or_name: str):
-#     """Import a Catalyst state module and auto-register its PNG extractors."""
-#     import importlib, sys, os
-#     mod = None
-#     try:
-#         if module_path_or_name.endswith('.py') and os.path.exists(module_path_or_name):
-#             # import by path
-#             dirname = os.path.dirname(module_path_or_name)
-#             fname = os.path.splitext(os.path.basename(module_path_or_name))[0]
-#             if dirname not in sys.path:
-#                 sys.path.append(dirname)
-#             mod = importlib.import_module(fname)
-#         else:
-#             mod = importlib.import_module(module_path_or_name)
-#         register_png_extractor(mod)
-#         return mod
-#     except Exception as e:
-#         _log(f"[REGISTER][ERROR] Failed to load/register module '{module_path_or_name}': {e}", "ERROR")
-#         return None

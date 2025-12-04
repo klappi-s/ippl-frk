@@ -1,18 +1,7 @@
 """! \file pipeline_default.py
 \brief Main ParaView Catalyst pipeline: live visualization, VTK extracts, and steering.
 \details Discovers channel proxies, wires optional extractors, updates live views,
-and forwards/fetches steerable parameters between the simulation an        # Option 2: Extract only specific blocks (e.g., just particles without helper)
-        # Uncomment the following to extract only the main particle block:
-        # if parsed.VTKextract == "ON":
-        #     particles_block = ExtractBlock(
-        #         registrationName=f"{cname}_main_extract",
-        #         Input=proxy, 
-        #         Selectors=['//main']
-        #     )
-        #     particles_block.UpdatePipeline()
-        #     _log(f"Attaching VTPD extractor to MAIN particle block (via MergeBlocks) '{cname}'")
-        #     _extractors[cname+"_main_only"] = create_extractor_from_single_block(cname+"_main", particles_block, 1)UI.
-Designed to orchestrate the per-channel extractor scripts in catalyst_extractors/.
+and forwards/fetches steerable parameters between the simulation an        
 """
 
 # script-version: 2.0
@@ -35,29 +24,23 @@ Designed to orchestrate the per-channel extractor scripts in catalyst_extractors
 # Possible TODO:
 #  - (alternative or additionally) write working MACROS for inaccessible PV settings  
 #  - Colouring in GUI
-# - currently png extractors rely on velocity attribute
-#  - currently extractor scriots rely on velocity attribute ...
-#  - i we don't use show like in the png ext scripts proxies wont appear
-# if pv client is opened befor simulation start, but if is opened after
-# the scripts are called they are all shown in pipeline browser
-# but we can hide them specificallys
+#  - currently png extractors rely on velocity attribute
+#  - maybe we want to use resample to image data as a pipeline filter since:
+#    png extraction seems to be better rendered this way once te filte is configured properly...
+#  - default coluring live: try to look at pvpython script (generated with trace) to see how we might be able to colour etc our life filter ...
+#  - switch yaml to json range options 
+#  - instead of many env variables work with json file and maybe json catalyst pipeline like example ...
+#  - remove element associate env option can do this direct in python with filters ...
+# BUG: if pv client is opened after Simulation has completed first execute
+# the created PNG extractor show up in the clients pipeline browser
+# Iam not sure how to avoid this. This will break the View needed for
+# the extractor to work properly and png extaction starrts failing ca
+# 3 timesteps after the client was opened.
 
-# also the png extractors will also be shown in the pipelin
-# and break the actualy png extraction now sure how to avoid
-# this bug
 
-# maybe we want to use resample to image data like in 
-# png extraction seems to be better render once figureed 
-# out how to properly configurethe filter ...
 
-# try to see pvpython script (generated with trace) to see how we 
-# might be able to colour etc our life filter ...
 
-# remove element associate option can do this direct in python
 
-# switch yaml to json range options 
-
-# instead of many env variables work with json file and maybe json catalyst pipeline like example ...
 ########################################################
 ########################################################
 
@@ -140,6 +123,19 @@ def create_VTM_extractor(name, object, fr = 10):
     vTPC.Trigger.Frequency = fr
     vTPC.Writer.FileName = 'ippl_'+name+'_{timestep:06d}.vtpc'
     return vTPC
+
+# Option 2: Extract only specific blocks (e.g., just particles without helper)
+        # Uncomment the following to extract only the main particle block:
+        # if parsed.VTKextract == "ON":
+        #     particles_block = ExtractBlock(
+        #         registrationName=f"{cname}_main_extract",
+        #         Input=proxy, 
+        #         Selectors=['//main']
+        #     )
+        #     particles_block.UpdatePipeline()
+        #     _log(f"Attaching VTPD extractor to MAIN particle block (via MergeBlocks) '{cname}'")
+        #     _extractors[cname+"_main_only"] = create_extractor_from_single_block(cname+"_main", particles_block, 1)UI.
+# Designed to orchestrate the per-channel extractor scripts in catalyst_extractors/.
 
 # def create_extractor_from_single_block(name, extract_block_filter, fr = 10):
 #     """Create an extractor for a single block from multimesh.
@@ -664,6 +660,7 @@ def catalyst_execute(info):
             reader.UpdatePipeline()
             reader.UpdateVTKObjects()
 
+    # Not needed anymore ... 
     # # Always update backward senders to ensure result mesh generation
     # if parsed.steer == "ON":
     #     # Unique sender proxies
