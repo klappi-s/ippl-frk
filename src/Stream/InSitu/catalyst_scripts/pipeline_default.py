@@ -60,10 +60,10 @@ from paraview.simple import (
     ExtractBlock,
     CellDatatoPointData,
     Glyph,
-    GetColorTransferFunction
+    GetColorTransferFunction,
+    ResampleToImage
     # LoadPlugin,
     # ExtractSubset,
-    # ResampleToImage,
     # AdaptiveResampleToImage,
 )
 from paraview import servermanager
@@ -81,7 +81,8 @@ sys.path.append(os.path.dirname(__file__))
 
 
 from catalystSubroutines import (
-    print_proxy_overview
+    print_proxy_overview,
+    get_global_spatial_bounds
     # ,
     # create_VTPD_extractor
 )
@@ -390,12 +391,14 @@ for cname in parsed.channel_names:
         if options.EnableCatalystLive:
             _log(f"Creating ExtractBlock filter(s) for particle channel '{cname}' (Live view)")
             particles = ExtractBlock(
-                registrationName=f"{cname[15:]}_bunch",
+                # registrationName=f"{cname[15:]}.bunch",
+                registrationName=f"{cname}.bunch",
                 Input=proxy,
                 Selectors=['//main']
             )
             helper = ExtractBlock(
-                registrationName=f"{cname[15:]}_box",
+                # registrationName=f"{cname[15:]}_box",
+                registrationName=f"{cname}.box",
                 Input=proxy,
                 Selectors=['//help']
             )
@@ -438,24 +441,65 @@ for cname in parsed.channel_names:
         if options.EnableCatalystLive:
 
             _log("   -> Using MergeBlocks for structured scalar field data.")
-            merged = MergeBlocks(registrationName=cname[12:]+'_MergedBlocks',
+            # merged = MergeBlocks(registrationName=cname[12:]+'_MergedBlocks',
+            merged = MergeBlocks(registrationName=cname +'.MergedBlocks',
                                  Input=proxy)
             merged.MergePartitionsOnly = 1
             Show(merged)
 
             _log("   -> Using CellDataToPointtData for structured scalar field data.")
-            cell2point = CellDatatoPointData(registrationName=cname[12:]+'_Cell2Point', 
+            # cell2point = CellDatatoPointData(registrationName=cname[12:]+'.Cell2Point', 
+            cell2point = CellDatatoPointData(registrationName=cname+'.Cell2Point', 
                                              Input=merged)
             Show(cell2point)
-            # use resample to ImageData
-            # maybe merge destroys regularity switches to other data strucutre like threshhold 
-            # filter... we can just reample back to image (will look correct with the right configuration)   
-            # just duplicate behaviour from sfield pnf extraction
+            
+            _log("   -> Using ResampleToImage for structured scalar field data.")
+            
+            # Calculate dimensions (logic from png_ext_sfield.py)
+            info = proxy.GetDataInformation()
+            local_bounds = info.GetBounds()
+            local_extent = info.GetExtent()
+            global_bounds = get_global_spatial_bounds(local_bounds)
+            
+            nx = (local_extent[1] - local_extent[0] + 1)
+            ny = (local_extent[3] - local_extent[2] + 1)
+            nz = (local_extent[5] - local_extent[4] + 1)
+            
+            lx = (local_bounds[1] - local_bounds[0])
+            ly = (local_bounds[3] - local_bounds[2])
+            lz = (local_bounds[5] - local_bounds[4])
+            
+            spacing_x = lx / max(nx - 1, 1)
+            spacing_y = ly / max(ny - 1, 1)
+            spacing_z = lz / max(nz - 1, 1)
+            
+            dx = max(spacing_x, 1e-12)
+            dy = max(spacing_y, 1e-12)
+            dz = max(spacing_z, 1e-12)
 
+
+            ghost_x = 1
+            ghost_y = 1
+            ghost_z = 1
+
+            dim_x = int(round((global_bounds[1] - global_bounds[0]) / dx)) - 2*ghost_x
+            dim_y = int(round((global_bounds[3] - global_bounds[2]) / dy)) - 2*ghost_y
+            dim_z = int(round((global_bounds[5] - global_bounds[4]) / dz)) - 2*ghost_z
+            global_extent = [dim_x, dim_y, dim_z]
+            print(global_extent)
+
+
+            
+            resample = ResampleToImage(registrationName=cname+'.ResampleToImage', Input=merged)
+            resample.UseInputBounds = 1
+            # resample.SamplingBounds = global_bounds
+            resample.SamplingDimensions = global_extent
+            Show(resample)
 
             # cell2point.CellDataArraytoprocess = ['RankID', 'density']
             _filters[cname[12:]+"_merge"] = merged
             _filters[cname[12:]+"_c2p"] = merged
+            _filters[cname[12:]+"_resample"] = resample
 
         if parsed.VTKextract == "ON":
             # _log(f"Attaching VTPD extractor to proxy '{cname}'")
@@ -688,8 +732,8 @@ def catalyst_execute(info):
 
 
 
-    # if options.EnableCatalystLive:
-    #     time.sleep(0.01)
+    if options.EnableCatalystLive:
+        time.sleep(2)
             
 # ------------------------------------------------------------------------------
 
