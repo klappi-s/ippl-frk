@@ -1,6 +1,23 @@
 from paraview import simple
 from catalystSubroutines import get_global_spatial_bounds
 
+def setup_default_view(source_proxy, view):
+    """
+    Fallback for non-particle sources (e.g. Fields).
+    """
+    rep = simple.Show(source_proxy, view)
+    
+    # Auto-detect type
+    info = source_proxy.GetDataInformation()
+    if info.GetNumberOfCells() > 0:
+        rep.SetRepresentationType('Surface')
+    else:
+        rep.SetRepresentationType('Points')
+        
+    simple.ResetCamera()
+    return rep
+
+
 def setup_particle_view(source_proxy, view):
     """
     Applies the 'Point Gaussian' style with a yellow bounding box helper.
@@ -114,36 +131,10 @@ def setup_particle_view(source_proxy, view):
     # box_rep.LineWidth = 2.0
     # box_rep.Opacity = 0.5 # Slightly transparent
 
-    # --- VIEW SETTINGS ---
-    # Apply the dark gradient background from your script
-    view.UseColorPaletteForBackground = 0
-    view.BackgroundColorMode = 'Gradient'
-    # Dark Blue/Black gradient
-    view.Background = [0.0, 0.0, 0.0] # Bottom color
-    view.Background2 = [0.0, 0.0, 0.2] # Top color (Dark Blue)
-    
-    view.AxesGrid.Visibility = 1
-    
-    # Reset Camera to fit everything
     simple.ResetCamera()
 
     return part_rep
 
-def setup_default_view(source_proxy, view):
-    """
-    Fallback for non-particle sources (e.g. Fields).
-    """
-    rep = simple.Show(source_proxy, view)
-    
-    # Auto-detect type
-    info = source_proxy.GetDataInformation()
-    if info.GetNumberOfCells() > 0:
-        rep.SetRepresentationType('Surface')
-    else:
-        rep.SetRepresentationType('Points')
-        
-    simple.ResetCamera()
-    return rep
 
 
 def update_particle_view(source_proxy, view):
@@ -197,92 +188,63 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         simple.Delete(existing_rep)
 
     # 2. Create ResampleToImage Filter
-    # Calculate bounds and dimensions
-    
-    # Use base source for extent info if available, as MergedBlocks might lose it
-    base_proxy = simple.FindSource(channel_name)
-    # if base_proxy:
-    #     info = base_proxy.GetDataInformation()
-    # else:
-    #     info = source_proxy.GetDataInformation()
-    
+    base_proxy = simple.FindSource(channel_name)    
     base_info = base_proxy.GetDataInformation()
     info = source_proxy.GetDataInformation()
-
     cinfo = info.GetCellDataInformation()
     ghost_info = cinfo.GetArrayInformation("vtkGhostType") if cinfo else None
 
-
-
     local_bounds = base_info.GetBounds()
     local_extent = base_info.GetExtent()
-
-
     global_bounds = info.GetBounds()
-    # extent = info.GetExtent() does not succeed ...
-
-    print(local_bounds)
-    print(local_extent)
-    
-    print(global_bounds)
-    # print(extent)
-    
-    
-    # Default values
-    sampling_bounds = global_bounds
     sampling_dims = [16, 16, 16]
+
     
     # Try to derive from extent if structured
-    if local_extent[1] >= local_extent[0]:
-        nx = local_extent[1] - local_extent[0] + 1
-        ny = local_extent[3] - local_extent[2] + 1
-        nz = local_extent[5] - local_extent[4] + 1
-        
-        lx = local_bounds[1] - local_bounds[0]
-        ly = local_bounds[3] - local_bounds[2]
-        lz = local_bounds[5] - local_bounds[4]
-        
-        # Avoid div by zero
-        spacing_x = lx / max(nx - 1, 1)
-        spacing_y = ly / max(ny - 1, 1)
-        spacing_z = lz / max(nz - 1, 1)
-        
-        dx = max(spacing_x, 1e-12)
-        dy = max(spacing_y, 1e-12)
-        dz = max(spacing_z, 1e-12)
-        
-        gx = global_bounds[1] - global_bounds[0]
-        gy = global_bounds[3] - global_bounds[2]
-        gz = global_bounds[5] - global_bounds[4]
-        
-
-        dim_x = int(round(gx / dx)) - 2
-        dim_y = int(round(gy / dy)) - 2
-        dim_z = int(round(gz / dz)) - 2
-        
-        global_extent = [dim_x, dim_y, dim_z]
-        sampling_dims = global_extent
-
-     # Optionally trim one layer if you want to exclude outer ghost ring from resampling
-        if ghost_info:
-            print("Ghost Present")
-            cut_layers = 1  # set to 0 to keep full bounds
-        else:
-            print("No Ghost Present")
-            cut_layers = 0  # set to 0 to keep full bounds
-
-        global_bounds = (
-               global_bounds[0] + cut_layers * dx,
-               global_bounds[1] - cut_layers * dx,
-               global_bounds[2] + cut_layers * dy,
-               global_bounds[3] - cut_layers * dy,
-               global_bounds[4] + cut_layers * dz,
-               global_bounds[5] - cut_layers * dz,
-        )
-        print(f"ResampleToImage: Derived dims {sampling_dims} from extent {local_extent}, local bounds {local_bounds} and global bounds {global_bounds}")
+    nx = local_extent[1] - local_extent[0] + 1
+    ny = local_extent[3] - local_extent[2] + 1
+    nz = local_extent[5] - local_extent[4] + 1
+    
+    lx = local_bounds[1] - local_bounds[0]
+    ly = local_bounds[3] - local_bounds[2]
+    lz = local_bounds[5] - local_bounds[4]
+    
+    # Avoid div by zero
+    spacing_x = lx / max(nx - 1, 1)
+    spacing_y = ly / max(ny - 1, 1)
+    spacing_z = lz / max(nz - 1, 1)
+    
+    dx = max(spacing_x, 1e-12)
+    dy = max(spacing_y, 1e-12)
+    dz = max(spacing_z, 1e-12)
+    
+    gx = global_bounds[1] - global_bounds[0]
+    gy = global_bounds[3] - global_bounds[2]
+    gz = global_bounds[5] - global_bounds[4]
+    
+    dim_x = int(round(gx / dx)) - 2
+    dim_y = int(round(gy / dy)) - 2
+    dim_z = int(round(gz / dz)) - 2
+    
+    global_extent = [dim_x, dim_y, dim_z]
+    # Optionally trim one layer if you want to exclude outer ghost ring from resampling
+    if ghost_info:
+        print("Ghost Present")
+        cut_layers = 1  # set to 0 to keep full bounds
     else:
-        print(f"ResampleToImage: Using default dims {sampling_dims}")
-
+        print("No Ghost Present")
+        cut_layers = 0  # set to 0 to keep full bounds
+    
+    global_bounds = (
+        global_bounds[0] + cut_layers * dx,
+        global_bounds[1] - cut_layers * dx,
+        global_bounds[2] + cut_layers * dy,
+        global_bounds[3] - cut_layers * dy,
+        global_bounds[4] + cut_layers * dz,
+        global_bounds[5] - cut_layers * dz,
+    )
+    print(f"ResampleToImage: Derived dims {global_extent} from extent {local_extent}, local bounds {local_bounds} and global bounds {global_bounds}")
+    
 
 
 
@@ -300,21 +262,6 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
 
     info = resample.GetDataInformation()
     point_data = info.GetPointDataInformation()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     array_name = None
     association = 'POINTS' # ResampleToImage produces Point Data
@@ -397,3 +344,136 @@ def update_scalar_field_view(source_proxy, view):
         pwf = rep.ScalarOpacityFunction
         if pwf:
             pwf.RescaleTransferFunction(r[0], r[1])
+
+def setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False):
+    """
+    Applies Glyph (Arrow) rendering for vector fields.
+    """
+    # 1. Clean existing
+    glyph_name = f"{channel_name}_Glyph"
+    existing_glyph = simple.FindSource(glyph_name)
+    if existing_glyph:
+        simple.Delete(existing_glyph)
+        
+    existing_rep = simple.GetRepresentation(source_proxy, view)
+    if existing_rep:
+        simple.Delete(existing_rep)
+
+    display_proxy = None
+
+    if not is_extracted:
+        # 2. Calculate Scale Factor
+        info = source_proxy.GetDataInformation()
+        bounds = info.GetBounds()
+        global_bounds = get_global_spatial_bounds(bounds)
+        
+        dx = global_bounds[1] - global_bounds[0]
+        dy = global_bounds[3] - global_bounds[2]
+        dz = global_bounds[5] - global_bounds[4]
+        
+        import math
+        diag = math.sqrt(dx*dx + dy*dy + dz*dz)
+        scale_factor = diag / 30.0 if diag > 0 else 1.0
+
+        # 3. Create Glyph Filter
+        glyph = simple.Glyph(registrationName=glyph_name, Input=source_proxy, GlyphType='Arrow')
+        
+        # Determine Array Name
+        c_info = info.GetCellDataInformation()
+        p_info = info.GetPointDataInformation()
+        
+        array_name = None
+        association = 'CELLS'
+        
+        candidates = [channel_name, channel_name.replace("ippl_vField_", "")]
+        
+        for name in candidates:
+            if c_info.GetArrayInformation(name):
+                array_name = name
+                association = 'CELLS'
+                break
+            if p_info.GetArrayInformation(name):
+                array_name = name
+                association = 'POINTS'
+                break
+                
+        if array_name:
+            glyph.OrientationArray = [association, array_name]
+            # glyph.ScaleArray = [association, array_name] 
+        
+        glyph.ScaleFactor = scale_factor
+        glyph.UpdatePipeline()
+        display_proxy = glyph
+    else:
+        display_proxy = source_proxy
+
+    # 4. Show
+    rep = simple.Show(display_proxy, view)
+    rep.SetRepresentationType('Surface')
+    
+    # Coloring Logic
+    info = display_proxy.GetDataInformation()
+    c_info = info.GetCellDataInformation()
+    p_info = info.GetPointDataInformation()
+    
+    array_name = None
+    association = 'POINTS' # Glyphs usually have point data
+    
+    # Try to find the array to color by
+    candidates = [channel_name, channel_name.replace("ippl_vField_", "")]
+    
+    for name in candidates:
+        if p_info.GetArrayInformation(name):
+            array_name = name
+            association = 'POINTS'
+            break
+        if c_info.GetArrayInformation(name):
+            array_name = name
+            association = 'CELLS'
+            break
+            
+    if array_name:
+        rep.ColorArrayName = [association, array_name]
+        
+        lut = simple.GetColorTransferFunction(array_name)
+        
+        if association == 'CELLS':
+            r = c_info.GetArrayInformation(array_name).GetComponentRange(-1)
+        else:
+            r = p_info.GetArrayInformation(array_name).GetComponentRange(-1)
+            
+        if r[1] > r[0]:
+            lut.RescaleTransferFunction(r[0], r[1])
+            
+        rep.LookupTable = lut
+        
+        sb = simple.GetScalarBar(lut, view)
+        sb.Title = array_name
+        sb.ComponentTitle = 'Magnitude'
+        sb.Visibility = 1
+        rep.SetScalarBarVisibility(view, True)
+
+    view.AxesGrid.Visibility = 1
+    simple.ResetCamera()
+    
+    return rep
+
+def update_vector_field_view(source_proxy, view):
+    """
+    Updates color range for vector fields.
+    """
+    rep = simple.GetRepresentation(source_proxy, view)
+    if not rep: return
+    
+    ca = rep.ColorArrayName
+    if ca and len(ca) >= 2:
+        array_name = ca[1]
+        if array_name:
+            info = rep.Input.GetDataInformation()
+            data_info = info.GetPointDataInformation()
+            array_info = data_info.GetArrayInformation(array_name)
+            if array_info:
+                r = array_info.GetComponentRange(-1)
+                lut = rep.LookupTable
+                if lut:
+                    lut.RescaleTransferFunction(r[0], r[1])

@@ -190,6 +190,8 @@ def extract_data():
         proxies_to_extract.append(f"{channel_name}.MergedBlocks")
         # proxies_to_extract.append(f"{channel_name}.Cell2Point")
         # proxies_to_extract.append(f"{channel_name}.ResampleToImage")
+    elif channel_name.startswith("ippl_vField"):
+        proxies_to_extract.append(f"{channel_name}.Glyph")
 
     print(f"Requesting {proxies_to_extract}...")
     
@@ -245,6 +247,15 @@ def extract_data():
                 render_config.setup_scalar_field_view(merged_proxy, view, channel_name)
             # else:
             #     render_config.setup_scalar_field_view(source_proxy, view, channel_name)
+        elif channel_name.startswith("ippl_vField"):
+            print(f"Applying Vector Field Render for {channel_name}...")
+            glyph_proxy = find_source_by_name(f"{channel_name}.Glyph")
+            if glyph_proxy:
+                print(f"Found extracted Glyph filter: {channel_name}.Glyph")
+                render_config.setup_vector_field_view(glyph_proxy, view, channel_name, is_extracted=True)
+            else:
+                print(f"Extracted Glyph filter not found. Creating local Glyph filter.")
+                render_config.setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False)
         else:
             print(f"Applying Default Render for {channel_name}...")
             render_config.setup_default_view(source_proxy, view)
@@ -284,6 +295,15 @@ def reset_visualization():
              if p1: simple.Delete(p1)
              if p2: simple.Delete(p2)
              if p3: simple.Delete(p3)
+        elif sel.startswith("ippl_vField"):
+             p1 = find_source_by_name(f"{sel}_Glyph")
+             if p1: simple.Delete(p1)
+             p2 = find_source_by_name(f"{sel}.Glyph")
+             if p2: simple.Delete(p2)
+             
+             if source_proxy: simple.Delete(source_proxy)
+             p = find_source_by_name(sel)
+             if p and p != source_proxy: simple.Delete(p)
         elif sel.startswith("ippl_particles"):
              # Clean up filters created in render_config
              p1 = find_source_by_name("Particles_Only")
@@ -340,6 +360,21 @@ async def poll_catalyst():
                             resample_proxy.UpdatePipeline()
                             render_config.update_scalar_field_view(resample_proxy, simple.GetActiveView())
                             
+                    elif sel.startswith("ippl_vField"):
+                        if source_proxy: source_proxy.UpdatePipeline()
+                        
+                        # Update extracted Glyph if exists
+                        glyph_proxy = find_source_by_name(f"{sel}.Glyph")
+                        if glyph_proxy:
+                            glyph_proxy.UpdatePipeline()
+                            render_config.update_vector_field_view(glyph_proxy, simple.GetActiveView())
+                        else:
+                            # Update local Glyph if exists
+                            glyph_proxy = find_source_by_name(f"{sel}_Glyph")
+                            if glyph_proxy:
+                                glyph_proxy.UpdatePipeline()
+                                render_config.update_vector_field_view(glyph_proxy, simple.GetActiveView())
+
                     else:
                         if source_proxy: 
                             source_proxy.UpdatePipeline()

@@ -512,12 +512,12 @@ for cname in parsed.channel_names:
         if options.EnableCatalystLive:
             
             _log("   -> Using MergeBlocks for structured vector field data.")
-            merged = MergeBlocks(registrationName=cname[12:]+'_MergedBlocks',Input=proxy)
+            merged = MergeBlocks(registrationName=cname+'.MergedBlocks',Input=proxy)
             merged.MergePartitionsOnly = 1
             Show(merged)
 
             _log("   -> Using Glyph for structured vector field data.")
-            glyph = Glyph(registrationName=cname[12:]+'_Glyph', Input=merged, GlyphType='Arrow')
+            glyph = Glyph(registrationName=cname +'.Glyph', Input=merged, GlyphType='Arrow')
             glyph.OrientationArray = ['CELLS', cname[12:]]
             # glyphShow = 
             Show(glyph)
