@@ -394,13 +394,15 @@ for cname in parsed.channel_names:
                 # registrationName=f"{cname[15:]}.bunch",
                 registrationName=f"{cname}.bunch",
                 Input=proxy,
-                Selectors=['//main']
+                # // fails to enable visualisation by attributes exclusive to this block
+                Selectors=['//main', '//block_main'] 
+                # Selectors=[]
             )
             helper = ExtractBlock(
                 # registrationName=f"{cname[15:]}_box",
                 registrationName=f"{cname}.box",
                 Input=proxy,
-                Selectors=['//help']
+                Selectors=['//help', '//block_help']
             )
             particles.UpdatePipeline()
             helper.UpdatePipeline()

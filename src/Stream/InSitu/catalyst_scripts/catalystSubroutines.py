@@ -9,6 +9,7 @@ scripts in this package.
 
 
 from paraview import servermanager
+from paraview import simple
 from paraview.simple import CreateExtractor
 import sys
 import math
@@ -273,4 +274,58 @@ def print_proxy_overview():
     #     _log(f"   - Properties:", "INFO")
     #     for prop_name in proxy.ListProperties():
     #         _log(f"     - {prop_name}", "INFO")
+
+def find_source_by_name(base_name):
+    """
+    Robustly finds a source in the pipeline.
+    """
+    s = simple.FindSource(base_name)
+    if s: return s
+    
+    sources = simple.GetSources()
+    for (group, name), proxy in sources.items():
+        if name.startswith(base_name):
+            return proxy
+    return None
+    
+def get_available_extract_names(catalyst_link):
+    """
+    Queries the Catalyst In-Situ Proxy Manager for available channels.
+    """
+    if not catalyst_link:
+        return []
+
+    try:
+        # Access the raw C++ object to get the InSitu Manager
+        if hasattr(catalyst_link, "GetInsituProxyManager"):
+            pm = catalyst_link.GetInsituProxyManager()
+        else:
+            pm = catalyst_link.GetClientSideObject().GetInsituProxyManager()
+
+        if pm is None:
+            return []
+
+        # The 'sources' group in the Insitu Manager contains the available extracts
+        num_proxies = pm.GetNumberOfProxies("sources")
+        
+        all_names = []
+        for idx in range(num_proxies):
+            name = pm.GetProxyName("sources", idx)
+            if name:
+                all_names.append(name)
+        
+        print(f"DEBUG: All found sources: {sorted(list(set(all_names)))}")
+
+        names = []
+        for name in all_names:
+            # Filter out the generated filters (ending in .bunch, .box, .MergedBlocks, .Cell2Point, .Glyph)
+            if any(name.endswith(suffix) for suffix in [".bunch", ".box", ".MergedBlocks", ".Cell2Point", ".Glyph", ".ResampleToImage"]):
+                continue
+            names.append(name)
+
+        return sorted(list(set(names)))
+
+    except Exception as e:
+        print(f"[Error] Failed to query InsituProxyManager: {e}")
+        return []
 

@@ -8,6 +8,7 @@ from paraview import simple
 from paraview import live
 
 import trame_render_config as render_config
+from catalystSubroutines import find_source_by_name, get_available_extract_names
 
 # -----------------------------------------------------------------------------
 # Trame Setup
@@ -24,59 +25,9 @@ source_proxy = None
 # Helper Functions
 # -----------------------------------------------------------------------------
 
-def find_source_by_name(base_name):
-    """
-    Robustly finds a source in the pipeline.
-    """
-    s = simple.FindSource(base_name)
-    if s: return s
-    
-    sources = simple.GetSources()
-    for (group, name), proxy in sources.items():
-        if name.startswith(base_name):
-            return proxy
-    return None
-    
-def get_available_extract_names():
-    """
-    Queries the Catalyst In-Situ Proxy Manager for available channels.
-    """
-    if not catalyst_link:
-        return []
-
-    try:
-        # Access the raw C++ object to get the InSitu Manager
-        if hasattr(catalyst_link, "GetInsituProxyManager"):
-            pm = catalyst_link.GetInsituProxyManager()
-        else:
-            pm = catalyst_link.GetClientSideObject().GetInsituProxyManager()
-
-        if pm is None:
-            return []
-
-        # The 'sources' group in the Insitu Manager contains the available extracts
-        num_proxies = pm.GetNumberOfProxies("sources")
-        
-        all_names = []
-        for idx in range(num_proxies):
-            name = pm.GetProxyName("sources", idx)
-            if name:
-                all_names.append(name)
-        
-        print(f"DEBUG: All found sources: {sorted(list(set(all_names)))}")
-
-        names = []
-        for name in all_names:
-            # Filter out the generated filters (ending in .bunch, .box, .MergedBlocks, .Cell2Point, .Glyph)
-            if any(name.endswith(suffix) for suffix in [".bunch", ".box", ".MergedBlocks", ".Cell2Point", ".Glyph", ".ResampleToImage"]):
-                continue
-            names.append(name)
-
-        return sorted(list(set(names)))
-
-    except Exception as e:
-        print(f"[Error] Failed to query InsituProxyManager: {e}")
-        return []
+# Moved to catalystSubroutines.py:
+# - find_source_by_name
+# - get_available_extract_names
 
 # -----------------------------------------------------------------------------
 # Core Functions
@@ -114,7 +65,7 @@ def scan_sources_only():
         msgs_processed += 1
         if msgs_processed > 50: break
     
-    names = get_available_extract_names()
+    names = get_available_extract_names(catalyst_link)
     
     if names:
         print(f"Scan complete. Found: {names}")
@@ -192,6 +143,9 @@ def extract_data():
         # proxies_to_extract.append(f"{channel_name}.ResampleToImage")
     elif channel_name.startswith("ippl_vField"):
         proxies_to_extract.append(f"{channel_name}.Glyph")
+    elif channel_name.startswith("ippl_particles"):
+        proxies_to_extract.append(f"{channel_name}.bunch")
+        proxies_to_extract.append(f"{channel_name}.box")
 
     print(f"Requesting {proxies_to_extract}...")
     
@@ -206,6 +160,8 @@ def extract_data():
     primary_proxy_name = channel_name
     if channel_name.startswith("ippl_sField"):
         primary_proxy_name = f"{channel_name}.MergedBlocks"
+    elif channel_name.startswith("ippl_particles"):
+        primary_proxy_name = f"{channel_name}.bunch"
         # primary_proxy_name = f"{channel_name}.Cell2Point"
         # primary_proxy_name = f"{channel_name}.ResampleToImage"
 
@@ -228,6 +184,8 @@ def extract_data():
                 pass
         time.sleep(0.1)
 
+
+
     if found_data:
         # Update global source_proxy to point to the primary one
         source_proxy = find_source_by_name(primary_proxy_name)
@@ -238,7 +196,7 @@ def extract_data():
         # --- Dispatch based on name ---
         if channel_name.startswith("ippl_particles"):
             print(f"Applying Custom Particle Render for {channel_name}...")
-            render_config.setup_particle_view(source_proxy, view)
+            render_config.setup_particle_view(source_proxy, view, channel_name)
         elif channel_name.startswith("ippl_sField"):
             print(f"Applying Scalar Field Render for {channel_name}...")
             # Use MergedBlocks as source
@@ -261,6 +219,7 @@ def extract_data():
             render_config.setup_default_view(source_proxy, view)
 
         # Trigger update
+        render_config.reset_camera(simple.GetActiveView(), state.selected_source, source_proxy)
         simple.Render()
         if hasattr(ctrl, 'view_update'):
             ctrl.view_update()
@@ -311,10 +270,19 @@ def reset_visualization():
              p2 = find_source_by_name("Merged_Particles")
              if p2: simple.Delete(p2)
              
-             # Clean up main source
-             if source_proxy: simple.Delete(source_proxy)
-             p = find_source_by_name(sel)
-             if p and p != source_proxy: simple.Delete(p)
+             # Clean up box
+             p_box = find_source_by_name(f"{sel}.box")
+             if p_box: simple.Delete(p_box)
+             
+             # Clean up bunch
+             p_bunch = find_source_by_name(f"{sel}.bunch")
+             if p_bunch: simple.Delete(p_bunch)
+             
+             # Clean up container
+             p_container = find_source_by_name(sel)
+             if p_container: simple.Delete(p_container)
+             
+             source_proxy = None
         else:
              if source_proxy: simple.Delete(source_proxy)
              # Ensure parent is gone if source_proxy was different
@@ -326,6 +294,8 @@ def reset_visualization():
     simple.Render()
     if hasattr(ctrl, 'view_update'):
         ctrl.view_update()
+
+# Removed reset_camera function as it is now in trame_render_config.py
 
 # ... (Polling and Steering) ...
 async def poll_catalyst():
@@ -379,6 +349,10 @@ async def poll_catalyst():
                         if source_proxy: 
                             source_proxy.UpdatePipeline()
                             if sel.startswith("ippl_particles"):
+                                # Update box as well
+                                box_proxy = find_source_by_name(f"{sel}.box")
+                                if box_proxy: box_proxy.UpdatePipeline()
+                                
                                 render_config.update_particle_view(source_proxy, simple.GetActiveView())
                     
                     simple.Render()
@@ -454,6 +428,11 @@ with SinglePageLayout(server) as layout:
         vuetify3.VBtn("Initialize", click=extract_data, disabled=("!connected || has_data || !selected_source",), variant="text")
         with vuetify3.VBtn(icon=True, click=reset_visualization, disabled=("!has_data",), color="error", variant="text"):
             vuetify3.VIcon("mdi-refresh")
+        
+        # --- RESET CAMERA ---
+        with vuetify3.VBtn(icon=True, click=lambda: render_config.reset_camera(simple.GetActiveView(), state.selected_source, source_proxy), disabled=("!has_data",), variant="text", color="primary"):
+            vuetify3.VIcon("mdi-camera-retake")
+            vuetify3.VTooltip(activator="parent", location="bottom", text="Reset Camera")
         
         vuetify3.VDivider(vertical=True, classes="mx-4")
         

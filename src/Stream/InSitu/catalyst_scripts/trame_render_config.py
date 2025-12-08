@@ -1,5 +1,5 @@
 from paraview import simple
-from catalystSubroutines import get_global_spatial_bounds
+from catalystSubroutines import get_global_spatial_bounds, nice_bounds_sym, get_global_range, auto_camera_from_bounds, find_source_by_name
 
 def setup_default_view(source_proxy, view):
     """
@@ -18,7 +18,7 @@ def setup_default_view(source_proxy, view):
     return rep
 
 
-def setup_particle_view(source_proxy, view):
+def setup_particle_view(source_proxy, view, channel_name):
     """
     Applies the 'Point Gaussian' style with a yellow bounding box helper.
     Replicates the logic from the PNG extractor script.
@@ -32,28 +32,14 @@ def setup_particle_view(source_proxy, view):
 
     # 2. Extract the 'Main' particles (Block 0 usually)
     #    We create a separate filter so we can style it differently
-    particles_extract = simple.ExtractBlock(Input=source_proxy, registrationName="Particles_Only")
-    particles_extract.Selectors = ['//block_main'] 
-    particles_extract.UpdatePipeline()
+    # particles_extract = simple.ExtractBlock(Input=source_proxy, registrationName="Particles_Only")
+    # particles_extract.Selectors = ['//main'] 
+    # particles_extract.UpdatePipeline()
+    # input_for_particles = particles_extract
 
-    # Check if extraction worked
-    input_for_particles = particles_extract
-    if particles_extract.GetDataInformation().GetNumberOfPoints() == 0:
-        print("Warning: Particle extraction empty. Attempting MergeBlocks...")
-        # Fallback: Merge everything into one dataset
-        merged = simple.MergeBlocks(Input=source_proxy, registrationName="Merged_Particles")
-        merged.MergePartitionsOnly = 1
-        merged.UpdatePipeline()
-        if merged.GetDataInformation().GetNumberOfPoints() > 0:
-             input_for_particles = merged
-        else:
-             print("Warning: MergeBlocks also empty. Using raw source.")
-             input_for_particles = source_proxy
-
-    # 3. Extract the 'Helper/Box' (Block 1 usually)
-    # box_extract = simple.ExtractBlock(Input=source_proxy, registrationName="Box_Helper")
-    # box_extract.Selectors = ['//block_help']
-    # box_extract.UpdatePipeline()
+    found_source =  simple.FindSource(channel_name+".bunch")
+    found_source.UpdatePipeline()
+    input_for_particles = found_source
 
     # --- VISUALIZE PARTICLES ---
     # Show the particles using Point Gaussian
@@ -64,7 +50,8 @@ def setup_particle_view(source_proxy, view):
     # We try to find the velocity array, otherwise default to solid color
     info = input_for_particles.GetDataInformation()
     point_data = info.GetPointDataInformation()
-    print(dir(point_data))
+
+
     # Debug: Print available arrays
     num_arrays = point_data.GetNumberOfArrays()
     print(f"Available Point Arrays ({num_arrays}):")
@@ -119,23 +106,49 @@ def setup_particle_view(source_proxy, view):
     else:
         part_rep.GaussianRadius = 0.05
 
+
+
+
+
+
+
+
+
     # --- VISUALIZE BOX HELPER ---
     # Show the box as a yellow outline
-    # box_rep = simple.Show(box_extract, view)
-    # box_rep.SetRepresentationType('Outline')
-    
-    # # Solid Color: Yellow
-    # box_rep.ColorArrayName = ['POINTS', ''] # Disable array coloring
-    # box_rep.AmbientColor = [1.0, 1.0, 0.0]
-    # box_rep.DiffuseColor = [1.0, 1.0, 0.0]
-    # box_rep.LineWidth = 2.0
-    # box_rep.Opacity = 0.5 # Slightly transparent
+
+    box_source = simple.FindSource(channel_name+".box")
+    if box_source:
+        # Clean existing rep to ensure fresh state
+        existing_box_rep = simple.GetRepresentation(box_source, view)
+        if existing_box_rep:
+            simple.Delete(existing_box_rep)
+
+        box_source.UpdatePipeline()
+        
+        # Debug info
+        info = box_source.GetDataInformation()
+        print(f"Box Data: {info.GetNumberOfPoints()} points, {info.GetNumberOfCells()} cells")
+
+        box_rep = simple.Show(box_source, view)
+        box_rep.SetRepresentationType('Outline')
+        
+        # Solid Color: Yellow
+        box_rep.AmbientColor = [1.0, 1.0, 0.0]
+        box_rep.DiffuseColor = [1.0, 1.0, 0.0]
+        box_rep.LineWidth = 2.0
+        box_rep.Opacity = 0.1 
+        box_rep.Visibility = 1
+        
+        # Correct way to disable array coloring (Solid Color)
+        box_rep.ColorArrayName = [None, ''] 
+        box_rep.MapScalars = 0
+    else:
+        print(f"Warning: {channel_name}.box not found.")
 
     simple.ResetCamera()
 
     return part_rep
-
-
 
 def update_particle_view(source_proxy, view):
     """
@@ -281,24 +294,47 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         
         # Color Transfer Function
         lut = simple.GetColorTransferFunction(array_name)
-        r = point_data.GetArrayInformation(array_name).GetComponentRange(-1)
-            
-        if r[1] > r[0]:
-            lut.RescaleTransferFunction(r[0], r[1])
-            
+        
+        # Define the specific color map from png_ext_sfield.py
+        lut.RGBPoints = [-2.00, 0.231373, 0.298039, 0.752941, 
+                         0.00, 0.865003, 0.865003, 0.865003, 
+                         2.00, 0.705882, 0.0156863, 0.14902]
+        lut.ScalarRangeInitialized = 1.0
+
         # Opacity Transfer Function
         pwf = simple.GetOpacityTransferFunction(array_name)
-        pwf.RescaleTransferFunction(r[0], r[1])
+        
+        # Define the specific opacity map from png_ext_sfield.py
+        pwf.Points = [-2.00, 1.00, 0.5, 0.0, 
+                     -1.20, 0.75, 0.5, 0.0, 
+                     -0.80, 0.25, 0.5, 0.0, 
+                     -0.01, 0.00, 0.5, 0.0, 
+                      0.00, 1.00, 0.5, 0.0, 
+                      0.01, 0.00, 0.5, 0.0, 
+                      0.80, 0.25, 0.5, 0.0, 
+                      1.20, 0.75, 0.5, 0.0, 
+                      2.00, 1.00, 0.5, 0.0]
+        pwf.ScalarRangeInitialized = 1
+
+        # Rescale based on actual data
+        local_min, local_max = point_data.GetArrayInformation(array_name).GetComponentRange(-1)
+        global_min, global_max = get_global_range(local_min, local_max)
+        nice_min, nice_max = nice_bounds_sym(global_min, global_max)
+        
+        lut.RescaleTransferFunction(nice_min, nice_max)
+        pwf.RescaleTransferFunction(nice_min, nice_max)
 
         rep.ColorArrayName = [association, array_name]
         rep.LookupTable = lut
         rep.OpacityArrayName = [association, array_name]
         rep.OpacityTransferFunction = 'Piecewise Function'
         rep.ScalarOpacityFunction = pwf
+        rep.ScalarOpacityUnitDistance = 4.00
         
         # Scalar Bar
         sb = simple.GetScalarBar(lut, view)
         sb.Title = array_name
+        sb.ComponentTitle = 'Magnitude'
         sb.Visibility = 1
         rep.SetScalarBarVisibility(view, True)
         
@@ -337,13 +373,16 @@ def update_scalar_field_view(source_proxy, view):
         
     array_info = data_info.GetArrayInformation(array_name)
     if array_info:
-        r = array_info.GetComponentRange(-1)
+        local_min, local_max = array_info.GetComponentRange(-1)
+        global_min, global_max = get_global_range(local_min, local_max)
+        nice_min, nice_max = nice_bounds_sym(global_min, global_max)
+
         lut = rep.LookupTable
         if lut:
-            lut.RescaleTransferFunction(r[0], r[1])
+            lut.RescaleTransferFunction(nice_min, nice_max)
         pwf = rep.ScalarOpacityFunction
         if pwf:
-            pwf.RescaleTransferFunction(r[0], r[1])
+            pwf.RescaleTransferFunction(nice_min, nice_max)
 
 def setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False):
     """
@@ -477,3 +516,49 @@ def update_vector_field_view(source_proxy, view):
                 lut = rep.LookupTable
                 if lut:
                     lut.RescaleTransferFunction(r[0], r[1])
+
+def reset_camera(view, selection_name, source_proxy):
+    if not view: return
+    
+    # Identify the actual proxy being visualized to get correct bounds
+    target_proxy = source_proxy
+    sel = selection_name
+    
+    if sel:
+        if sel.startswith("ippl_vField"):
+            # Priority: Local Glyph -> Extracted Glyph -> Source
+            p = find_source_by_name(f"{sel}_Glyph")
+            if not p: p = find_source_by_name(f"{sel}.Glyph")
+            if p: target_proxy = p
+            
+        elif sel.startswith("ippl_sField"):
+            # Priority: Local Resample -> Merged -> Source
+            p = find_source_by_name(f"{sel}_Resample")
+            if not p: p = find_source_by_name(f"{sel}.MergedBlocks")
+            if p: target_proxy = p
+            
+        elif sel.startswith("ippl_particles"):
+             # For particles, use the bunch proxy
+             p = find_source_by_name(f"{sel}.bunch")
+             if p: target_proxy = p
+
+    if not target_proxy: return
+
+    # Get bounds
+    target_proxy.UpdatePipeline()
+    info = target_proxy.GetDataInformation()
+    bounds = info.GetBounds()
+    
+    # If bounds are invalid (e.g. uninitialized), try to fetch from representation
+    if bounds[0] > bounds[1]:
+        rep = simple.GetRepresentation(target_proxy, view)
+        if rep:
+            info = rep.Input.GetDataInformation()
+            bounds = info.GetBounds()
+            
+    # If still invalid, return
+    if bounds[0] > bounds[1]:
+        print(f"Cannot reset camera: Invalid bounds for {target_proxy.GetLogName()}")
+        return
+
+    auto_camera_from_bounds(view, bounds)
