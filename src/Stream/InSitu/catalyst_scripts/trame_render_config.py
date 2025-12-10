@@ -435,6 +435,25 @@ def setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False
                 array_name = name
                 association = 'POINTS'
                 break
+
+        # Fallback: choose the first 3-component vector array available
+        if array_name is None:
+            # Check point data first
+            if p_info and p_info.GetNumberOfArrays() > 0:
+                for i in range(p_info.GetNumberOfArrays()):
+                    ai = p_info.GetArrayInformation(i)
+                    if ai and ai.GetNumberOfComponents() in (3, 2):
+                        array_name = ai.GetName()
+                        association = 'POINTS'
+                        break
+            # Then cell data
+            if array_name is None and c_info and c_info.GetNumberOfArrays() > 0:
+                for i in range(c_info.GetNumberOfArrays()):
+                    ai = c_info.GetArrayInformation(i)
+                    if ai and ai.GetNumberOfComponents() in (3, 2):
+                        array_name = ai.GetName()
+                        association = 'CELLS'
+                        break
                 
         if array_name:
             glyph.OrientationArray = [association, array_name]
@@ -470,6 +489,14 @@ def setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False
             array_name = name
             association = 'CELLS'
             break
+    # Fallback to first available array if candidates absent
+    if array_name is None:
+        if p_info and p_info.GetNumberOfArrays() > 0:
+            array_name = p_info.GetArrayInformation(0).GetName()
+            association = 'POINTS'
+        elif c_info and c_info.GetNumberOfArrays() > 0:
+            array_name = c_info.GetArrayInformation(0).GetName()
+            association = 'CELLS'
             
     if array_name:
         rep.ColorArrayName = [association, array_name]

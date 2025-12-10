@@ -362,6 +362,7 @@ void ProxyWriter::appendPrototype() {
   misc_ << "      <Proxy name='SteerableEnumsPrototype' label='Enums-Collective-Prototype (do not cancel [x] or add new [+]!!)'>\n";
   for (const auto& ch : channels_) {
     if (!ch.isEnum || ch.enumEntries.empty()) continue;
+    if (ch.propertyName.find('.') != std::string::npos) continue;
   misc_ << "        <IntVectorProperty name='PrototypeEnum_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << ch.defaultInt << "' immediate_apply='1'>\n";
   misc_ << "          <EnumerationDomain name='enum'>\n";
     for (const auto& [text, val] : ch.enumEntries) {
