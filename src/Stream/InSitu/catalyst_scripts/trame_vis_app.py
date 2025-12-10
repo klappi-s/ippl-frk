@@ -172,7 +172,6 @@ def toggle_visibility(name):
                     state.status_text = "Live disabled: transport error"
 
 def focus_camera_on(name):
-    global view_update_enabled
     if name not in active_proxies: return
     proxy = active_proxies[name]
     render_config.reset_camera(simple.GetActiveView(), name, proxy)
@@ -181,10 +180,144 @@ def focus_camera_on(name):
         try:
             ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            print(f"[WARN] view_update failed: {e}. Disabling further updates.")
             view_update_enabled = False
-            state.live_mode = False
-            state.status_text = "Live disabled: transport error"
+
+def get_display_proxy(name):
+    if name.startswith("ippl_sField"):
+        p = find_source_by_name(f"{name}_Resample")
+        if not p: p = find_source_by_name(f"{name}.MergedBlocks")
+        return p
+    elif name.startswith("ippl_vField"):
+        p = find_source_by_name(f"{name}_Glyph")
+        if not p: p = find_source_by_name(f"{name}.Glyph")
+        if not p: p = find_source_by_name(name)
+        return p
+    elif name.startswith("ippl_particles"):
+        return find_source_by_name(f"{name}.bunch")
+    else:
+        return find_source_by_name(name)
+
+def open_edit_dialog(name):
+    state.editing_source = name
+    state.show_edit_dialog = True
+    
+    proxy = get_display_proxy(name)
+    if not proxy:
+        state.color_arrays = []
+        state.current_color_array = None
+        return
+
+    # Get Representation
+    rep = simple.GetRepresentation(proxy, simple.GetActiveView())
+    if not rep:
+        state.color_arrays = []
+        state.current_color_array = None
+        return
+
+    # Get Arrays
+    info = proxy.GetDataInformation()
+    arrays = []
+    
+    # Point Data
+    pd = info.GetPointDataInformation()
+    for i in range(pd.GetNumberOfArrays()):
+        ai = pd.GetArrayInformation(i)
+        arrays.append({'title': f"{ai.GetName()} (Points)", 'value': f"POINTS:{ai.GetName()}"})
+        
+    # Cell Data
+    cd = info.GetCellDataInformation()
+    for i in range(cd.GetNumberOfArrays()):
+        ai = cd.GetArrayInformation(i)
+        arrays.append({'title': f"{ai.GetName()} (Cells)", 'value': f"CELLS:{ai.GetName()}"})
+        
+    # Add Solid Color option
+    arrays.insert(0, {'title': 'Solid Color', 'value': 'SOLID'})
+    
+    state.color_arrays = arrays
+    
+    # Get Current Color
+    # ColorArrayName is usually ['POINTS', 'name'] or ['CELLS', 'name'] or [None, '']
+    ca = rep.ColorArrayName
+    if ca and len(ca) > 1 and ca[0] and ca[1]:
+        state.current_color_array = f"{ca[0]}:{ca[1]}"
+    else:
+        state.current_color_array = 'SOLID'
+
+def update_color_by(value):
+    name = state.editing_source
+    if not name: return
+    
+    proxy = get_display_proxy(name)
+    if not proxy: return
+    
+    rep = simple.GetRepresentation(proxy, simple.GetActiveView())
+    if not rep: return
+    # Hide any existing scalar bar tied to previous array
+    prev_ca = getattr(rep, 'ColorArrayName', None)
+    if prev_ca and isinstance(prev_ca, list) and len(prev_ca) >= 2 and prev_ca[0] and prev_ca[1]:
+        try:
+            prev_lut = simple.GetColorTransferFunction(prev_ca[1])
+            prev_sb = simple.GetScalarBar(prev_lut, simple.GetActiveView())
+            if prev_sb:
+                prev_sb.Visibility = 0
+        except Exception:
+            pass
+    # Also ensure rep turns off previous scalar bar
+    try:
+        rep.SetScalarBarVisibility(simple.GetActiveView(), False)
+    except Exception:
+        pass
+
+    if value == 'SOLID':
+        rep.ColorArrayName = [None, '']
+        rep.SetScalarBarVisibility(simple.GetActiveView(), False)
+    else:
+        # value is "ASSOC:NAME"
+        parts = value.split(':')
+        if len(parts) < 2: return
+        assoc = parts[0]
+        array_name = parts[1]
+        
+        rep.ColorArrayName = [assoc, array_name]
+        
+        # Rescale LUT
+        lut = simple.GetColorTransferFunction(array_name)
+        
+        # Get Range
+        info = proxy.GetDataInformation()
+        if assoc == 'POINTS':
+            dinfo = info.GetPointDataInformation()
+        else:
+            dinfo = info.GetCellDataInformation()
+            
+        ai = dinfo.GetArrayInformation(array_name)
+        if ai:
+            r = ai.GetComponentRange(-1) # Magnitude
+            if r[1] > r[0]:
+                lut.RescaleTransferFunction(r[0], r[1])
+                
+        rep.LookupTable = lut
+        
+        # Update Scalar Bar
+        sb = simple.GetScalarBar(lut, simple.GetActiveView())
+        sb.Title = array_name
+        sb.ComponentTitle = 'Magnitude'
+        sb.Visibility = 1
+        rep.SetScalarBarVisibility(simple.GetActiveView(), True)
+
+    simple.Render()
+    if hasattr(ctrl, 'view_update') and view_update_enabled:
+        try:
+            ctrl.view_update()
+        except Exception as e:
+            print(f"[WARN] view_update failed: {e}. Disabling further updates.")
+            # We don't disable global view_update_enabled here to be less aggressive in the UI interaction
+            pass
+
+def apply_and_close():
+    update_color_by(state.current_color_array)
+    state.show_edit_dialog = False
 
 # Moved to trame_steering_config.py:
 # - load_steerable_proxies
@@ -666,6 +799,17 @@ with SinglePageLayout(server) as layout:
                                     ):
                                         vuetify3.VIcon("mdi-crosshairs-gps")
                                         vuetify3.VTooltip(activator="parent", location="bottom", text="Focus Camera")
+
+                                    # Settings Button
+                                     with vuetify3.VBtn(
+                                        icon=True, 
+                                        variant="text", 
+                                        density="compact",
+                                        click=(open_edit_dialog, "[item.id]"),
+                                        color="secondary"
+                                    ):
+                                        vuetify3.VIcon("mdi-palette")
+                                        vuetify3.VTooltip(activator="parent", location="bottom", text="Edit Visualization")
                                         
                                     # Delete
                                      with vuetify3.VBtn(
@@ -1001,6 +1145,25 @@ with SinglePageLayout(server) as layout:
         with vuetify3.VContainer(fluid=True, classes="fill-height pa-0"):
             view = vtk.VtkRemoteView(simple.GetRenderView())
             ctrl.view_update = view.update
+            
+        # Edit Dialog
+        with vuetify3.VDialog(v_model=("show_edit_dialog", False), max_width=500):
+            with vuetify3.VCard():
+                vuetify3.VCardTitle("Edit Visualization: {{ editing_source }}")
+                with vuetify3.VCardText():
+                    vuetify3.VSelect(
+                        v_model=("current_color_array",),
+                        items=("color_arrays", []),
+                        label="Color By",
+                        item_title="title",
+                        item_value="value",
+                        density="compact",
+                        variant="outlined",
+                    )
+                with vuetify3.VCardActions():
+                    vuetify3.VSpacer()
+                    vuetify3.VBtn("Cancel", click="show_edit_dialog = False")
+                    vuetify3.VBtn("OK", click=apply_and_close, color="primary", variant="elevated")
 
 state.connected = False
 state.has_data = False
@@ -1012,6 +1175,10 @@ state.selected_source = None
 state.pipeline_items = []
 state.axes_grid_visible = True
 state.split_pos = 50
+state.show_edit_dialog = False
+state.editing_source = ""
+state.color_arrays = []
+state.current_color_array = None
 
 # Initialize state for steerable parameters
 state.selected_steering_proxy = steerable_proxies[0]['name'] if steerable_proxies else None

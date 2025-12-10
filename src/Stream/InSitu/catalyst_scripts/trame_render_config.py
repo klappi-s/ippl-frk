@@ -46,45 +46,44 @@ def setup_particle_view(source_proxy, view, channel_name):
     part_rep = simple.Show(input_for_particles, view)
     part_rep.SetRepresentationType('Point Gaussian')
     
-    # Configure Color (Velocity Magnitude)
-    # We try to find the velocity array, otherwise default to solid color
+    # Configure Color: prefer existing selection; fallback to velocity; else first array
     info = input_for_particles.GetDataInformation()
     point_data = info.GetPointDataInformation()
-
 
     # Debug: Print available arrays
     num_arrays = point_data.GetNumberOfArrays()
     print(f"Available Point Arrays ({num_arrays}):")
-
     for i in range(num_arrays):
-        # Use GetArrayInformation(index) instead of GetArray(index)
         array_info = point_data.GetArrayInformation(i)
-        if array_info:
-            print(f" - {array_info.GetName()}")
-        else:
-            print(f" - [Array {i} info is None]")
+        print(f" - {array_info.GetName()}" if array_info else f" - [Array {i} info is None]")
 
-    if point_data.GetArrayInformation('velocity'):
-        part_rep.ColorArrayName = ['POINTS', 'velocity']
-        
-        # Setup Lookup Table
-        lut = simple.GetColorTransferFunction('velocity')
-        # Reset range based on current data
-        import math
-        r = point_data.GetArrayInformation('velocity').GetComponentRange(-1) # -1 = Magnitude
+    # Determine target array
+    current_ca = getattr(part_rep, 'ColorArrayName', None)
+    target_assoc = None
+    target_name = None
+    if current_ca and isinstance(current_ca, list) and len(current_ca) >= 2 and current_ca[0] and current_ca[1]:
+        target_assoc, target_name = current_ca[0], current_ca[1]
+    elif point_data.GetArrayInformation('velocity'):
+        target_assoc, target_name = 'POINTS', 'velocity'
+    elif num_arrays > 0:
+        ai0 = point_data.GetArrayInformation(0)
+        target_assoc, target_name = 'POINTS', (ai0.GetName() if ai0 else None)
+
+    if target_name:
+        part_rep.ColorArrayName = [target_assoc, target_name]
+        lut = simple.GetColorTransferFunction(target_name)
+        r = point_data.GetArrayInformation(target_name).GetComponentRange(-1) if point_data.GetArrayInformation(target_name) else (0.0, 1.0)
         if r[1] > r[0]:
             lut.RescaleTransferFunction(r[0], r[1])
-            
         part_rep.LookupTable = lut
-        
-        # Scalar Bar (Legend)
         sb = simple.GetScalarBar(lut, view)
-        sb.Title = 'Velocity'
+        sb.Title = target_name
         sb.ComponentTitle = 'Magnitude'
         sb.Visibility = 1
         part_rep.SetScalarBarVisibility(view, True)
     else:
-        print(" 'velocity' array not found, using default coloring.")
+        # Solid color fallback
+        part_rep.ColorArrayName = [None, '']
 
     # Calculate Gaussian Radius based on bounding box
     bounds = info.GetBounds()
@@ -169,16 +168,18 @@ def update_particle_view(source_proxy, view):
             
     if not part_rep: return
 
-    # 2. Update Transfer Function Range
-    info = part_rep.Input.GetDataInformation().GetPointDataInformation()
-    vel_array = info.GetArrayInformation('velocity')
-    if vel_array:
-        r = vel_array.GetComponentRange(-1)
-        lut = part_rep.LookupTable
-        if lut:
-            # You might want to smooth this so it doesn't flicker, 
-            # but here is the direct update:
-            lut.RescaleTransferFunction(r[0], r[1])
+    # 2. Update Transfer Function Range based on current ColorArrayName
+    ca = getattr(part_rep, 'ColorArrayName', None)
+    if ca and isinstance(ca, list) and len(ca) >= 2 and ca[0] and ca[1]:
+        assoc, array_name = ca[0], ca[1]
+        dinfo = part_rep.Input.GetDataInformation()
+        data_info = dinfo.GetPointDataInformation() if assoc == 'POINTS' else dinfo.GetCellDataInformation()
+        arr_info = data_info.GetArrayInformation(array_name) if data_info else None
+        if arr_info:
+            r = arr_info.GetComponentRange(-1)
+            lut = part_rep.LookupTable
+            if lut:
+                lut.RescaleTransferFunction(r[0], r[1])
 
     # 3. Update Radius (Optional, if box expands)
     # bounds = part_rep.Input.GetDataInformation().GetBounds()
