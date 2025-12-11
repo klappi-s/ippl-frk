@@ -692,7 +692,7 @@ void CatalystAdaptor::AddSteerableChannel( const std::vector<ippl::Vector<T, Dim
 template<typename T>
 requires (!std::is_enum_v<std::decay_t<T>>)
 void CatalystAdaptor::FetchSteerableChannelValue( T& steerable_scalar_backwardpass, const std::string& label) {
-    ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: " << typeid(T).name() << endl;
+    // ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: " << typeid(T).name() << endl;
 
     std::string unified_path = std::string("catalyst/steerable_channel_backward_all/fields/") +
                                "steerable_field_b_" + label + "/values";
@@ -724,10 +724,10 @@ void CatalystAdaptor::FetchSteerableChannelValue( T& steerable_scalar_backwardpa
 
     // Safe logging: avoid operator<< on non-streamable types like std::vector<Struct>
     if constexpr (is_std_vector_any<std::decay_t<T>>::value) {
-        ca_m << "::Execute()::FetchSteerableChannel(" << label << ") | received vector | size="
+        ca_m << "::Execute()::FetchSteerableChannel(" << label << ") | Type: " << typeid(T).name() << " | received vector | size="
              << steerable_scalar_backwardpass.size() << endl;
     } else {
-        ca_m << "::Execute()::FetchSteerableChannel(" << label << ") | received:" << steerable_scalar_backwardpass << endl;
+        ca_m << "::Execute()::FetchSteerableChannel(" << label << ") | Type: " << typeid(T).name() << " | received: " << steerable_scalar_backwardpass << endl;
     }
 }
 
@@ -736,7 +736,7 @@ template<typename E>
 requires (std::is_enum_v<std::decay_t<E>>)
 void CatalystAdaptor::FetchSteerableChannelValue( E& e, const std::string& label)
 {
-    ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: Enum| Value sent:" << /* enumChoices_[label].second  */to_string(e) << endl;
+    // ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: Enum| Value sent:" << /* enumChoices_[label].second  */to_string(e) << endl;
     std::string unified_path = std::string("catalyst/steerable_channel_backward_all/fields/") +
                                "steerable_field_b_" + label + "/values";
     if (!results.has_path(unified_path)) {
@@ -747,7 +747,7 @@ void CatalystAdaptor::FetchSteerableChannelValue( E& e, const std::string& label
     if (!values_node.dtype().is_number()) return;
     e = static_cast<E>(values_node.to_int32());
 
-    ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: Enum|  received:" << to_string(e) << endl;
+    ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: Enum | received: " << to_string(e) << endl;
 }
 
 
@@ -755,60 +755,45 @@ void CatalystAdaptor::FetchSteerableChannelValue( E& e, const std::string& label
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::FetchSteerableChannelValue( ippl::Vector<T, Dim_v>& steerable_vec_backwardpass, const std::string& label)
 {
-    ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Vector<" << typeid(T).name() << "," << Dim_v << ">" << endl;
-
-    // static const char* comp_names[3] = {"x","y","z"};
     const unsigned comps = Dim_v > 3 ? 3u : Dim_v;
-    // bool any_set = false;
-    // // Preferred: unified vector array with values/x,y,z
-    // for (unsigned c = 0; c < comps; ++c) {
-    //     std::string unified_vec_comp = std::string("catalyst/steerable_channel_backward_all/fields/") +
-    //                                    "steerable_field_b_" + label + "/values/" + comp_names[c];
-    //     if (results.has_path(unified_vec_comp)) {
-    //         conduit_cpp::Node vnode = results[unified_vec_comp];
-    //         if (vnode.dtype().is_number()) {
-    //             steerable_vec_backwardpass[c] = static_cast<T>(vnode.to_double());
-    //             any_set = true;
-    //             ca_m << "  read component '" << comp_names[c] << "' from " << unified_vec_comp
-    //                  << ": " << vnode.to_double() << endl;
-    //         }
-    //     }
-    // }
-
-    // Fallback: a flat numeric array at .../values holding at least `comps` elements
-    // if (!any_set) {
-    if (true) {
-        std::string unified_vec_values = std::string("catalyst/steerable_channel_backward_all/fields/") +
-                                         "steerable_field_b_" + label + "/values";
-        const std::string* chosen = nullptr;
-        if (results.has_path(unified_vec_values)) chosen = &unified_vec_values;
-        if (chosen) {
-            conduit_cpp::Node vnode = results[*chosen];
-                bool idx_read = true;
-                for (unsigned c = 0; c < comps; ++c) {
-                    std::string idx_path = *chosen + "." + std::to_string(c);
-                    if (results.has_path(idx_path)) {
-                        conduit_cpp::Node ic = results[idx_path];
-                        if (ic.dtype().is_number()) {
-                            steerable_vec_backwardpass[c] = static_cast<T>(ic.to_double());
-                        } else {
-                            idx_read = false;
-                        }
-                    } else {
-                        idx_read = false;
-                    }
-                }
-                if (idx_read) {
-                    // ca_m << "  read list-like values from " << *chosen << ":" << steerable_vec_backwardpass << endl;
-                    ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Vector<" << typeid(T).name() << "," << Dim_v << "> | received: " << steerable_vec_backwardpass << endl;
-                
-                }
-            // }
+    
+    std::string unified_vec_values = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                                     "steerable_field_b_" + label + "/values";
+    const std::string* chosen = nullptr;
+    if (results.has_path(unified_vec_values)) chosen = &unified_vec_values;
+    
+    if (chosen) {
+        conduit_cpp::Node vnode = results[*chosen];
+        
+        // Handle 1D vector appearing as scalar
+        if (comps == 1 && vnode.dtype().is_number()) {
+             steerable_vec_backwardpass[0] = static_cast<T>(vnode.to_double());
+             ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: Vector<" << typeid(T).name() << "," << Dim_v << "> | received: " << steerable_vec_backwardpass << endl;
+             return;
         }
-        else {
-            ca_warn << "  no backward vector found for label '" << label << "' under expected paths." << endl;
 
+        bool idx_read = true;
+        for (unsigned c = 0; c < comps; ++c) {
+            std::string idx_path = *chosen + "/" + std::to_string(c);
+            if (results.has_path(idx_path)) {
+                conduit_cpp::Node ic = results[idx_path];
+                if (ic.dtype().is_number()) {
+                    steerable_vec_backwardpass[c] = static_cast<T>(ic.to_double());
+                } else {
+                    idx_read = false;
+                }
+            } else {
+                idx_read = false;
+            }
         }
+        if (idx_read) {
+            ca_m << "::Execute()::FetchSteerableChannel(" << label  << ") | Type: Vector<" << typeid(T).name() << "," << Dim_v << "> | received: " << steerable_vec_backwardpass << endl;
+        } else {
+             ca_warn << "  backward vector '" << label << "' missing components." << endl;
+        }
+    }
+    else {
+        ca_warn << "  no backward vector found for label '" << label << "' under expected paths." << endl;
     }
 }
 
@@ -820,7 +805,7 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const 
 {
     // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
-    ca_m << "::Execute()::FetchSteerableChannel(vector<elem>) " << alabel << endl;
+    // ca_m << "::Execute()::FetchSteerableChannel(vector<elem>) " << alabel << endl;
     const std::string path = std::string("catalyst/steerable_channel_backward_all/fields/") +
                              "steerable_field_b_" + alabel + "/values";
     if (!results.has_path(path)) {
@@ -851,47 +836,57 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<Elem>& out, const 
         for (size_t i = 0; i < n; ++i) {
             assign_from_double(i, vals.child(i).to_double());
         }
-        return;
+        // return; // Don't return yet, we want to log
+    } else {
+
+        // Otherwise, try direct pointer access but guard with try/catch and a final safe fallback
+        bool success = false;
+        try {
+            if (dt.is_double()) {
+                const double* ptr = vals.as_double_ptr();
+                for (size_t i = 0; i < n; ++i) assign_from_double(i, ptr[i]);
+                success = true;
+            }
+            else if (dt.is_int32()) {
+                const int32_t* ptr = vals.as_int32_ptr();
+                for (size_t i = 0; i < n; ++i) assign_from_double(i, static_cast<double>(ptr[i]));
+                success = true;
+            }
+            else if (dt.is_uint32()) {
+                const uint32_t* ptr = vals.as_uint32_ptr();
+                for (size_t i = 0; i < n; ++i) assign_from_double(i, static_cast<double>(ptr[i]));
+                success = true;
+            }
+        } catch (const std::exception &e) {
+            ca_m << "  [DEBUG] direct pointer read failed for '" << alabel << "': " << e.what() << endl;
+            success = false;
+        } catch (...) {
+            ca_m << "  [DEBUG] direct pointer read failed for '" << alabel << "' (unknown error)" << endl;
+            success = false;
+        }
+
+        if (!success) {
+            // Final fallback: read each element by indexed child path (robust but slightly slower)
+            for (size_t i = 0; i < n; ++i) {
+                std::string child_path = path + "/" + std::to_string(i);
+                if (results.has_path(child_path)) {
+                    assign_from_double(i, results[child_path].to_double());
+                } else {
+                    // If even this fails, leave default value and warn
+                    ca_m << "  [WARN] Could not read element " << i << " of '" << alabel << "' via fallback" << endl;
+                }
+            }
+        }
     }
 
-    // Otherwise, try direct pointer access but guard with try/catch and a final safe fallback
-    bool success = false;
-    try {
-        if (dt.is_double()) {
-            const double* ptr = vals.as_double_ptr();
-            for (size_t i = 0; i < n; ++i) assign_from_double(i, ptr[i]);
-            success = true;
-        }
-        else if (dt.is_int32()) {
-            const int32_t* ptr = vals.as_int32_ptr();
-            for (size_t i = 0; i < n; ++i) assign_from_double(i, static_cast<double>(ptr[i]));
-            success = true;
-        }
-        else if (dt.is_uint32()) {
-            const uint32_t* ptr = vals.as_uint32_ptr();
-            for (size_t i = 0; i < n; ++i) assign_from_double(i, static_cast<double>(ptr[i]));
-            success = true;
-        }
-    } catch (const std::exception &e) {
-        ca_m << "  [DEBUG] direct pointer read failed for '" << alabel << "': " << e.what() << endl;
-        success = false;
-    } catch (...) {
-        ca_m << "  [DEBUG] direct pointer read failed for '" << alabel << "' (unknown error)" << endl;
-        success = false;
+    // Log the received array
+    ca_m << "::Execute()::FetchSteerableChannel(" << alabel << ") | Type: vector<elem> | received: [";
+    for (size_t i = 0; i < out.size(); ++i) {
+        if (i > 0) ca_m << ", ";
+        if constexpr (std::is_enum_v<std::decay_t<Elem>>) ca_m << to_string(out[i]);
+        else ca_m << out[i];
     }
-
-    if (success) return;
-
-    // Final fallback: read each element by indexed child path (robust but slightly slower)
-    for (size_t i = 0; i < n; ++i) {
-        std::string child_path = path + "/" + std::to_string(i);
-        if (results.has_path(child_path)) {
-            assign_from_double(i, results[child_path].to_double());
-        } else {
-            // If even this fails, leave default value and warn
-            ca_m << "  [WARN] Could not read element " << i << " of '" << alabel << "' via fallback" << endl;
-        }
-    }
+    ca_m << "]" << endl;
 }
 
 // Fetch std::vector<ippl::Vector<T,Dim>>
@@ -900,40 +895,63 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::Vector<T, Di
 {
     // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
-    ca_m << "::Execute()::FetchSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << alabel << endl;
+    // ca_m << "::Execute()::FetchSteerableChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << alabel << endl;
     const std::string root = std::string("catalyst/steerable_channel_backward_all/fields/") +
                              "steerable_field_b_" + alabel + "/values";
     
-    
-    
-    //                          // Prefer named component arrays x/y/z
-    // bool has_xyz = results.has_path(root + "/x") && results.has_path(root + "/y") && results.has_path(root + "/z");
-    // if (!has_xyz) {
-    //     ca_m << "  no backward vector array for '" << label << "' (expected x/y/z)" << endl;
-    //     return;
-    // }
-    // conduit_cpp::Node xn = results[root + "/x"]; 
-    // conduit_cpp::Node yn = results[root + "/y"]; 
-    // conduit_cpp::Node zn = results[root + "/z"]; 
+    // Handle 1D vector array appearing as flat array
+    if constexpr (Dim_v == 1) {
+        if (results.has_path(root) && !results.has_path(root + "/0")) {
+            conduit_cpp::Node vals = results[root];
+            size_t n = vals.dtype().number_of_elements();
+            if (n == 0 && vals.number_of_children() > 0) n = vals.number_of_children();
+            
+            out.resize(n);
+            
+            auto get_val = [&](size_t i) -> double {
+                if (vals.number_of_children() > 0) return vals.child(i).to_double();
+                conduit_cpp::DataType dt = vals.dtype();
+                if (dt.is_double()) return vals.as_double_ptr()[i];
+                if (dt.is_int32())  return static_cast<double>(vals.as_int32_ptr()[i]);
+                if (dt.is_uint32()) return static_cast<double>(vals.as_uint32_ptr()[i]);
+                try { return vals.child(i).to_double(); } catch (...) { return 0.0; }
+            };
+
+            for(size_t i=0; i<n; ++i) {
+                out[i][0] = static_cast<T>(get_val(i));
+            }
+            
+            ca_m << "::Execute()::FetchSteerableChannel(" << alabel << ") | Type: vector<Vector<" << typeid(T).name() << "," << Dim_v << ">> | received: [";
+            for (size_t i = 0; i < out.size(); ++i) {
+                if (i > 0) ca_m << ", ";
+                ca_m << out[i];
+            }
+            ca_m << "]" << endl;
+            return;
+        }
+    }
 
     // Prefer named component arrays x/y/z
-    bool has_xyz = results.has_path(root + "/0") && results.has_path(root + "/1") && results.has_path(root + "/2");
+    bool has_xyz = results.has_path(root + "/0");
+    if constexpr (Dim_v >= 2) has_xyz = has_xyz && results.has_path(root + "/1");
+    if constexpr (Dim_v >= 3) has_xyz = has_xyz && results.has_path(root + "/2");
+
     if (!has_xyz) {
-        ca_m << "  no backward vector array for '" << alabel << "' (expected 0/1/2)" << endl;
+        ca_m << "  no backward vector array for '" << alabel << "' (expected components 0" 
+             << (Dim_v >= 2 ? "/1" : "") << (Dim_v >= 3 ? "/2" : "") << ")" << endl;
         return;
     }
     conduit_cpp::Node xn = results[root + "/0"]; 
-    conduit_cpp::Node yn = results[root + "/1"]; 
-    conduit_cpp::Node zn = results[root + "/2"]; 
-
-
-
-
+    conduit_cpp::Node yn;
+    if constexpr (Dim_v >= 2) yn = results[root + "/1"];
+    conduit_cpp::Node zn;
+    if constexpr (Dim_v >= 3) zn = results[root + "/2"];
 
     const size_t nx = xn.dtype().number_of_elements();
-    const size_t ny = yn.dtype().number_of_elements();
-    const size_t nz = zn.dtype().number_of_elements();
-    const size_t N = std::min({nx, ny, nz});
+    size_t N = nx;
+    if constexpr (Dim_v >= 2) N = std::min(N, (size_t)yn.dtype().number_of_elements());
+    if constexpr (Dim_v >= 3) N = std::min(N, (size_t)zn.dtype().number_of_elements());
+
     out.resize(N);
     auto get_elem = [](conduit_cpp::Node& n, size_t i) -> double {
         if (n.number_of_children() > 0) return n.child(i).to_double();
@@ -946,14 +964,24 @@ void CatalystAdaptor::FetchSteerableChannelValue( std::vector<ippl::Vector<T, Di
     };
     for (size_t i = 0; i < N; ++i) {
         double vx = get_elem(xn, i);
-        double vy = get_elem(yn, i);
-        double vz = get_elem(zn, i);
+        double vy = 0.0;
+        if constexpr (Dim_v >= 2) vy = get_elem(yn, i);
+        double vz = 0.0;
+        if constexpr (Dim_v >= 3) vz = get_elem(zn, i);
+        
         ippl::Vector<T, Dim_v> v{};
         v[0] = static_cast<T>(vx);
         if constexpr (Dim_v >= 2) v[1] = static_cast<T>(vy);
         if constexpr (Dim_v >= 3) v[2] = static_cast<T>(vz);
         out[i] = v;
     }
+
+    ca_m << "::Execute()::FetchSteerableChannel(" << alabel << ") | Type: vector<Vector<" << typeid(T).name() << "," << Dim_v << ">> | received: [";
+    for (size_t i = 0; i < out.size(); ++i) {
+        if (i > 0) ca_m << ", ";
+        ca_m << out[i];
+    }
+    ca_m << "]" << endl;
 }
 
 

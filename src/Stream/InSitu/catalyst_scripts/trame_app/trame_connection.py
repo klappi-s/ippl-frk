@@ -21,8 +21,8 @@ def install(ctx: Any):
 def connect_to_catalyst(ctx: Any):
     print("[UI] Connect clicked")
     state = ctx.state
-    cat_host = "localhost"
-    cat_port = 22222
+    cat_host = state.catalyst_host
+    cat_port = int(state.catalyst_port)
     try:
         # Preload definitions to avoid errors during handshake (best effort)
         steering_config.preload_steerable_proxies()

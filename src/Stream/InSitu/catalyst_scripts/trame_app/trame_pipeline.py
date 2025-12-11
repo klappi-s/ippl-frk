@@ -24,7 +24,7 @@ def get_display_proxy(ctx: Any, name: str):
 
 def remove_proxy(ctx: Any, name: str):
     print(f"[UI] Remove Source clicked: {name}")
-    if name not in ctx.active_proxies: return
+    # if name not in ctx.active_proxies: return
     print(f"Removing proxy: {name}")
     sel = name
     if sel.startswith("ippl_sField"):
@@ -51,7 +51,11 @@ def remove_proxy(ctx: Any, name: str):
     else:
         p = find_source_by_name(sel)
         if p: simple.Delete(p)
-    del ctx.active_proxies[name]
+    
+    # Remove from active_proxies if present
+    if name in ctx.active_proxies:
+        del ctx.active_proxies[name]
+        
     new_items = [item for item in ctx.state.pipeline_items if item['id'] != name]
     ctx.state.pipeline_items = new_items
     if not ctx.active_proxies:
@@ -69,7 +73,7 @@ def remove_proxy(ctx: Any, name: str):
 
 def toggle_visibility(ctx: Any, name: str):
     print(f"[UI] Toggle Visibility clicked: {name}")
-    if name not in ctx.active_proxies: return
+    # if name not in ctx.active_proxies: return
     items = ctx.state.pipeline_items
     new_items = []
     is_visible = True

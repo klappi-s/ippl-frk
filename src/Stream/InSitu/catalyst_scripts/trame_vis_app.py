@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 
 from paraview import simple, live
@@ -29,6 +30,10 @@ from trame_app.trame_runtime import resume_polling
 # Server and state
 server = get_server()
 state, ctrl = server.state, server.controller
+
+# Connection defaults
+state.catalyst_host = "localhost"
+state.catalyst_port = 22222
 
 # Helpers used across the file
 def find_source_by_name(name):
@@ -105,6 +110,7 @@ def _on_color_map_change(current_color_map=None, **kwargs):
         ColorAPI(_ctx).apply_color_map(current_color_map)
     except Exception as e:
         print(f"[WARN] Failed to apply color map on change: {e}")
+
 
 def apply_and_close():
     print(f"[UI] Apply and Close clicked for: {state.editing_source}")
@@ -225,6 +231,50 @@ def set_scalar_bar_visibility(desired_vis):
             ctrl.view_update()
         except Exception:
             pass
+
+
+
+def _get_workspace_parent_dir():
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # .../ippl-frk/src/Stream/InSitu/catalyst_scripts -> go up 4 to ippl-frk, 5 to parent workspace
+        repo_root = os.path.abspath(os.path.join(script_dir, "..", "..", "..", ".."))
+        parent_dir = os.path.abspath(os.path.join(repo_root, ".."))
+        return parent_dir
+    except Exception:
+        return os.getcwd()
+
+
+def take_screenshot():
+    print("[UI] Screenshot requested")
+    view = simple.GetRenderView()
+    if not view:
+        print("[WARN] No active view; cannot capture screenshot")
+        return
+    raw_dir = getattr(state, 'screenshot_save_path', '') or _get_workspace_parent_dir()
+    dest_dir = os.path.abspath(os.path.expanduser(raw_dir))
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+    except Exception as e:
+        print(f"[WARN] Could not create directory '{dest_dir}': {e}. Falling back to default path.")
+        dest_dir = _get_workspace_parent_dir()
+        os.makedirs(dest_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    filename = f"ippl_view_{timestamp}.png"
+    file_path = os.path.join(dest_dir, filename)
+    try:
+        simple.SaveScreenshot(file_path, view=view)
+        print(f"[INFO] Screenshot saved to {file_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to save screenshot: {e}")
+
+
+def reset_screenshot_path():
+    print("[UI] Reset screenshot path to default")
+    try:
+        state.screenshot_save_path = state.default_screenshot_path
+    except Exception:
+        state.screenshot_save_path = _get_workspace_parent_dir()
 
 # Moved to trame_steering_config.py:
 # - load_steerable_proxies
@@ -910,15 +960,74 @@ with SinglePageLayout(server) as layout:
         with vuetify3.VBtn(click=toggle_simulation, disabled=("!connected",), color=("sim_paused ? 'green' : 'orange'",), icon=True, variant="tonal", classes="mr-2"):
             vuetify3.VIcon("{{ sim_paused ? 'mdi-play' : 'mdi-pause' }}")
         with vuetify3.VBtn(
-            icon=True, 
-            click=toggle_axes_grid, 
-            disabled=("!has_data",), 
-            variant="text", 
+            icon=True,
+            click=toggle_axes_grid,
+            disabled=("!has_data",),
+            variant="text",
             color=("axes_grid_visible ? 'primary' : 'grey'",)
         ):
             vuetify3.VIcon("{{ axes_grid_visible ? 'mdi-grid' : 'mdi-grid-off' }}")
             vuetify3.VTooltip(activator="parent", location="bottom", text="Toggle Axes Grid")
+
+        with vuetify3.VBtn(icon=True, click=take_screenshot, variant="text", color="teal-accent-3", classes="mr-1"):
+            vuetify3.VIcon("mdi-camera")
+            vuetify3.VTooltip(activator="parent", location="bottom", text="Save screenshot (PNG)")
+
+        with vuetify3.VMenu(v_model=("screenshot_menu_open", False), open_on_hover=False, close_on_content_click=False):
+            with vuetify3.Template(v_slot_activator="{ props }"):
+                with vuetify3.VBtn(v_bind="props", icon=True, variant="text", color="teal-accent-1", classes="mr-2"):
+                    vuetify3.VIcon("mdi-menu-down")
+                    vuetify3.VTooltip(activator="parent", location="bottom", text="Screenshot settings")
+            with vuetify3.VCard(style="min-width: 320px;"):
+                vuetify3.VCardTitle("Screenshot Settings", classes="text-subtitle-2 pb-1")
+                vuetify3.VDivider()
+                with vuetify3.VCardText(classes="pt-3"):
+                    vuetify3.VTextField(
+                        v_model=("screenshot_save_path",),
+                        label="Save directory",
+                        variant="outlined",
+                        density="compact",
+                        hide_details=False,
+                        hint="Directory for PNG captures",
+                        persistent_hint=True,
+                    )
+                with vuetify3.VCardActions():
+                    vuetify3.VBtn("Use default", variant="text", click=reset_screenshot_path)
+                    vuetify3.VSpacer()
+                    vuetify3.VBtn("Close", variant="text", click="screenshot_menu_open = false")
+
         vuetify3.VDivider(vertical=True, classes="mx-4")
+
+        # Connection Settings Menu
+        with vuetify3.VMenu(v_model=("connection_menu_open", False), open_on_hover=False, close_on_content_click=False):
+            with vuetify3.Template(v_slot_activator="{ props }"):
+                with vuetify3.VBtn(v_bind="props", icon=True, variant="text", color="grey", classes="mr-2", disabled=("connected",)):
+                    vuetify3.VIcon("mdi-cog")
+                    vuetify3.VTooltip(activator="parent", location="bottom", text="Connection Settings")
+            with vuetify3.VCard(style="min-width: 300px;"):
+                vuetify3.VCardTitle("Catalyst Connection", classes="text-subtitle-2 pb-1")
+                vuetify3.VDivider()
+                with vuetify3.VCardText(classes="pt-3"):
+                    vuetify3.VTextField(
+                        v_model=("catalyst_host", "localhost"),
+                        label="Host",
+                        variant="outlined",
+                        density="compact",
+                        hide_details=False,
+                        classes="mb-3"
+                    )
+                    vuetify3.VTextField(
+                        v_model=("catalyst_port", 22222),
+                        label="Port",
+                        variant="outlined",
+                        density="compact",
+                        hide_details=False,
+                        type="number"
+                    )
+                with vuetify3.VCardActions():
+                    vuetify3.VSpacer()
+                    vuetify3.VBtn("Close", variant="text", click="connection_menu_open = false")
+
         vuetify3.VBtn("{{ connected ? 'Disconnect' : 'Connect' }}", click=toggle_connection, variant="text", classes="mr-2")
         vuetify3.VChip("{{ status_text }}", color=("status_color", "grey"), text_color="white", classes="mr-4")
 
@@ -984,6 +1093,9 @@ state.scalar_bar_visible = False
 state.available_color_maps = []
 state.current_color_map = None
 state.color_map_per_source = {}
+state.default_screenshot_path = _get_workspace_parent_dir()
+state.screenshot_save_path = state.default_screenshot_path
+state.screenshot_menu_open = False
 
 # Initialize state for steerable parameters
 state.selected_steering_proxy = steerable_proxies[0]['name'] if steerable_proxies else None
