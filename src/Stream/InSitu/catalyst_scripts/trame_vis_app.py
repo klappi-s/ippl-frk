@@ -1,4 +1,3 @@
-import asyncio
 import os
 import time
 
@@ -36,20 +35,10 @@ state.catalyst_host = "localhost"
 state.catalyst_port = 22222
 
 # Helpers used across the file
-def find_source_by_name(name):
-    try:
-        return simple.FindSource(name)
-    except Exception:
-        return None
+# (find_source_by_name removed as it was only used in legacy poll_catalyst)
 
-# Legacy globals (kept for compatibility with existing code paths)
-active_proxies = {}
-view_update_enabled = True
-last_view_update_ts = 0.0
-view_update_pending_until = 0.0
-camera_last_sig = None
-camera_last_change_ts = 0.0
-catalyst_link = None
+# Legacy globals removed (active_proxies, view_update_enabled, etc.)
+
 
 def remove_proxy(name):
     from trame_app import trame_pipeline as pipe
@@ -76,8 +65,17 @@ def open_edit_dialog(name):
 def update_color_by(value):
     ColorAPI(_ctx).update_color_by(value)
 
+def update_representation(value):
+    ColorAPI(_ctx).set_representation(value)
+
+def update_solid_color(value):
+    ColorAPI(_ctx).set_solid_color(value)
+
 def apply_color_map(preset_key):
     ColorAPI(_ctx).apply_color_map(preset_key)
+
+def apply_custom_range():
+    ColorAPI(_ctx).apply_custom_range()
 
 def set_scalar_bar_visibility(desired_vis):
     ColorAPI(_ctx).set_scalar_bar_visibility(desired_vis)
@@ -101,6 +99,22 @@ def _on_scalar_bar_visible_change(scalar_bar_visible=None, **kwargs):
     except Exception as e:
         print(f"[WARN] Failed to set scalar bar visibility: {e}")
 
+@state.change("slice_normal_x", "slice_normal_y", "slice_normal_z")
+def _on_slice_normal_change(slice_normal_x=None, slice_normal_y=None, slice_normal_z=None, **kwargs):
+    # Reconstruct list from scalar states
+    nx = float(state.slice_normal_x)
+    ny = float(state.slice_normal_y)
+    nz = float(state.slice_normal_z)
+    update_slice_normal([nx, ny, nz])
+
+@state.change("slice_origin_x", "slice_origin_y", "slice_origin_z")
+def _on_slice_origin_change(slice_origin_x=None, slice_origin_y=None, slice_origin_z=None, **kwargs):
+    # Reconstruct list from scalar states
+    ox = float(state.slice_origin_x)
+    oy = float(state.slice_origin_y)
+    oz = float(state.slice_origin_z)
+    update_slice_origin([ox, oy, oz])
+
 @state.change("current_color_map")
 def _on_color_map_change(current_color_map=None, **kwargs):
     print(f"[UI] Color Map preset changed: {current_color_map}")
@@ -111,6 +125,38 @@ def _on_color_map_change(current_color_map=None, **kwargs):
     except Exception as e:
         print(f"[WARN] Failed to apply color map on change: {e}")
 
+@state.change("current_representation")
+def _on_representation_change(current_representation=None, **kwargs):
+    if current_representation:
+        update_representation(current_representation)
+
+@state.change("solid_color")
+def _on_solid_color_change(solid_color=None, **kwargs):
+    if solid_color and state.current_color_array == 'SOLID':
+        update_solid_color(solid_color)
+
+
+
+
+def extract_slice():
+    print(f"[UI] Extract Slice clicked for: {state.editing_source}")
+    from trame_app import trame_pipeline as pipe
+    pipe.extract_slice(_ctx, state.editing_source)
+    state.show_edit_dialog = False
+
+def extract_ghosts():
+    print(f"[UI] Extract Ghosts clicked for: {state.editing_source}")
+    from trame_app import trame_pipeline as pipe
+    pipe.extract_ghosts(_ctx, state.editing_source)
+    state.show_edit_dialog = False
+
+def update_slice_normal(normal):
+    print(f"[UI] Update Slice Normal: {normal}")
+    ColorAPI(_ctx).set_slice_normal(normal)
+
+def update_slice_origin(origin):
+    # Debounce could be useful here, but for now direct update
+    ColorAPI(_ctx).set_slice_origin(origin)
 
 def apply_and_close():
     print(f"[UI] Apply and Close clicked for: {state.editing_source}")
@@ -392,122 +438,8 @@ def reset_visualization():
 # Removed reset_camera function as it is now in trame_render_config.py
 
 # ... (Polling and Steering) ...
-async def poll_catalyst():
-    while True:
-        if catalyst_link:
-            try:
-                live.ProcessServerNotifications()
-                if state.live_mode and state.has_data:
-                    # Capture camera signature to detect interaction / movement
-                    view = simple.GetActiveView()
-                    now = time.time()
-                    camera_sig = None
-                    try:
-                        if view:
-                            camera_sig = (
-                                tuple(getattr(view, 'CameraPosition', []) or []),
-                                tuple(getattr(view, 'CameraFocalPoint', []) or []),
-                                tuple(getattr(view, 'CameraViewUp', []) or []),
-                                getattr(view, 'CameraViewAngle', None),
-                                getattr(view, 'CameraParallelScale', None),
-                            )
-                    except Exception:
-                        camera_sig = None
+# poll_catalyst removed (duplicate of trame_runtime.poll_catalyst)
 
-                    # Update last change timestamp if camera properties have changed
-                    global camera_last_sig, camera_last_change_ts
-                    if camera_sig is not None and camera_sig != camera_last_sig:
-                        camera_last_sig = camera_sig
-                        camera_last_change_ts = now
-                        # Log camera perspective change (debounced by natural loop frequency)
-                        try:
-                            pos, foc, up, ang, pscale = camera_sig
-                            print(f"[UI] Camera changed: pos={pos}, focal={foc}, up={up}, angle={ang}, parallelScale={pscale}")
-                        except Exception:
-                            print("[UI] Camera changed")
-                    
-                    # Iterate over all active proxies
-                    for sel, proxy in active_proxies.items():
-                        
-                        # --- CALL UPDATE LOGIC ---
-                        if sel.startswith("ippl_sField"):
-                            # Update base proxy
-                            if proxy: proxy.UpdatePipeline()
-                            
-                            # Update MergedBlocks
-                            merged_proxy = find_source_by_name(f"{sel}.MergedBlocks")
-                            if merged_proxy: merged_proxy.UpdatePipeline()
-
-                            # Update local filter if exists
-                            resample_proxy = find_source_by_name(f"{sel}_Resample")
-                            if resample_proxy:
-                                # For scalar fields, avoid over-updating the local resample filter.
-                                # Only update/resample every few polling cycles to reduce payload size.
-                                # Use a lightweight modulo gate based on time.
-                                now_gate = time.time()
-                                # Update at most every 0.5s for the resample proxy
-                                if (now_gate - getattr(state, 'last_resample_update_ts', 0.0)) > 2.0:
-                                    resample_proxy.UpdatePipeline()
-                                    render_config.update_scalar_field_view(resample_proxy, simple.GetActiveView())
-                                    state.last_resample_update_ts = now_gate
-                                
-                        elif sel.startswith("ippl_vField"):
-                            if proxy: proxy.UpdatePipeline()
-                            
-                            # Update extracted Glyph if exists
-                            glyph_proxy = find_source_by_name(f"{sel}.Glyph")
-                            if glyph_proxy:
-                                glyph_proxy.UpdatePipeline()
-                                render_config.update_vector_field_view(glyph_proxy, simple.GetActiveView())
-                            else:
-                                # Update local Glyph if exists
-                                glyph_proxy = find_source_by_name(f"{sel}_Glyph")
-                                if glyph_proxy:
-                                    glyph_proxy.UpdatePipeline()
-                                    render_config.update_vector_field_view(glyph_proxy, simple.GetActiveView())
-
-                        else:
-                            if proxy: 
-                                proxy.UpdatePipeline()
-                                if sel.startswith("ippl_particles"):
-                                    # Update box as well
-                                    box_proxy = find_source_by_name(f"{sel}.box")
-                                    if box_proxy: box_proxy.UpdatePipeline()
-                                    
-                                    render_config.update_particle_view(proxy, simple.GetActiveView())
-                    
-                    simple.Render()
-                    # Throttle view updates
-                    global last_view_update_ts, view_update_enabled, view_update_pending_until
-                    now = time.time()
-                    # Heavier payloads for scalar fields: increase throttle interval
-                    has_scalar_field = any(k.startswith("ippl_sField") for k in active_proxies.keys())
-                    # Increase interval significantly to keep UI responsive when scalar fields are active
-                    interval = 2.0 if has_scalar_field else 0.5
-                    # Debounce camera motion: only send a frame once camera has been stable for a short period
-                    camera_stable_for = (now - camera_last_change_ts) if camera_last_change_ts else 999
-                    camera_stable = (camera_stable_for > 1.0)  # 400ms of no camera change
-                    # Backpressure gate: skip triggering a new update if a previous one may still be flushing
-                    if now < view_update_pending_until:
-                        pass
-                    # Skip sending intermediate frames while camera is moving, especially for scalar fields
-                    elif has_scalar_field and not camera_stable:
-                        # While interacting with camera, defer pushing frames to avoid flooding the socket
-                        pass
-                    elif hasattr(ctrl, 'view_update') and view_update_enabled and state.live_mode and (now - last_view_update_ts) > interval:
-                        try:
-                            ctrl.view_update()
-                            last_view_update_ts = now
-                            # Assume the transport may still be flushing large frames for ~1s when sFields are active
-                            view_update_pending_until = now + (1.2 if has_scalar_field else 0.3)
-                        except Exception as e:
-                            print(f"[WARN] view_update failed during polling: {e}. Disabling further updates and live mode.")
-                            view_update_enabled = False
-                            state.live_mode = False
-                            state.status_text = "Live disabled: transport error"
-            except Exception:
-                pass
-        await asyncio.sleep(0.5)
 
 
         
@@ -947,7 +879,7 @@ with SinglePageLayout(server) as layout:
     with layout.toolbar:
         vuetify3.VSpacer()
         
-        # Reverse the order of GUI elements (left-to-right): live switch, play/pause, grid toggle, separator, connect toggle, connected status
+        # order of GUI elements (left-to-right): live switch, play/pause, grid toggle, separator, connect toggle, connected status
         vuetify3.VSwitch(
             v_model=("live_mode", False), 
             label="Live", 
@@ -1041,6 +973,53 @@ with SinglePageLayout(server) as layout:
             with vuetify3.VCard():
                 vuetify3.VCardTitle("Edit Visualization: {{ editing_source }}")
                 with vuetify3.VCardText():
+                    # Extract Slice Button for sField
+                    with vuetify3.VContainer(v_if="editing_source.startsWith('ippl_sField')", classes="pa-0 mb-2"):
+                        with vuetify3.VRow(dense=True):
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VBtn("Extract Slice", click=extract_slice, block=True, color="secondary", variant="tonal")
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VBtn("Extract Ghosts", click=extract_ghosts, block=True, color="deep-orange", variant="tonal")
+                        vuetify3.VDivider(classes="my-2")
+
+                    # Slice Controls
+                    with vuetify3.VContainer(v_if="editing_source.includes('.Slice')", classes="pa-0 mb-2"):
+                        vuetify3.VLabel(text="Slice Origin", classes="text-caption font-weight-bold")
+                        with vuetify3.VRow(dense=True):
+                            with vuetify3.VCol(cols=12, classes="py-0"):
+                                vuetify3.VSlider(v_model=("slice_origin_x",), min=("slice_bounds[0]",), max=("slice_bounds[1]",), step="any", density="compact", hide_details=True, label="X", thumb_label=True)
+                            with vuetify3.VCol(cols=12, classes="py-0"):
+                                vuetify3.VSlider(v_model=("slice_origin_y",), min=("slice_bounds[2]",), max=("slice_bounds[3]",), step="any", density="compact", hide_details=True, label="Y", thumb_label=True)
+                            with vuetify3.VCol(cols=12, classes="py-0"):
+                                vuetify3.VSlider(v_model=("slice_origin_z",), min=("slice_bounds[4]",), max=("slice_bounds[5]",), step="any", density="compact", hide_details=True, label="Z", thumb_label=True)
+                        
+                        vuetify3.VLabel(text="Slice Normal", classes="text-caption font-weight-bold mt-2")
+                        with vuetify3.VRow(dense=True):
+                            with vuetify3.VCol(cols=4):
+                                vuetify3.VTextField(v_model=("slice_normal_x",), label="X", type="number", step="0.1", density="compact", variant="outlined", hide_details=True)
+                            with vuetify3.VCol(cols=4):
+                                vuetify3.VTextField(v_model=("slice_normal_y",), label="Y", type="number", step="0.1", density="compact", variant="outlined", hide_details=True)
+                            with vuetify3.VCol(cols=4):
+                                vuetify3.VTextField(v_model=("slice_normal_z",), label="Z", type="number", step="0.1", density="compact", variant="outlined", hide_details=True)
+                        
+                        # Quick Normal Buttons
+                        with vuetify3.VRow(dense=True, classes="mt-1"):
+                            with vuetify3.VCol(cols=12, classes="d-flex justify-center"):
+                                with vuetify3.VBtnToggle(density="compact", variant="outlined", color="primary"):
+                                    vuetify3.VBtn("X", click="slice_normal_x=1; slice_normal_y=0; slice_normal_z=0")
+                                    vuetify3.VBtn("Y", click="slice_normal_x=0; slice_normal_y=1; slice_normal_z=0")
+                                    vuetify3.VBtn("Z", click="slice_normal_x=0; slice_normal_y=0; slice_normal_z=1")
+
+                        vuetify3.VDivider(classes="my-2")
+
+                    vuetify3.VSelect(
+                        v_model=("current_representation",),
+                        items=("available_representations", []),
+                        label="Representation",
+                        density="compact",
+                        variant="outlined",
+                    )
+                    vuetify3.VDivider(classes="my-2")
                     vuetify3.VSelect(
                         v_model=("current_color_array",),
                         items=("color_arrays", []),
@@ -1050,6 +1029,19 @@ with SinglePageLayout(server) as layout:
                         density="compact",
                         variant="outlined",
                     )
+                    
+                    with vuetify3.VContainer(v_if="current_color_array === 'SOLID'", classes="pa-0"):
+                        vuetify3.VLabel(text="Solid Color", classes="text-caption")
+                        vuetify3.VColorPicker(
+                            v_model=("solid_color",),
+                            mode="hex",
+                            hide_inputs=True,
+                            hide_mode_switch=True,
+                            show_swatches=True,
+                            elevation=0,
+                            canvas_height=100,
+                        )
+
                     vuetify3.VDivider(classes="my-2")
                     vuetify3.VSwitch(
                         v_model=("scalar_bar_visible", False),
@@ -1057,8 +1049,30 @@ with SinglePageLayout(server) as layout:
                         inset=True,
                         density="comfortable",
                         color=("scalar_bar_visible ? 'green' : 'grey'",),
+                        disabled=("current_color_array === 'SOLID'",),
                         # change handled via state.change hook
                     )
+                    vuetify3.VDivider(classes="my-2")
+                    
+                    # Rescale Controls
+                    vuetify3.VSwitch(
+                        v_model=("auto_rescale_color", True),
+                        label="Auto Rescale Range",
+                        inset=True,
+                        density="comfortable",
+                        color="primary",
+                        disabled=("current_color_array === 'SOLID'",),
+                    )
+                    
+                    with vuetify3.VContainer(v_if="!auto_rescale_color && current_color_array !== 'SOLID'", classes="pa-0 mb-2"):
+                        vuetify3.VLabel(text="Custom Range", classes="text-caption")
+                        with vuetify3.VRow(dense=True):
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VTextField(v_model=("custom_rescale_min",), label="Min", type="number", density="compact", variant="outlined", hide_details=True)
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VTextField(v_model=("custom_rescale_max",), label="Max", type="number", density="compact", variant="outlined", hide_details=True)
+                        vuetify3.VBtn("Apply Range", click=apply_custom_range, block=True, size="small", variant="tonal", classes="mt-2")
+
                     vuetify3.VDivider(classes="my-2")
                     vuetify3.VSelect(
                         v_model=("current_color_map",),
@@ -1068,6 +1082,7 @@ with SinglePageLayout(server) as layout:
                         item_value="value",
                         density="compact",
                         variant="outlined",
+                        disabled=("current_color_array === 'SOLID'",),
                         # Rely on state change hook to apply preset
                     )
                 with vuetify3.VCardActions():
@@ -1089,7 +1104,17 @@ state.show_edit_dialog = False
 state.editing_source = ""
 state.color_arrays = []
 state.current_color_array = None
+state.solid_color = "#ffffff"
+state.available_representations = []
+state.current_representation = None
 state.scalar_bar_visible = False
+state.slice_normal_x = 1.0
+state.slice_normal_y = 0.0
+state.slice_normal_z = 0.0
+state.slice_origin_x = 0.0
+state.slice_origin_y = 0.0
+state.slice_origin_z = 0.0
+state.slice_bounds = [-1, 1, -1, 1, -1, 1]
 state.available_color_maps = []
 state.current_color_map = None
 state.color_map_per_source = {}
@@ -1302,6 +1327,13 @@ def _on_live_mode_change(live_mode=None, **kwargs):
 # Initialize shared context and wire runtime resume
 _ctx = Ctx(server=server, state=state, ctrl=ctrl)
 resume_polling(_ctx)
+
+@state.change("auto_rescale_color", "custom_rescale_min", "custom_rescale_max")
+def _on_rescale_settings_change(**kwargs):
+    try:
+        ColorAPI(_ctx).save_rescale_settings()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     simple.GetRenderView()

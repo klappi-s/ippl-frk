@@ -183,7 +183,19 @@ def extract_data(ctx: Any):
     if found_data and new_proxy:
         ctx.active_proxies[channel_name] = new_proxy
         current_items = list(state.pipeline_items)
-        current_items.append({"id": channel_name, "name": channel_name, "visible": True})
+        
+        if channel_name.startswith("ippl_particles"):
+            # Split particle source into Bunch and Box
+            current_items.append({"id": f"{channel_name}.bunch", "name": f"{channel_name} (Bunch)", "visible": True})
+            ctx.active_proxies[f"{channel_name}.bunch"] = new_proxy # new_proxy is the bunch
+            
+            box_proxy = find_source_by_name(f"{channel_name}.box")
+            if box_proxy:
+                current_items.append({"id": f"{channel_name}.box", "name": f"{channel_name} (Box)", "visible": True})
+                ctx.active_proxies[f"{channel_name}.box"] = box_proxy
+        else:
+            current_items.append({"id": channel_name, "name": channel_name, "visible": True})
+            
         state.pipeline_items = current_items
         view = simple.GetActiveView()
         if channel_name.startswith("ippl_particles"):

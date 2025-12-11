@@ -385,7 +385,9 @@ def reset_camera(view, selection_name, source_proxy):
     target_proxy = source_proxy
     sel = selection_name
     if sel:
-        if sel.startswith("ippl_vField"):
+        if sel.endswith(".bunch") or sel.endswith(".box"):
+            target_proxy = source_proxy
+        elif sel.startswith("ippl_vField"):
             p = find_source_by_name(f"{sel}_Glyph")
             if not p: p = find_source_by_name(f"{sel}.Glyph")
             if p: target_proxy = p
