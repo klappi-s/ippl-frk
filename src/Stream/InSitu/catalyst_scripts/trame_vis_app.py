@@ -13,16 +13,19 @@ try:
     from trame_app import trame_render_config as render_config
     from trame_app import trame_steering_config as steering_config
     from trame_app import trame_connection as connection_api
+    from trame_app import trame_logging as log
 except Exception:
     # Fallbacks for script execution without package context
     try:
         from .trame_app import trame_render_config as render_config
         from .trame_app import trame_steering_config as steering_config
         from .trame_app import trame_connection as connection_api
+        from .trame_app import trame_logging as log
     except Exception:
         import trame_app.trame_render_config as render_config
         import trame_app.trame_steering_config as steering_config
         import trame_app.trame_connection as connection_api
+        import trame_app.trame_logging as log
 from trame_app.trame_ctx import Ctx
 from trame_app.trame_runtime import resume_polling
 
@@ -82,11 +85,12 @@ def set_scalar_bar_visibility(desired_vis):
 
 # Steering: reload/extract all steering proxies via connection module
 def reload_steering_proxies():
-    print("[UI] Reload Steering Proxies clicked")
+    from trame_app.trame_logging import ui, warn
+    ui("Reload Steering Proxies clicked")
     try:
         connection_api.reload_steering_proxies(_ctx)
     except Exception as e:
-        print(f"[WARN] Reload steering proxies failed: {e}")
+        warn("Reload steering proxies failed: {}", e)
 
 @ctrl.trigger("reload_steering")
 def _reload_steering_trigger():
@@ -97,7 +101,7 @@ def _on_scalar_bar_visible_change(scalar_bar_visible=None, **kwargs):
     try:
         ColorAPI(_ctx).set_scalar_bar_visibility(bool(scalar_bar_visible))
     except Exception as e:
-        print(f"[WARN] Failed to set scalar bar visibility: {e}")
+        log.warn("Failed to set scalar bar visibility: {}", e)
 
 @state.change("slice_normal_x", "slice_normal_y", "slice_normal_z")
 def _on_slice_normal_change(slice_normal_x=None, slice_normal_y=None, slice_normal_z=None, **kwargs):
@@ -117,13 +121,13 @@ def _on_slice_origin_change(slice_origin_x=None, slice_origin_y=None, slice_orig
 
 @state.change("current_color_map")
 def _on_color_map_change(current_color_map=None, **kwargs):
-    print(f"[UI] Color Map preset changed: {current_color_map}")
+    log.ui("Color Map preset changed: {}", current_color_map)
     if not current_color_map:
         return
     try:
         ColorAPI(_ctx).apply_color_map(current_color_map)
     except Exception as e:
-        print(f"[WARN] Failed to apply color map on change: {e}")
+        log.warn("Failed to apply color map on change: {}", e)
 
 @state.change("current_representation")
 def _on_representation_change(current_representation=None, **kwargs):
@@ -139,25 +143,25 @@ def _on_solid_color_change(solid_color=None, **kwargs):
 
 
 def extract_slice():
-    print(f"[UI] Extract Slice clicked for: {state.editing_source}")
+    log.ui("Extract Slice clicked for: {}", state.editing_source)
     from trame_app import trame_pipeline as pipe
     pipe.extract_slice(_ctx, state.editing_source)
     state.show_edit_dialog = False
 
 def extract_ghosts():
-    print(f"[UI] Extract Ghosts clicked for: {state.editing_source}")
+    log.ui("Extract Ghosts clicked for: {}", state.editing_source)
     from trame_app import trame_pipeline as pipe
     pipe.extract_ghosts(_ctx, state.editing_source)
     state.show_edit_dialog = False
 
 def extract_scalar_field():
-    print(f"[UI] Extract Scalar Field clicked for: {state.editing_source}")
+    log.ui("Extract Scalar Field clicked for: {}", state.editing_source)
     from trame_app import trame_pipeline as pipe
     pipe.extract_scalar_field(_ctx, state.editing_source)
     state.show_edit_dialog = False
 
 def update_slice_normal(normal):
-    print(f"[UI] Update Slice Normal: {normal}")
+    log.ui("Update Slice Normal: {}", normal)
     ColorAPI(_ctx).set_slice_normal(normal)
 
 def update_slice_origin(origin):
@@ -178,12 +182,12 @@ def reset_opacity():
     update_opacity()
 
 def apply_and_close():
-    print(f"[UI] Apply and Close clicked for: {state.editing_source}")
+    log.ui("Apply and Close clicked for: {}", state.editing_source)
     # Only close the dialog; color changes are applied immediately via state triggers
     state.show_edit_dialog = False
 
 def apply_color_map(preset_key):
-    print(f"[UI] Apply Color Map clicked: {preset_key} (source: {state.editing_source})")
+    log.ui("Apply Color Map clicked: {} (source: {})", preset_key, state.editing_source)
     """Apply a color map preset to the current LUT for the selected array."""
     global view_update_enabled
     name = state.editing_source
@@ -221,7 +225,7 @@ def apply_color_map(preset_key):
         # Use rescale to data range after applying preset
         lut.ApplyPreset(preset_name, True)
     except Exception as e:
-        print(f"[WARN] Failed to apply preset '{preset_name}': {e}")
+        log.warn("Failed to apply preset '{}': {}", preset_name, e)
         return
 
     # Keep representation pointing to this lut
@@ -244,7 +248,7 @@ def apply_color_map(preset_key):
         try:
             ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
             view_update_enabled = False
             state.live_mode = False
             state.status_text = "Live disabled: transport error"
@@ -258,7 +262,7 @@ def apply_color_map(preset_key):
         state.color_map_per_source = { name: preset_key }
 
 def set_scalar_bar_visibility(desired_vis):
-    print(f"[UI] Scalar Bar visibility toggled: {desired_vis} (source: {state.editing_source})")
+    log.ui("Scalar Bar visibility toggled: {} (source: {})", desired_vis, state.editing_source)
     """Set the scalar bar visibility to desired_vis for the current selection."""
     name = state.editing_source
     proxy = get_display_proxy(name) if name else None
@@ -310,17 +314,17 @@ def _get_workspace_parent_dir():
 
 
 def take_screenshot():
-    print("[UI] Screenshot requested")
+    log.ui("Screenshot requested")
     view = simple.GetRenderView()
     if not view:
-        print("[WARN] No active view; cannot capture screenshot")
+        log.warn("No active view; cannot capture screenshot")
         return
     raw_dir = getattr(state, 'screenshot_save_path', '') or _get_workspace_parent_dir()
     dest_dir = os.path.abspath(os.path.expanduser(raw_dir))
     try:
         os.makedirs(dest_dir, exist_ok=True)
     except Exception as e:
-        print(f"[WARN] Could not create directory '{dest_dir}': {e}. Falling back to default path.")
+        log.warn("Could not create directory '{}': {}. Falling back to default path.", dest_dir, e)
         dest_dir = _get_workspace_parent_dir()
         os.makedirs(dest_dir, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -328,13 +332,13 @@ def take_screenshot():
     file_path = os.path.join(dest_dir, filename)
     try:
         simple.SaveScreenshot(file_path, view=view)
-        print(f"[INFO] Screenshot saved to {file_path}")
+        log.info("Screenshot saved to {}", file_path)
     except Exception as e:
-        print(f"[ERROR] Failed to save screenshot: {e}")
+        log.error("Failed to save screenshot: {}", e)
 
 
 def reset_screenshot_path():
-    print("[UI] Reset screenshot path to default")
+    log.ui("Reset screenshot path to default")
     try:
         state.screenshot_save_path = state.default_screenshot_path
     except Exception:
@@ -347,18 +351,21 @@ def reset_screenshot_path():
 # - parse_steerable_parameters
 
 def apply_steering():
-    print("[UI] Apply Steering clicked")
+    from trame_app.trame_logging import ui, info, debug, warn
+    ui("Apply Steering clicked")
     """Apply the current steering parameters."""
-    print("[DEBUG] apply_steering called")
+    debug("apply_steering called")
     link = getattr(_ctx, "catalyst_link", None)
     if not link:
-        print("[WARN] Cannot apply steering: no Catalyst connection available in context.")
+        warn("Cannot apply steering: no Catalyst connection available in context.")
         return
 
     proxy_defs = getattr(state, "steerable_proxies", None) or steerable_proxies
     if not proxy_defs:
-        print("[WARN] No steerable proxies defined; aborting apply.")
+        warn("No steerable proxies defined; aborting apply.")
         return
+    
+    info("Applying steering to {} proxies", len(proxy_defs))
 
     for proxy_def in proxy_defs:
         proxy_name = proxy_def['name']
@@ -435,11 +442,12 @@ def apply_steering():
                             v = param['default'][0] if param['default'] else 0
                         all_values.append(v)
                 
-                print(f"[DEBUG] Sending steering parameter {proxy_name}.{name} = {all_values}")
+                from trame_app.trame_logging import debug, error
+                debug("Sending steering parameter {}.{} = {}", proxy_name, name, all_values)
                 steering_config.update_steering_parameter(link, proxy_name, name, all_values)
                 
             except Exception as e:
-                print(f"[ERROR] Error applying parameter {name}: {e}")
+                error("Error applying parameter {}: {}", name, e)
                 import traceback
                 traceback.print_exc()
 
@@ -450,8 +458,8 @@ def flush_and_apply_steering(array_data=None):
     This is needed because Vue's in-place array mutations don't trigger Trame's
     change detection. The client passes the current array values directly.
     """
-    print("[DEBUG] flush_and_apply_steering called")
-    print(f"[DEBUG] Received array_data: {array_data}")
+    log.debug("flush_and_apply_steering called")
+    log.debug("Received array_data: {}", array_data)
     
     if array_data:
         # Update state with the values passed from the client
@@ -461,7 +469,7 @@ def flush_and_apply_steering(array_data=None):
         for key, values in array_data.items():
             try:
                 state[key] = list(values)
-                print(f"[DEBUG] Updated {key}: {state[key]}")
+                log.debug("Updated {}: {}", key, state[key])
                 
                 # Extract proxy name from key to update count
                 # Keys are like: steer_{safe_name} or steer_{safe_name}_{i}
@@ -494,18 +502,18 @@ def flush_and_apply_steering(array_data=None):
                                         proxy_counts[proxy_safe_name] = new_count
                                     # All arrays in the same proxy should have the same length
                                     if proxy_counts[proxy_safe_name] != new_count:
-                                        print(f"[WARN] Inconsistent array lengths for proxy {proxy_safe_name}: {proxy_counts[proxy_safe_name]} vs {new_count}")
+                                        log.warn("Inconsistent array lengths for proxy {}: {} vs {}", proxy_safe_name, proxy_counts[proxy_safe_name], new_count)
                                     break
                             
             except Exception as e:
-                print(f"[DEBUG] Error updating {key}: {e}")
+                log.debug("Error updating {}: {}", key, e)
         
         # Update counts for all affected array proxies
         for proxy_safe_name, new_count in proxy_counts.items():
             count_key = f"count_{proxy_safe_name}"
             old_count = state.get(count_key, 0)
             if old_count != new_count:
-                print(f"[DEBUG] Updating {count_key}: {old_count} -> {new_count}")
+                log.debug("Updating {}: {} -> {}", count_key, old_count, new_count)
                 state[count_key] = new_count
     
     # Now apply the steering with fresh state
@@ -536,7 +544,7 @@ def apply_steering_triggered():
                         try:
                             current = state[key]
                             if isinstance(current, list):
-                                print(f"[DEBUG] Forcing sync for {key}: {current}")
+                                log.debug("Forcing sync for {}: {}", key, current)
                         except Exception:
                             pass
                 else:
@@ -544,7 +552,7 @@ def apply_steering_triggered():
                     try:
                         current = state[key]
                         if isinstance(current, list):
-                            print(f"[DEBUG] Forcing sync for {key}: {current}")
+                            log.debug("Forcing sync for {}: {}", key, current)
                     except Exception:
                         pass
     
@@ -588,27 +596,27 @@ def reset_visualization():
 
         
 def pause_sim():
-    print("[UI] Pause clicked")
+    log.ui("Pause clicked")
     link = getattr(_ctx, 'catalyst_link', None)
     try:
         if link:
             live.PauseCatalyst(link, pause=True)
             state.sim_paused = True
     except Exception as e:
-        print(f"[WARN] Failed to pause simulation: {e}")
+        log.warn("Failed to pause simulation: {}", e)
 
 def unpause_sim():
-    print("[UI] Unpause clicked")
+    log.ui("Unpause clicked")
     link = getattr(_ctx, 'catalyst_link', None)
     try:
         if link:
             live.PauseCatalyst(link, pause=False)
             state.sim_paused = False
     except Exception as e:
-        print(f"[WARN] Failed to unpause simulation: {e}")
+        log.warn("Failed to unpause simulation: {}", e)
 
 def toggle_simulation():
-    print("[UI] Toggle Simulation clicked")
+    log.ui("Toggle Simulation clicked")
     link = getattr(_ctx, 'catalyst_link', None)
     try:
         if link:
@@ -624,10 +632,10 @@ def toggle_simulation():
             else:
                 pause_sim()
     except Exception as e:
-        print(f"[WARN] Failed to toggle simulation: {e}")
+        log.warn("Failed to toggle simulation: {}", e)
 
 def toggle_axes_grid():
-    print("[UI] Toggle Axes Grid clicked")
+    log.ui("Toggle Axes Grid clicked")
     global view_update_enabled
     view = simple.GetActiveView()
     if not view: return
@@ -642,7 +650,7 @@ def toggle_axes_grid():
         try:
             ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
             view_update_enabled = False
             state.live_mode = False
             state.status_text = "Live disabled: transport error"
@@ -670,7 +678,7 @@ for proxy_def in steerable_proxies:
                     steering_array_keys.append(f"steer_{safe_name}_{i}")
             else:
                 steering_array_keys.append(f"steer_{safe_name}")
-print(f"[DEBUG] Steering array keys (computed early): {steering_array_keys}")
+log.debug("Steering array keys (computed early): {}", steering_array_keys)
 
 # Build the JS code for the Apply button to reassign all arrays before flushing
 if steering_array_keys:
@@ -684,7 +692,7 @@ else:
 # Opacity Point Controller Functions (must be defined before UI references them)
 # -----------------------------------------------------------------------------
 def _add_opacity_point():
-    print("[DEBUG-UI] add_opacity_point TRIGGERED")
+    log.debug("add_opacity_point TRIGGERED")
     points = list(state.opacity_points)
     new_id = state.opacity_next_id
     state.opacity_next_id += 1
@@ -694,7 +702,7 @@ def _add_opacity_point():
 ctrl.add_opacity_point = _add_opacity_point
 
 def _remove_opacity_point(id_to_remove):
-    print(f"[DEBUG-UI] remove_opacity_point TRIGGERED: id={id_to_remove}")
+    log.debug("remove_opacity_point TRIGGERED: id={}", id_to_remove)
     try:
         id_to_remove = int(id_to_remove)
     except (ValueError, TypeError):
@@ -705,7 +713,7 @@ def _remove_opacity_point(id_to_remove):
 ctrl.remove_opacity_point = _remove_opacity_point
 
 def _update_opacity_point(index, id, field, value, *extras):
-    print(f"[DEBUG-UI] update_opacity_point TRIGGERED: index={index}, id={id}, field={field}, value={value}")
+    log.debug("update_opacity_point TRIGGERED: index={}, id={}, field={}, value={}", index, id, field, value)
     
     try:
         idx = int(index)
@@ -718,7 +726,7 @@ def _update_opacity_point(index, id, field, value, *extras):
         search_id = id
 
     points = list(state.opacity_points)
-    print(f"[DEBUG-UI] Snapshot before update: {points}")
+    log.debug("Snapshot before update: {}", points)
 
     target_index = None
 
@@ -743,7 +751,7 @@ def _update_opacity_point(index, id, field, value, *extras):
                 break
 
     if target_index is None:
-        print(f"[DEBUG-UI] No point found with id {search_id}")
+        log.debug("No point found with id {}", search_id)
         return
 
     point = points[target_index]
@@ -752,7 +760,7 @@ def _update_opacity_point(index, id, field, value, *extras):
     try:
         new_val = float(value)
     except (TypeError, ValueError) as err:
-        print(f"[WARN] Invalid incoming value '{value}' ({type(value)}): {err}")
+        log.warn("Invalid incoming value '{}' ({}): {}", value, type(value), err)
         return
 
     try:
@@ -767,7 +775,7 @@ def _update_opacity_point(index, id, field, value, *extras):
     new_point[field] = new_val
     points[target_index] = new_point
 
-    print(f"[DEBUG-UI] Updating point id={point.get('id')} at index={target_index}: {before_float} -> {new_val}")
+    log.debug("Updating point id={} at index={}: {} -> {}", point.get('id'), target_index, before_float, new_val)
     state.opacity_points = points
 
 ctrl.update_opacity_point = _update_opacity_point
@@ -1546,7 +1554,7 @@ for proxy_def in steerable_proxies:
 
 # Store the list of steering array keys for client-side flushing
 state.steering_array_keys = steering_array_keys
-print(f"[DEBUG] Steering array keys to flush: {steering_array_keys}")
+log.debug("Steering array keys to flush: {}", steering_array_keys)
 
 @ctrl.trigger("add_entry")
 def add_entry(proxy_safe_name):
@@ -1640,7 +1648,7 @@ def remove_entry(proxy_safe_name, row_idx):
 
 @state.change("connected")
 def reset_view_update_on_connect(connected, **kwargs):
-    print(f"[STATE] Connected changed: {connected}")
+    log.debug("Connected changed: {}", connected)
     global view_update_enabled
     view_update_enabled = True
     # Reset throttling/backpressure gates on (re-)connect
@@ -1659,14 +1667,14 @@ def reset_view_update_on_connect(connected, **kwargs):
 
 @state.change("connected")
 def update_color(connected, **kwargs):
-    print(f"[STATE] Status color update on connected={connected}")
+    log.debug("Status color update on connected={}", connected)
     state.status_color = "success" if connected else "grey"
 
 # Log Live mode toggles
 @state.change("live_mode")
 def _on_live_mode_change(live_mode=None, **kwargs):
     try:
-        print(f"[UI] Live mode toggled: {bool(live_mode)}")
+        log.ui("Live mode toggled: {}", bool(live_mode))
     except Exception:
         pass
 
@@ -1703,19 +1711,19 @@ def _on_color_array_change(current_color_array=None, **kwargs):
 
 @state.change("opacity_points")
 def _on_opacity_points_change(**kwargs):
-    print(f"[DEBUG-STATE] _on_opacity_points_change triggered.")
+    log.debug("_on_opacity_points_change triggered.")
     if state.loading_opacity:
-        print(f"[DEBUG-STATE] loading_opacity is True, skipping update.")
+        log.debug("loading_opacity is True, skipping update.")
         return
     # Sort points by x before sending
     points = sorted(state.opacity_points, key=lambda p: float(p['x']))
 
-    print(f"[DEBUG-STATE] Sending points to ColorAPI: {points}")
+    log.debug("Sending points to ColorAPI: {}", points)
     ColorAPI(_ctx).update_opacity_points(points)
 
 # Update the button callback to use the sorted logic too
 def update_opacity():
-    print("[DEBUG-STATE] Manual Apply Opacity triggered via button")
+    log.debug("Manual Apply Opacity triggered via button")
     _on_opacity_points_change()
 
 def reset_opacity():
@@ -1727,5 +1735,16 @@ def reset_opacity():
     update_opacity()
 
 if __name__ == "__main__":
+    import argparse
+    from trame_app.trame_logging import set_log_level
+    
+    parser = argparse.ArgumentParser(description='Trame Catalyst Visualization App')
+    parser.add_argument('--debug', type=int, default=0, choices=[-1, 0, 1, 2],
+                        help='Debug level: -1=silent, 0=UI only (default), 1=moderate, 2=detailed')
+    # Use parse_known_args() to allow Trame server arguments like --server, --port, etc.
+    args, remaining = parser.parse_known_args()
+    
+    set_log_level(args.debug)
+    
     simple.GetRenderView()
     server.start()

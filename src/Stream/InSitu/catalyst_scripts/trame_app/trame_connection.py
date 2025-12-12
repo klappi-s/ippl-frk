@@ -6,9 +6,11 @@ from paraview import simple, live
 try:
     from . import trame_render_config as render_config  # sibling module in trame_app
     from . import trame_steering_config as steering_config
+    from . import trame_logging as log
 except Exception:
     import trame_app.trame_render_config as render_config
     import trame_app.trame_steering_config as steering_config
+    import trame_app.trame_logging as log
 from catalystSubroutines import find_source_by_name, get_available_extract_names
 
 # Public API: install(ctx) optional, and functions accepting ctx
@@ -19,7 +21,7 @@ def install(ctx: Any):
 
 
 def connect_to_catalyst(ctx: Any):
-    print("[UI] Connect clicked")
+    log.ui("Connect clicked")
     state = ctx.state
     cat_host = state.catalyst_host
     cat_port = int(state.catalyst_port)
@@ -27,7 +29,7 @@ def connect_to_catalyst(ctx: Any):
         # Preload definitions to avoid errors during handshake (best effort)
         steering_config.preload_steerable_proxies()
 
-        print(f"Connecting to {cat_host}:{cat_port}...")
+        log.info("Connecting to {}:{}", cat_host, cat_port)
         ctx.catalyst_link = live.ConnectToCatalyst(ds_host=cat_host, ds_port=cat_port)
         if ctx.catalyst_link:
             state.connected = True
@@ -35,37 +37,37 @@ def connect_to_catalyst(ctx: Any):
             try:
                 ipm = ctx.catalyst_link.GetInsituProxyManager()
                 if ipm:
-                    print("[DEBUG] connect_to_catalyst: Loading proxies into insitu PM")
+                    log.debug("connect_to_catalyst: Loading proxies into insitu PM")
                     steering_config.load_steerable_proxies(proxy_manager=ipm)
                     # Extract steering channels so proxies exist before Apply
                     try:
                         names = get_available_extract_names(ctx.catalyst_link)
                         steering_names = [n for n in names if n.startswith("Steering") or n.startswith("SteeringParameters")]
                         if steering_names:
-                            print(f"[DEBUG] Extracting steering channels: {steering_names}")
+                            log.debug("Extracting steering channels: {}", steering_names)
                             for sname in steering_names:
                                 try:
                                     live.ExtractCatalystData(ctx.catalyst_link, sname)
                                 except Exception as e_ex:
-                                    print(f"[WARN] Extract steering '{sname}' failed: {e_ex}")
+                                    log.warn("Extract steering '{}' failed: {}", sname, e_ex)
                             # Process notifications to materialize proxies
                             for _ in range(20):
                                 if not live.ProcessServerNotifications():
                                     break
                         else:
-                            print("[DEBUG] No steering channels listed to extract")
+                            log.debug("No steering channels listed to extract")
                     except Exception as e_list:
-                        print(f"[WARN] Failed to list/extract steering channels: {e_list}")
+                        log.warn("Failed to list/extract steering channels: {}", e_list)
                     # Refresh parsed steering definitions for UI
                     try:
                         ctx.state.steerable_proxies = steering_config.parse_steerable_parameters()
                         if not ctx.state.selected_steering_proxy and ctx.state.steerable_proxies:
                             ctx.state.selected_steering_proxy = ctx.state.steerable_proxies[0]['name']
                     except Exception as e2:
-                        print(f"[WARN] Failed to parse steerable parameters: {e2}")
+                        log.warn("Failed to parse steerable parameters: {}", e2)
                     state.insitu_proxies_loaded = True
             except Exception as e:
-                print(f"[DEBUG] connect_to_catalyst: Failed to load insitu proxies: {e}")
+                log.debug("connect_to_catalyst: Failed to load insitu proxies: {}", e)
             # Start polling via runtime module (already wired in app init)
             ctx.ctrl.resume_polling()
             # Auto-scan list on connect, but don't auto-select
@@ -73,15 +75,15 @@ def connect_to_catalyst(ctx: Any):
         else:
             state.status_text = "Connection returned None"
     except Exception as e:
-        print(f"[Error] Connect: {e}")
+        log.error("Connect: {}", e)
         state.status_text = f"Error: {e}"
 
 
 def toggle_connection(ctx: Any):
-    print("[UI] Toggle Connection clicked")
+    log.ui("Toggle Connection clicked")
     state = ctx.state
     if state.connected:
-        print("Disconnecting from Catalyst...")
+        log.info("Disconnecting from Catalyst...")
         if state.has_data:
             reset_visualization(ctx)
         ctx.catalyst_link = None
@@ -95,7 +97,7 @@ def toggle_connection(ctx: Any):
 
 def scan_sources_only(ctx: Any):
     if not ctx.catalyst_link: return
-    print("Scanning for available channels...")
+    log.info("Scanning for available channels...")
     msgs_processed = 0
     while live.ProcessServerNotifications():
         msgs_processed += 1
@@ -103,24 +105,24 @@ def scan_sources_only(ctx: Any):
     names = get_available_extract_names(ctx.catalyst_link)
     names = [n for n in names if not (n.startswith("Steering"))]
     if names:
-        print(f"Scan complete. Found: {names}")
+        log.info("Scan complete. Found: {}", names)
         ctx.state.available_sources = names
     else:
-        print("Scan returned empty.")
+        log.info("Scan returned empty.")
 
 
 def search_and_select_best(ctx: Any):
-    print(f"[UI] Search invoked with input: {ctx.state.selected_source}")
+    log.ui("Search invoked with input: {}", ctx.state.selected_source)
     current_input = ctx.state.selected_source
     available = ctx.state.available_sources
     if not available:
         scan_sources_only(ctx)
         available = ctx.state.available_sources
     if not available or not current_input:
-        print("Search skipped: No input provided or no sources found.")
+        log.info("Search skipped: No input provided or no sources found.")
         return
     if current_input in available:
-        print(f"Exact match found: {current_input}. Initializing...")
+        log.info("Exact match found: {}. Initializing...", current_input)
         extract_data(ctx)
         return
     best_match = None
@@ -129,14 +131,14 @@ def search_and_select_best(ctx: Any):
             best_match = name
             break
     if best_match:
-        print(f"Auto-switching selection to: {best_match}")
+        log.info("Auto-switching selection to: {}", best_match)
         ctx.state.selected_source = best_match
     else:
-        print(f"No match found for '{current_input}'")
+        log.info("No match found for '{}'", current_input)
 
 
 def extract_data(ctx: Any):
-    print(f"[UI] Init clicked for selection: {ctx.state.selected_source}")
+    log.ui("Init clicked for selection: {}", ctx.state.selected_source)
     state = ctx.state
     if not ctx.catalyst_link: return
     channel_name = state.selected_source
@@ -147,11 +149,11 @@ def extract_data(ctx: Any):
             bunch_key = f"{channel_name}.bunch"
             box_key = f"{channel_name}.box"
             if bunch_key in ctx.active_proxies and box_key in ctx.active_proxies:
-                 print(f"Source {channel_name} is already fully active.")
+                 log.info("Source {} is already fully active.", channel_name)
                  return
-            print(f"Partial particle source detected. Re-extracting missing components for {channel_name}...")
+            log.info("Partial particle source detected. Re-extracting missing components for {}...", channel_name)
         else:
-            print(f"Source {channel_name} is already active.")
+            log.info("Source {} is already active.", channel_name)
             return
     proxies_to_extract = [channel_name]
     if channel_name.startswith("ippl_sField"):
@@ -162,12 +164,12 @@ def extract_data(ctx: Any):
     elif channel_name.startswith("ippl_particles"):
         proxies_to_extract.append(f"{channel_name}.bunch")
         proxies_to_extract.append(f"{channel_name}.box")
-    print(f"Requesting {proxies_to_extract}...")
+    log.info("Requesting {}...", proxies_to_extract)
     try:
         for p_name in proxies_to_extract:
             live.ExtractCatalystData(ctx.catalyst_link, p_name)
     except Exception as e:
-        print(f"Extract call failed: {e}")
+        log.warn("Extract call failed: {}", e)
         return
     primary_proxy_name = channel_name
     if channel_name.startswith("ippl_sField"):
@@ -214,24 +216,24 @@ def extract_data(ctx: Any):
         state.pipeline_items = current_items
         view = simple.GetActiveView()
         if channel_name.startswith("ippl_particles"):
-            print(f"Applying Custom Particle Render for {channel_name}...")
+            log.info("Applying Custom Particle Render for {}...", channel_name)
             render_config.setup_particle_view(new_proxy, view, channel_name)
         elif channel_name.startswith("ippl_sField"):
-            print(f"Applying Scalar Field Render for {channel_name}...")
+            log.info("Applying Scalar Field Render for {}...", channel_name)
             merged_proxy = find_source_by_name(f"{channel_name}.MergedBlocks")
             if merged_proxy:
                 render_config.setup_scalar_field_view(merged_proxy, view, channel_name)
         elif channel_name.startswith("ippl_vField"):
-            print(f"Applying Vector Field Render for {channel_name}...")
+            log.info("Applying Vector Field Render for {}...", channel_name)
             glyph_proxy = find_source_by_name(f"{channel_name}.Glyph")
             if glyph_proxy:
-                print(f"Found extracted Glyph filter: {channel_name}.Glyph")
+                log.info("Found extracted Glyph filter: {}.Glyph", channel_name)
                 render_config.setup_vector_field_view(glyph_proxy, view, channel_name, is_extracted=True)
             else:
-                print(f"Extracted Glyph filter not found. Creating local Glyph filter.")
+                log.info("Extracted Glyph filter not found. Creating local Glyph filter.")
                 render_config.setup_vector_field_view(new_proxy, view, channel_name, is_extracted=False)
         else:
-            print(f"Applying Default Render for {channel_name}...")
+            log.info("Applying Default Render for {}...", channel_name)
             render_config.setup_default_view(new_proxy, view)
         render_config.reset_camera(simple.GetActiveView(), channel_name, new_proxy)
         simple.Render()
@@ -239,17 +241,17 @@ def extract_data(ctx: Any):
             try:
                 ctx.ctrl.view_update()
             except Exception as e:
-                print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+                log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
                 ctx.view_update_enabled = False
                 state.live_mode = False
                 state.status_text = "Live disabled: transport error"
         state.has_data = True
         state.selected_source = None
-        print(f"Extraction successful: {channel_name}")
+        log.info("Extraction successful: {}", channel_name)
 
 
 def reset_visualization(ctx: Any):
-    print("[UI] Reset Visualization clicked")
+    log.ui("Reset Visualization clicked")
     state = ctx.state
     state.live_mode = False
     state.has_data = False
@@ -295,7 +297,7 @@ def reset_visualization(ctx: Any):
         try:
             ctx.ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
             ctx.view_update_enabled = False
             state.live_mode = False
             state.status_text = "Live disabled: transport error"
@@ -303,19 +305,19 @@ def reset_visualization(ctx: Any):
 
 def reload_steering_proxies(ctx: Any):
     """Extract/reload steering proxies and report availability vs XML."""
-    print("[UI] Reload Steering Proxies requested")
+    log.ui("Reload Steering Proxies requested")
     link = ctx.catalyst_link
     if not link:
-        print("[WARN] No Catalyst connection; cannot reload steering proxies.")
+        log.warn("No Catalyst connection; cannot reload steering proxies.")
         return
 
     # Parse expected proxies from XML
     try:
         expected_defs = steering_config.parse_steerable_parameters()
         expected_names = [p['name'] for p in expected_defs]
-        print(f"[DEBUG] XML-defined steerable proxies: {expected_names}")
+        log.debug("XML-defined steerable proxies: {}", expected_names)
     except Exception as e:
-        print(f"[ERROR] Failed to parse steerable parameters: {e}")
+        log.error("Failed to parse steerable parameters: {}", e)
         expected_defs = []
         expected_names = []
 
@@ -324,16 +326,16 @@ def reload_steering_proxies(ctx: Any):
         names = get_available_extract_names(link)
     except Exception:
         names = []
-    print(f"DEBUG: All found sources: {names}")
+    log.debug("All found sources: {}", names)
     steering_names = [n for n in names if n.startswith("Steering") or n.startswith("SteeringParameters")]
-    print(f"[DEBUG] Steering channels discovered: {steering_names}")
+    log.debug("Steering channels discovered: {}", steering_names)
 
     # Request extraction for each steering channel
     for sname in steering_names:
         try:
             live.ExtractCatalystData(link, sname)
         except Exception as e_ex:
-            print(f"[WARN] Extract steering '{sname}' failed: {e_ex}")
+            log.warn("Extract steering '{}' failed: {}", sname, e_ex)
 
     # Process notifications to ensure proxies materialize client-side
     try:
@@ -385,11 +387,11 @@ def reload_steering_proxies(ctx: Any):
                     pass
         (found if found_flag else missing).append(pname)
 
-    print(f"[INFO] Steering proxies available (from XML): {found}")
+    log.info("Steering proxies available (from XML): {}", found)
     if missing:
-        print(f"[WARN] Steering proxies missing/not extracted: {missing}")
+        log.warn("Steering proxies missing/not extracted: {}", missing)
     else:
-        print("[INFO] All XML-defined steering proxies are available.")
+        log.info("All XML-defined steering proxies are available.")
 
     # Refresh state copies for UI consumers
     try:

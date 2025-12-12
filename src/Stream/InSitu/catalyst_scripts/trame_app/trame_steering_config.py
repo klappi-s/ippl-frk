@@ -1,6 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
 from paraview import simple, servermanager
+from . import trame_logging as log
 
 # Ensure we always read catalyst_proxy.xml from the catalyst_scripts folder, not trame_app
 _TRAME_APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,7 +14,7 @@ def preload_steerable_proxies():
     """Load definitions into the global servermanager before connection."""
     xml_path = get_xml_path()
     if not os.path.exists(xml_path):
-        print(f"[ERROR] catalyst_proxy.xml not found at {xml_path}")
+        log.error("catalyst_proxy.xml not found at {}", xml_path)
         return
 
     try:
@@ -25,9 +26,9 @@ def preload_steerable_proxies():
                 pdm = pm.GetProxyDefinitionManager()
                 if pdm:
                     pdm.LoadConfigurationXMLFromString(xml_content)
-                    print(f"[DEBUG] Pre-loaded steerable proxies into global definition manager")
+                    log.debug("Pre-loaded steerable proxies into global definition manager")
         except Exception as e:
-            print(f"[WARN] Failed to pre-load into global manager: {e}")
+            log.warn("Failed to pre-load into global manager: {}", e)
         if servermanager.ActiveConnection:
              try:
                  pm = servermanager.ActiveConnection.Session.GetSessionProxyManager()
@@ -35,13 +36,13 @@ def preload_steerable_proxies():
                      pm.LoadConfigurationXMLFromString(xml_content)
                  else:
                      pm.LoadConfigurationXML(xml_content)
-                 print("[DEBUG] Pre-loaded steerable proxies into active session")
+                 log.debug("Pre-loaded steerable proxies into active session")
              except Exception as e:
-                 print(f"[WARN] Failed to pre-load into active session: {e}")
+                 log.warn("Failed to pre-load into active session: {}", e)
         else:
-             print("[WARN] No ActiveConnection found during pre-load")
+             log.warn("No ActiveConnection found during pre-load")
     except Exception as e:
-        print(f"[ERROR] Failed to read/load steerable proxies: {e}")
+        log.error("Failed to read/load steerable proxies: {}", e)
 
 def load_steerable_proxies(proxy_manager=None):
     """Load the catalyst_proxy.xml to register steerable proxy definitions."""
@@ -51,7 +52,7 @@ def load_steerable_proxies(proxy_manager=None):
             with open(xml_path, 'r') as f:
                 xml_content = f.read()
             if proxy_manager:
-                print(f"[DEBUG] Loading steerable proxies into provided proxy manager")
+                log.debug("Loading steerable proxies into provided proxy manager")
                 if hasattr(proxy_manager, 'LoadConfigurationXMLFromString'):
                     proxy_manager.LoadConfigurationXMLFromString(xml_content)
                 elif hasattr(proxy_manager, 'LoadConfigurationXML'):
@@ -65,11 +66,11 @@ def load_steerable_proxies(proxy_manager=None):
                      pm.LoadConfigurationXMLFromString(xml_content)
                  else:
                      pm.LoadConfigurationXML(xml_content)
-                 print("[DEBUG] Loaded steerable proxies into active session")
+                 log.debug("Loaded steerable proxies into active session")
         except Exception as e:
-            print(f"[ERROR] Failed to load steerable proxies: {e}")
+            log.error("Failed to load steerable proxies: {}", e)
     else:
-        print(f"[ERROR] catalyst_proxy.xml not found at {xml_path}")
+        log.error("catalyst_proxy.xml not found at {}", xml_path)
 
 def get_steerable_proxy(catalyst_link, proxy_name=None):
     """Find the steerable proxy from the insitu proxy manager across common groups.
@@ -213,12 +214,12 @@ def get_steerable_proxy(catalyst_link, proxy_name=None):
 def debug_list_insitu_proxies(catalyst_link):
     """Utility to print available proxies and their XML names across groups."""
     if not catalyst_link:
-        print("[DEBUG] No catalyst_link for debug list")
+        log.debug("No catalyst_link for debug list")
         return
     try:
         pm = catalyst_link.GetInsituProxyManager()
     except Exception:
-        print("[DEBUG] No insitu proxy manager")
+        log.debug("No insitu proxy manager")
         return
     groups = ["sources", "filters", "insitu", "misc"]
     for g in groups:
@@ -226,13 +227,13 @@ def debug_list_insitu_proxies(catalyst_link):
             n = pm.GetNumberOfProxies(g)
         except Exception:
             continue
-        print(f"[DEBUG] Group '{g}' has {n} proxies")
+        log.debug("Group '{}' has {} proxies", g, n)
         for i in range(n):
             try:
                 name = pm.GetProxyName(g, i)
                 p = pm.GetProxy(g, name)
                 xmln = p.GetXMLName() if p else "?"
-                print(f"[DEBUG]  - {g}:{name} (XMLName={xmln})")
+                log.debug(" - {}:{} (XMLName={})", g, name, xmln)
             except Exception:
                 continue
 
@@ -240,7 +241,31 @@ def update_steering_parameter(catalyst_link, proxy_name, param_name, value):
     """Update a property on the steerable proxy."""
     proxy = get_steerable_proxy(catalyst_link, proxy_name)
     if proxy:
-        print(f"[DEBUG] Updating {proxy_name}.{param_name} to {value} (type={type(value)}, len={len(value) if isinstance(value, list) else 'N/A'})")
+        # Level 1: Summary of what's being updated
+        if isinstance(value, list):
+            if len(value) > 0 and isinstance(value[0], list):
+                # Array of vectors
+                log.info("{}.{} ← {} rows × {} components", 
+                        proxy_name.replace('SteerableParameters_', ''), 
+                        param_name.split('.')[-1], 
+                        len(value), len(value[0]) if value else 0)
+            else:
+                # Array of scalars or single vector
+                log.info("{}.{} ← {} values", 
+                        proxy_name.replace('SteerableParameters_', ''), 
+                        param_name.split('.')[-1], 
+                        len(value))
+        else:
+            log.info("{}.{} ← {}", 
+                    proxy_name.replace('SteerableParameters_', ''), 
+                    param_name.split('.')[-1], 
+                    value)
+        
+        # Level 2: Detailed debug info
+        log.debug("Updating {}.{} to {} (type={}, len={})", 
+                 proxy_name, param_name, value, type(value).__name__, 
+                 len(value) if isinstance(value, list) else 'N/A')
+        
         prop = proxy.GetProperty(param_name)
         if prop:
             def to_int(x):
@@ -302,41 +327,41 @@ def update_steering_parameter(catalyst_link, proxy_name, param_name, value):
                                 proxy_obj = proxy.GetClientSideObject()
                             if hasattr(proxy_obj, clean_cmd):
                                 getattr(proxy_obj, clean_cmd)(initial_string)
-                                print(f"[DEBUG] Called {clean_cmd}('{initial_string}') on proxy")
+                                log.debug("Called {}('{}') on proxy", clean_cmd, initial_string)
                     except Exception as e:
-                        print(f"[DEBUG] Could not call clean command: {e}")
+                        log.debug("Could not call clean command: {}", e)
                 
                 # Now set all elements - this will trigger repeat_command for each tuple
                 prop.SetNumberOfElements(len(casted))
                 for idx, val in enumerate(casted):
                     prop.SetElement(idx, val)
-                print(f"[DEBUG] Set {len(casted)} elements for {param_name}")
+                log.debug("Set {} elements for {}", len(casted), param_name)
             else:
                 casted = to_int(value) if is_int_prop else to_float(value)
                 prop.SetElement(0, casted)
-                print(f"[DEBUG] Set 1 element for {param_name}: {casted}")
+                log.debug("Set 1 element for {}: {}", param_name, casted)
             
             # Verify what was set
             try:
                 num_elems = prop.GetNumberOfElements()
-                print(f"[DEBUG] After set, property {param_name} has {num_elems} elements")
+                log.debug("After set, property {} has {} elements", param_name, num_elems)
             except Exception:
                 pass
                 
             proxy.UpdateVTKObjects()
-            print(f"[DEBUG] UpdateVTKObjects() called for {proxy_name}")
+            log.debug("UpdateVTKObjects() called for {}", proxy_name)
             
             # Force update of the pipeline to ensure changes propagate
             try:
                 if hasattr(proxy, 'UpdatePipeline'):
                     proxy.UpdatePipeline()
-                    print(f"[DEBUG] UpdatePipeline() called for {proxy_name}")
+                    log.debug("UpdatePipeline() called for {}", proxy_name)
             except Exception as e:
-                print(f"[DEBUG] UpdatePipeline failed (may not be needed): {e}")
+                log.debug("UpdatePipeline failed (may not be needed): {}", e)
         else:
-             print(f"[WARN] Property {param_name} not found on {proxy_name}")
+             log.warn("Property {} not found on {}", param_name, proxy_name)
     else:
-        print(f"[DEBUG] Steerable proxy {proxy_name} not found")
+        log.debug("Steerable proxy {} not found", proxy_name)
 
 def parse_steerable_parameters(base_path=None):
     """Parse catalyst_proxy.xml to extract steerable parameters."""
@@ -490,5 +515,5 @@ def parse_steerable_parameters(base_path=None):
             })
         return proxies_list
     except Exception as e:
-        print(f"[ERROR] Failed to parse catalyst_proxy.xml: {e}")
+        log.error("Failed to parse catalyst_proxy.xml: {}", e)
         return []

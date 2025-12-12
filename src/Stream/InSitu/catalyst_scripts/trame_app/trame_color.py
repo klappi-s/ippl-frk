@@ -3,14 +3,18 @@ from paraview import simple
 # Pipeline helper import needs to work whether we run as a package or standalone script
 try:
     from . import trame_pipeline as _pipeline
+    from . import trame_logging as log
 except Exception:
     try:
         from trame_app import trame_pipeline as _pipeline  # type: ignore
+        from trame_app import trame_logging as log  # type: ignore
     except Exception:
         try:
             import trame_pipeline as _pipeline  # type: ignore
+            import trame_logging as log  # type: ignore
         except Exception:
             _pipeline = None
+            import trame_logging as log
 
 from catalystSubroutines import find_source_by_name
 
@@ -29,7 +33,7 @@ class ColorAPI:
                 if proxy:
                     return proxy
             except Exception as e:
-                print(f"[WARN] Failed to get display proxy via pipeline helper: {e}")
+                log.warn("Failed to get display proxy via pipeline helper: {}", e)
 
         # Fallbacks: check active_proxies cache, then legacy name patterns
         proxy = getattr(self.ctx, "active_proxies", {}).get(name)
@@ -73,7 +77,7 @@ class ColorAPI:
             else:
                 return find_source_by_name(name)
         except Exception as e:
-            print(f"[WARN] Legacy display proxy lookup failed: {e}")
+            log.warn("Legacy display proxy lookup failed: {}", e)
         return None
 
     def _update_available_arrays(self, info):
@@ -95,12 +99,12 @@ class ColorAPI:
         arrays.insert(0, {'title': 'Solid Color', 'value': 'SOLID'})
         
         # Debug: Print found arrays
-        print(f"[UI] Available Arrays for {self.state.editing_source}: {[a['value'] for a in arrays]}")
+        log.debug("Available Arrays for {}: {}", self.state.editing_source, [a['value'] for a in arrays])
         
         self.state.color_arrays = arrays
 
     def open_edit_dialog(self, name):
-        print(f"[UI] Open Edit Dialog clicked: {name}")
+        log.ui("Open Edit Dialog clicked: {}", name)
         s = self.state
         s.editing_source = name
         s.show_edit_dialog = True
@@ -129,12 +133,12 @@ class ColorAPI:
             if val in valid_values:
                 s.current_color_array = val
             else:
-                print(f"[Warn] Current color {val} not found in available arrays: {valid_values}")
+                log.warn("Current color {} not found in available arrays: {}", val, valid_values)
                 # Fallback: try to find partial match or default
                 found = False
                 for v in valid_values:
                     if ca[1] in v:
-                        print(f"[Auto] Matching {val} to {v}")
+                        log.info("Auto-matching {} to {}", val, v)
                         s.current_color_array = v
                         found = True
                         break
@@ -215,7 +219,7 @@ class ColorAPI:
                     s.slice_bounds = [-1, 1, -1, 1, -1, 1]
 
             except Exception as e:
-                print(f"[WARN] Failed to init slice state: {e}")
+                log.warn("Failed to init slice state: {}", e)
 
         # Initialize solid color state
         try:
@@ -286,7 +290,7 @@ class ColorAPI:
                 ]
                 s.opacity_next_id = 5
         except Exception as e:
-            print(f"[WARN] Failed to init opacity state: {e}")
+            log.warn("Failed to init opacity state: {}", e)
             s.opacity_points = [
                 {'x': 0.0, 'y': 0.0, 'id': 0},
                 {'x': 100.0, 'y': 1.0, 'id': 1}
@@ -316,12 +320,12 @@ class ColorAPI:
                 # Default fallback (including vector fields)
                 s.available_representations = ['Surface', 'Wireframe', 'Points', 'Outline']
         except Exception as e:
-            print(f"[WARN] Failed to setup representation options: {e}")
+            log.warn("Failed to setup representation options: {}", e)
             s.available_representations = []
             s.current_representation = None
 
     def set_slice_normal(self, normal):
-        print(f"[UI] Set Slice Normal: {normal}")
+        log.ui("Set Slice Normal: {}", normal)
         name = self.state.editing_source
         proxy = self.get_display_proxy(name)
         if not proxy or ".Slice" not in name: return
@@ -331,10 +335,10 @@ class ColorAPI:
             simple.Render()
             self._safe_view_update()
         except Exception as e:
-            print(f"[WARN] Failed to set slice normal: {e}")
+            log.warn("Failed to set slice normal: {}", e)
 
     def set_slice_origin(self, origin):
-        # print(f"[UI] Set Slice Origin: {origin}") # Verbose
+        log.debug("Set Slice Origin: {}", origin)
         name = self.state.editing_source
         proxy = self.get_display_proxy(name)
         if not proxy or ".Slice" not in name: return
@@ -344,10 +348,10 @@ class ColorAPI:
             simple.Render()
             self._safe_view_update()
         except Exception as e:
-            print(f"[WARN] Failed to set slice origin: {e}")
+            log.warn("Failed to set slice origin: {}", e)
 
     def set_solid_color(self, hex_color):
-        print(f"[UI] Set Solid Color: {hex_color}")
+        log.ui("Set Solid Color: {}", hex_color)
         name = self.state.editing_source
         if not name: return
         
@@ -373,7 +377,7 @@ class ColorAPI:
                 simple.Render()
                 self._safe_view_update()
         except Exception as e:
-            print(f"[WARN] Failed to set solid color: {e}")
+            log.warn("Failed to set solid color: {}", e)
 
     def set_representation(self, mode):
         # Handle potential list input from UI
@@ -387,7 +391,7 @@ class ColorAPI:
         if isinstance(mode, str):
             mode = mode.strip("'\"")
             
-        print(f"[UI] Set Representation: {mode} (type: {type(mode)})")
+        log.ui("Set Representation: {} (type: {})", mode, type(mode).__name__)
         
         # Ensure mode is a native string and strip quotes (ParaView properties often stringify with quotes)
         mode = str(mode).strip("'\"")
@@ -411,7 +415,7 @@ class ColorAPI:
         if mode == 'Volume':
             ca = rep.ColorArrayName
             if ca and len(ca) > 0 and ca[0] == 'CELLS':
-                print(f"[Auto] Switching to Point Data for Volume rendering on {name}")
+                log.info("Auto-switching to Point Data for Volume rendering on {}", name)
                 info = proxy.GetDataInformation()
                 pd = info.GetPointDataInformation()
                 found_name = None
@@ -425,10 +429,10 @@ class ColorAPI:
                             break
                 
                 if found_name:
-                    print(f"[Auto] Selected Point Array: {found_name}")
+                    log.info("Auto-selected Point Array: {}", found_name)
                     self.update_color_by(found_name)
                 else:
-                    print("[Warn] No Point Data found for Volume rendering. It may be invisible.")
+                    log.warn("No Point Data found for Volume rendering. It may be invisible.")
 
         try:
             rep.SetRepresentationType(mode)
@@ -447,7 +451,7 @@ class ColorAPI:
             
             self._safe_view_update()
         except Exception as e:
-            print(f"[WARN] Failed to set representation: {e}")
+            log.warn("Failed to set representation: {}", e)
 
     def _validate_color_selection(self, rep):
         """Ensure current color selection is valid for the new representation/proxy."""
@@ -457,7 +461,7 @@ class ColorAPI:
         # Check if current selection is in available arrays
         valid_values = [a['value'] for a in s.color_arrays]
         if current not in valid_values:
-            print(f"[UI] Current color {current} invalid for new representation. Resetting.")
+            log.info("Current color {} invalid for new representation. Resetting.", current)
             # Try to find a valid default
             if len(valid_values) > 1: # 0 is SOLID, 1 is first array
                 # Prefer first array if available
@@ -475,7 +479,7 @@ class ColorAPI:
         merged = find_source_by_name(f"{name}.MergedBlocks")
         
         if not resample or not merged:
-            print(f"[WARN] Missing proxies for sField representation switch: resample={resample}, merged={merged}")
+            log.warn("Missing proxies for sField representation switch: resample={}, merged={}", resample, merged)
             return
 
         # Determine target proxy based on mode
@@ -510,7 +514,7 @@ class ColorAPI:
         
         # Debug: Check if target has data
         t_info = target_proxy.GetDataInformation()
-        print(f"[DEBUG] Switched to {target_proxy.GetLogName()}. Cells: {t_info.GetNumberOfCells()}, Bounds: {t_info.GetBounds()}")
+        log.debug("Switched to {}. Cells: {}, Bounds: {}", target_proxy.GetLogName(), t_info.GetNumberOfCells(), t_info.GetBounds())
         
         # Transfer color state if needed
         s = self.state
@@ -535,7 +539,7 @@ class ColorAPI:
         if mode == 'Volume':
             current_val = s.current_color_array
             if current_val and 'CELLS:' in current_val:
-                print(f"[Auto] Volume mode requires Point Data. Switching from {current_val}...")
+                log.info("Volume mode requires Point Data. Switching from {}...", current_val)
                 # Try to find the same array name in POINTS
                 array_name = current_val.split(':')[1]
                 new_val = f"POINTS:{array_name}"
@@ -543,14 +547,14 @@ class ColorAPI:
                 # Check if this point array actually exists
                 valid_values = [a['value'] for a in s.color_arrays]
                 if new_val in valid_values:
-                    print(f"[Auto] Found matching Point Data: {new_val}")
+                    log.info("Found matching Point Data: {}", new_val)
                     self.update_color_by(new_val)
                     s.current_color_array = new_val
                 else:
                     # Fallback to first available point array
                     point_arrays = [v for v in valid_values if 'POINTS:' in v]
                     if point_arrays:
-                        print(f"[Auto] Fallback to first Point Data: {point_arrays[0]}")
+                        log.info("Fallback to first Point Data: {}", point_arrays[0])
                         self.update_color_by(point_arrays[0])
                         s.current_color_array = point_arrays[0]
         
@@ -560,7 +564,7 @@ class ColorAPI:
         self._safe_view_update()
 
     def update_color_by(self, value):
-        print(f"[UI] Color By changed: {value}")
+        log.ui("Color By changed: {}", value)
         name = self.state.editing_source
         if not name:
             return
@@ -634,7 +638,7 @@ class ColorAPI:
                     comp_idx = lut.VectorComponent
                 
                 r = ai.GetComponentRange(comp_idx)
-                print(f"[DEBUG] Rescaling LUT for {array_name} to {r}")
+                log.debug("Rescaling LUT for {} to {}", array_name, r)
                 
                 if self.state.auto_rescale_color:
                     min_v, max_v = r[0], r[1]
@@ -691,7 +695,7 @@ class ColorAPI:
         self._safe_view_update()
 
     def set_color_component(self, mode):
-        print(f"[UI] Set Color Component: {mode}")
+        log.ui("Set Color Component: {}", mode)
         name = self.state.editing_source
         if not name: return
         proxy = self.get_display_proxy(name)
@@ -737,7 +741,7 @@ class ColorAPI:
         ai = dinfo.GetArrayInformation(array_name)
         if ai:
             r = ai.GetComponentRange(component_idx)
-            print(f"[DEBUG] Rescaling LUT for {array_name} component {mode} to {r}")
+            log.debug("Rescaling LUT for {} component {} to {}", array_name, mode, r)
             if self.state.auto_rescale_color:
                 min_v, max_v = r[0], r[1]
                 if self.state.symmetric_rescale:
@@ -745,7 +749,7 @@ class ColorAPI:
                     min_v = -max_abs
                     max_v = max_abs
                     
-                print(f"[DEBUG] Rescaling LUT for {array_name} to {min_v} - {max_v} (Symmetric: {self.state.symmetric_rescale})")
+                log.debug("Rescaling LUT for {} to {} - {} (Symmetric: {})", array_name, min_v, max_v, self.state.symmetric_rescale)
                     
                 if max_v > min_v:
                     lut.RescaleTransferFunction(min_v, max_v)
@@ -777,7 +781,7 @@ class ColorAPI:
                 pass
 
     def apply_color_map(self, preset_key):
-        print(f"[UI] Apply Color Map clicked: {preset_key} (source: {self.state.editing_source})")
+        log.ui("Apply Color Map clicked: {} (source: {})", preset_key, self.state.editing_source)
         name = self.state.editing_source
         if not name:
             return
@@ -831,7 +835,7 @@ class ColorAPI:
                     pass
 
         except Exception as e:
-            print(f"[WARN] Failed to apply preset '{preset_name}': {e}")
+            log.warn("Failed to apply preset '{}': {}", preset_name, e)
             return
         rep.LookupTable = lut
         sb = simple.GetScalarBar(lut, view)
@@ -854,7 +858,7 @@ class ColorAPI:
             self.state.color_map_per_source = { name: preset_key }
 
     def set_scalar_bar_visibility(self, desired_vis):
-        print(f"[UI] Scalar Bar visibility toggled: {desired_vis} (source: {self.state.editing_source})")
+        log.ui("Scalar Bar visibility toggled: {} (source: {})", desired_vis, self.state.editing_source)
         name = self.state.editing_source
         proxy = self.get_display_proxy(name) if name else None
         view = simple.GetActiveView()
@@ -891,7 +895,7 @@ class ColorAPI:
             if hasattr(self.ctrl, 'view_update') and getattr(self.ctx, 'view_update_enabled', True):
                 self.ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
             try:
                 self.ctx.view_update_enabled = False
                 self.state.live_mode = False
@@ -900,18 +904,18 @@ class ColorAPI:
                 pass
 
     def apply_custom_range(self):
-        print(f"[UI] Apply Custom Range clicked")
+        log.ui("Apply Custom Range clicked")
         s = self.state
         
         try:
             vmin = float(s.custom_rescale_min)
             vmax = float(s.custom_rescale_max)
         except (ValueError, TypeError):
-            print("[WARN] Invalid custom range values")
+            log.warn("Invalid custom range values")
             return
             
         if vmin >= vmax:
-            print("[WARN] Min must be less than Max")
+            log.warn("Min must be less than Max")
             return
 
         name = s.editing_source
@@ -934,7 +938,7 @@ class ColorAPI:
         self._safe_view_update()
 
     def apply_auto_rescale(self):
-        print("[UI] Apply Auto Rescale triggered")
+        log.ui("Apply Auto Rescale triggered")
         if not self.state.auto_rescale_color:
             return
 
@@ -966,7 +970,7 @@ class ColorAPI:
                     comp_idx = lut.VectorComponent
             
             r = ai.GetComponentRange(comp_idx)
-            print(f"[DEBUG] Auto-rescaling {array_name} (comp {comp_idx}) to {r}")
+            log.debug("Auto-rescaling {} (comp {}) to {}", array_name, comp_idx, r)
             
             min_v, max_v = r[0], r[1]
             if self.state.symmetric_rescale:
@@ -974,7 +978,7 @@ class ColorAPI:
                 min_v = -max_abs
                 max_v = max_abs
                 
-            print(f"[DEBUG] Applying range: {min_v} to {max_v} (Symmetric: {self.state.symmetric_rescale})")
+            log.debug("Applying range: {} to {} (Symmetric: {})", min_v, max_v, self.state.symmetric_rescale)
             
             if max_v > min_v:
                 lut.RescaleTransferFunction(min_v, max_v)
@@ -1003,28 +1007,28 @@ class ColorAPI:
         self.state.rescale_settings_per_source = d
 
     def update_opacity_points(self, points):
-        print(f"[DEBUG-BACKEND] update_opacity_points called with: {points}")
+        log.debug("update_opacity_points called with: {}", points)
         name = self.state.editing_source
         if not name: 
-            print("[DEBUG-BACKEND] No editing source.")
+            log.debug("No editing source.")
             return
         proxy = self.get_display_proxy(name)
         if not proxy: 
-            print(f"[DEBUG-BACKEND] No proxy found for {name}")
+            log.debug("No proxy found for {}", name)
             return
         view = simple.GetActiveView()
         rep = simple.GetRepresentation(proxy, view)
         if not rep: 
-            print("[DEBUG-BACKEND] No representation found.")
+            log.debug("No representation found.")
             return
         
         ca = rep.ColorArrayName
         if not ca or len(ca) < 2 or not ca[1]:
-            print(f"[DEBUG-BACKEND] Invalid ColorArrayName: {ca}")
+            log.debug("Invalid ColorArrayName: {}", ca)
             return
             
         array_name = ca[1]
-        print(f"[DEBUG-BACKEND] Updating opacity for array: {array_name}")
+        log.debug("Updating opacity for array: {}", array_name)
         lut = simple.GetColorTransferFunction(array_name)
         sof = simple.GetOpacityTransferFunction(array_name)
         
@@ -1051,7 +1055,7 @@ class ColorAPI:
         
         if width == 0: width = 1.0
         
-        print(f"[DEBUG-BACKEND] Calculated range: {min_val} to {max_val}, width: {width}")
+        log.debug("Calculated range: {} to {}, width: {}", min_val, max_val, width)
         
         # Build new points list [x, y, mid, sharp, ...]
         new_points = []
@@ -1064,28 +1068,28 @@ class ColorAPI:
                 # Append x, y, midpoint, sharpness
                 new_points.extend([val, opacity, 0.5, 0.0])
             except Exception as e:
-                print(f"[WARN] Failed to process opacity point {p}: {e}")
+                log.warn("Failed to process opacity point {}: {}", p, e)
 
-        print(f"[DEBUG-BACKEND] Flattened points for ParaView: {new_points}")
+        log.debug("Flattened points for ParaView: {}", new_points)
         
         sof.Points = new_points
-        print(f"[DEBUG-BACKEND] Assigned to sof.Points")
+        log.debug("Assigned to sof.Points")
         
         # # Ensure the representation is using this SOF (sometimes it gets detached)
         # Also ensure OpacityTransferFunction is set to 'Piecewise Function'
 
         if hasattr(rep, 'OpacityTransferFunction'):
 
-            print("rep has an OpacityTransferFunction")
+            log.debug("rep has an OpacityTransferFunction")
             rep.OpacityTransferFunction = 'Piecewise Function'
         else:
-            print("rep has no OpacityTransferFunction")
+            log.debug("rep has no OpacityTransferFunction")
 
         if hasattr(rep, 'ScalarOpacityFunction'):
-            print("rep has an attribute ScalarOpacityFunction")
+            log.debug("rep has an attribute ScalarOpacityFunction")
             rep.ScalarOpacityFunction = sof
         else:
-            print("rep has no attribute scalar opacity function")
+            log.debug("rep has no attribute scalar opacity function")
         
         
         simple.Render()

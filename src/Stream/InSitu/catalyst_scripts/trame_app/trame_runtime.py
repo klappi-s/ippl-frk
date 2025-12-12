@@ -10,11 +10,14 @@ from catalystSubroutines import find_source_by_name
 # Prefer local trame_app render_config; fallback to script-mode import if needed
 try:
     from . import trame_render_config as render_config
+    from . import trame_logging as log
 except Exception:
     try:
         from trame_app import trame_render_config as render_config
+        from trame_app import trame_logging as log
     except Exception:
         import trame_render_config as render_config
+        import trame_app.trame_logging as log
 
 async def poll_catalyst(ctx: Any):
     state = ctx.state
@@ -46,9 +49,9 @@ async def poll_catalyst(ctx: Any):
                         # Optional: verbose camera logging; leave to app layer if needed
                         try:
                             pos, foc, up, ang, pscale = camera_sig
-                            print(f"[UI] Camera changed: pos={pos}, focal={foc}, up={up}, angle={ang}, parallelScale={pscale}")
+                            log.ui("Camera changed: pos={}, focal={}, up={}, angle={}, parallelScale={}", pos, foc, up, ang, pscale)
                         except Exception:
-                            print("[UI] Camera changed")
+                            log.ui("Camera changed")
 
                     # Update pipelines
                     for sel, proxy in ctx.active_proxies.items():
@@ -103,7 +106,7 @@ async def poll_catalyst(ctx: Any):
                             ctx.last_view_update_ts = now
                             ctx.view_update_pending_until = now + (1.2 if has_scalar_field else 0.3)
                         except Exception as e:
-                            print(f"[WARN] view_update failed during polling: {e}. Disabling further updates and live mode.")
+                            log.warn("view_update failed during polling: {}. Disabling further updates and live mode.", e)
                             ctx.view_update_enabled = False
                             state.live_mode = False
                             state.status_text = "Live disabled: transport error"

@@ -5,8 +5,10 @@ from paraview import simple
 from catalystSubroutines import find_source_by_name, get_global_spatial_bounds
 try:
     from . import trame_render_config as render_config
+    from . import trame_logging as log
 except ImportError:
     import trame_render_config as render_config
+    import trame_logging as log
 
 
 def get_display_proxy(ctx: Any, name: str):
@@ -53,7 +55,7 @@ def get_display_proxy(ctx: Any, name: str):
 
 
 def remove_proxy(ctx: Any, name: str):
-    print(f"[UI] Remove Source clicked: {name}")
+    log.ui("Remove Source clicked: {}", name)
     
     # Try to find proxy in active_proxies first
     p = ctx.active_proxies.get(name)
@@ -84,11 +86,11 @@ def remove_proxy(ctx: Any, name: str):
             p = find_source_by_name(sel)
 
     if p:
-        print(f"Deleting proxy object for {name}")
+        log.info("Deleting proxy object for {}", name)
         try:
             simple.Delete(p)
         except Exception as e:
-            print(f"[WARN] Failed to delete proxy {name}: {e}")
+            log.warn("Failed to delete proxy {}: {}", name, e)
     
     # Remove from active_proxies if present
     if name in ctx.active_proxies:
@@ -100,14 +102,14 @@ def remove_proxy(ctx: Any, name: str):
         sibling = f"{parent}.box"
         # If sibling is not active, remove parent key to allow re-adding
         if sibling not in ctx.active_proxies and parent in ctx.active_proxies:
-            print(f"Cleaning up parent key {parent} from active_proxies")
+            log.debug("Cleaning up parent key {} from active_proxies", parent)
             del ctx.active_proxies[parent]
     elif name.endswith(".box"):
         parent = name[:-4]
         sibling = f"{parent}.bunch"
         # If sibling is not active, remove parent key to allow re-adding
         if sibling not in ctx.active_proxies and parent in ctx.active_proxies:
-            print(f"Cleaning up parent key {parent} from active_proxies")
+            log.debug("Cleaning up parent key {} from active_proxies", parent)
             del ctx.active_proxies[parent]
         
     new_items = [item for item in ctx.state.pipeline_items if item['id'] != name]
@@ -119,14 +121,14 @@ def remove_proxy(ctx: Any, name: str):
         try:
             ctx.ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
             ctx.view_update_enabled = False
             ctx.state.live_mode = False
             ctx.state.status_text = "Live disabled: transport error"
 
 
 def extract_slice(ctx: Any, name: str):
-    print(f"[UI] Extract Slice for: {name}")
+    log.ui("Extract Slice for: {}", name)
     
     # Find the input proxy (MergedBlocks for sField)
     input_proxy = None
@@ -140,7 +142,7 @@ def extract_slice(ctx: Any, name: str):
             input_proxy = find_source_by_name(name)
         
     if not input_proxy:
-        print(f"[WARN] Could not find input proxy for slice extraction on {name}")
+        log.warn("Could not find input proxy for slice extraction on {}", name)
         return
 
     # Generate unique name
@@ -192,7 +194,7 @@ def extract_slice(ctx: Any, name: str):
 
 
 def extract_ghosts(ctx: Any, name: str):
-    print(f"[UI] Extract Ghosts for: {name}")
+    log.ui("Extract Ghosts for: {}", name)
     
     # Find the input proxy (Resample for sField if available, else MergedBlocks)
     input_proxy = None
@@ -208,14 +210,14 @@ def extract_ghosts(ctx: Any, name: str):
         input_proxy = get_display_proxy(ctx, name)
         
     if not input_proxy:
-        print(f"[WARN] Could not find input proxy for ghost extraction on {name}")
+        log.warn("Could not find input proxy for ghost extraction on {}", name)
         return
 
     # Check for ghost array
     info = input_proxy.GetDataInformation()
     cinfo = info.GetCellDataInformation()
     if not cinfo.GetArrayInformation("vtkGhostType"):
-        print(f"[WARN] No vtkGhostType array found in {name}")
+        log.warn("No vtkGhostType array found in {}", name)
         # We could alert the user here, but for now just log
         # return # Optional: abort if no ghosts
 
@@ -238,16 +240,16 @@ def extract_ghosts(ctx: Any, name: str):
     try:
         extract_ghosts.OutputGhostCells = 1
     except AttributeError:
-        print(f"[WARN] Could not set OutputGhostCells on ExtractGhostCells filter via attribute.")
+        log.warn("Could not set OutputGhostCells on ExtractGhostCells filter via attribute.")
         try:
             # Try setting via property name directly
             extract_ghosts.SetPropertyWithName("OutputGhostCells", 1)
-            print(f"[INFO] Set OutputGhostCells via SetPropertyWithName.")
+            log.info("Set OutputGhostCells via SetPropertyWithName.")
         except Exception as e:
-            print(f"[WARN] Failed to set OutputGhostCells via SetPropertyWithName: {e}")
+            log.warn("Failed to set OutputGhostCells via SetPropertyWithName: {}", e)
             try:
                 # Debug: print available properties from ListProperties() which is more reliable for proxies
-                print(f"[DEBUG] ExtractGhostCells ListProperties: {extract_ghosts.ListProperties()}")
+                log.debug("ExtractGhostCells ListProperties: {}", extract_ghosts.ListProperties())
             except:
                 pass
 
@@ -301,10 +303,10 @@ def extract_ghosts(ctx: Any, name: str):
         array_info = cinfo.GetArrayInformation(ghost_array_name)
         if array_info:
             rng = array_info.GetComponentRange(0)
-            print(f"[DEBUG] {ghost_array_name} range: {rng}")
+            log.debug("{} range: {}", ghost_array_name, rng)
             
         # Also list other available arrays for debugging
-        print(f"[DEBUG] Available Cell Arrays: {[cinfo.GetArrayInformation(i).GetName() for i in range(cinfo.GetNumberOfArrays())]}")
+        log.debug("Available Cell Arrays: {}", [cinfo.GetArrayInformation(i).GetName() for i in range(cinfo.GetNumberOfArrays())])
     else:
         render_config.setup_default_view(extract_ghosts, view)
     
@@ -322,7 +324,7 @@ def extract_ghosts(ctx: Any, name: str):
 
 
 def toggle_visibility(ctx: Any, name: str):
-    print(f"[UI] Toggle Visibility clicked: {name}")
+    log.ui("Toggle Visibility clicked: {}", name)
     
     items = ctx.state.pipeline_items
     new_items = []
@@ -388,21 +390,21 @@ def toggle_visibility(ctx: Any, name: str):
         if display_proxy:
             _set_vis_proxy(display_proxy, is_visible)
         else:
-            print(f"[WARN] Could not find proxy for {name} to toggle visibility")
+            log.warn("Could not find proxy for {} to toggle visibility", name)
 
     simple.Render()
     if hasattr(ctx.ctrl, 'view_update') and ctx.view_update_enabled:
         try:
             ctx.ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates and live mode.")
+            log.warn("view_update failed: {}. Disabling further updates and live mode.", e)
             ctx.view_update_enabled = False
             ctx.state.live_mode = False
             ctx.state.status_text = "Live disabled: transport error"
 
 
 def focus_camera_on(ctx: Any, name: str):
-    print(f"[UI] Focus Camera clicked: {name}")
+    log.ui("Focus Camera clicked: {}", name)
     if name not in ctx.active_proxies: return
     proxy = ctx.active_proxies[name]
     render_config.reset_camera(simple.GetActiveView(), name, proxy)
@@ -411,12 +413,12 @@ def focus_camera_on(ctx: Any, name: str):
         try:
             ctx.ctrl.view_update()
         except Exception as e:
-            print(f"[WARN] view_update failed: {e}. Disabling further updates.")
+            log.warn("view_update failed: {}. Disabling further updates.", e)
             ctx.view_update_enabled = False
 
 
 def extract_scalar_field(ctx: Any, name: str):
-    print(f"[UI] Extract Scalar Field for: {name}")
+    log.ui("Extract Scalar Field for: {}", name)
     
     # Find the input proxy (MergedBlocks for vField)
     input_proxy = None
@@ -433,11 +435,11 @@ def extract_scalar_field(ctx: Any, name: str):
             # Fallback to the source itself (e.g. TrivialProducer)
             # We explicitly avoid get_display_proxy() here because for vField 
             # it returns the Glyph filter, but we want the field data.
-            print("find source by name .MergeBlocks failed, source not catalyst extracted ...")
+            log.info("find source by name .MergeBlocks failed, source not catalyst extracted ...")
             input_proxy = find_source_by_name(name)
         
     if not input_proxy:
-        print(f"[WARN] Could not find input proxy for scalar extraction on {name}")
+        log.warn("Could not find input proxy for scalar extraction on {}", name)
         return
 
     # Generate unique name
@@ -493,10 +495,10 @@ def extract_scalar_field(ctx: Any, name: str):
         global_extent = [dim_x, dim_y, dim_z]
         
         if ghost_info:
-            print("Ghost Present")
+            log.debug("Ghost Present")
             cut_layers = 1
         else:
-            print("No Ghost Present")
+            log.debug("No Ghost Present")
             cut_layers = 0
             
         sampling_bounds = (
@@ -507,14 +509,14 @@ def extract_scalar_field(ctx: Any, name: str):
             global_bounds[4] + cut_layers * dz,
             global_bounds[5] - cut_layers * dz,
         )
-        print(f"ResampleToImage: Derived dims {global_extent} from extent {local_extent}, local bounds {local_bounds} and global bounds {global_bounds}")
+        log.debug("ResampleToImage: Derived dims {} from extent {}, local bounds {} and global bounds {}", global_extent, local_extent, local_bounds, global_bounds)
         
         resample = simple.ResampleToImage(registrationName=f"{resample_name}_Internal", Input=input_proxy)
         resample.UseInputBounds = 0
         resample.SamplingBounds = sampling_bounds
         resample.SamplingDimensions = global_extent
     else:
-        print(f"[WARN] Base proxy {base_name} not found. Using default resampling.")
+        log.warn("Base proxy {} not found. Using default resampling.", base_name)
         info = input_proxy.GetDataInformation()
         bounds = info.GetBounds()
         dx = bounds[1] - bounds[0]
@@ -580,7 +582,7 @@ def extract_scalar_field(ctx: Any, name: str):
     if pd.GetNumberOfArrays() > 0:
         # Prefer the renamed array if available
         target_array = new_array_name if final_proxy == calc else pd.GetArrayInformation(0).GetName()
-        print(f"[Auto] Coloring Resample Volume by {target_array} (Magnitude)")
+        log.info("Coloring Resample Volume by {} (Magnitude)", target_array)
         simple.ColorBy(rep, ('POINTS', target_array, 'Magnitude'))
         rep.RescaleTransferFunctionToDataRange(True, True)
         rep.SetScalarBarVisibility(view, True)

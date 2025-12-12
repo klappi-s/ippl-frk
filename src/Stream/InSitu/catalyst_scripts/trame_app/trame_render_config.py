@@ -1,6 +1,11 @@
 from paraview import simple
 from catalystSubroutines import get_global_spatial_bounds, nice_bounds_sym, get_global_range, auto_camera_from_bounds, find_source_by_name
 
+try:
+    from . import trame_logging as log
+except Exception:
+    import trame_app.trame_logging as log
+
 def setup_default_view(source_proxy, view):
     rep = simple.Show(source_proxy, view)
     info = source_proxy.GetDataInformation()
@@ -28,10 +33,10 @@ def setup_particle_view(source_proxy, view, channel_name):
     point_data = info.GetPointDataInformation()
 
     num_arrays = point_data.GetNumberOfArrays()
-    print(f"Available Point Arrays ({num_arrays}):")
+    log.debug("Available Point Arrays ({})", num_arrays)
     for i in range(num_arrays):
         array_info = point_data.GetArrayInformation(i)
-        print(f" - {array_info.GetName()}" if array_info else f" - [Array {i} info is None]")
+        log.debug(" - {}", array_info.GetName() if array_info else f"[Array {i} info is None]")
 
     current_ca = getattr(part_rep, 'ColorArrayName', None)
     target_assoc = None
@@ -81,7 +86,7 @@ def setup_particle_view(source_proxy, view, channel_name):
             simple.Delete(existing_box_rep)
         box_source.UpdatePipeline()
         info = box_source.GetDataInformation()
-        print(f"Box Data: {info.GetNumberOfPoints()} points, {info.GetNumberOfCells()} cells")
+        log.debug("Box Data: {} points, {} cells", info.GetNumberOfPoints(), info.GetNumberOfCells())
         box_rep = simple.Show(box_source, view)
         box_rep.SetRepresentationType('Outline')
         box_rep.AmbientColor = [1.0, 1.0, 0.0]
@@ -92,7 +97,7 @@ def setup_particle_view(source_proxy, view, channel_name):
         box_rep.ColorArrayName = [None, ''] 
         box_rep.MapScalars = 0
     else:
-        print(f"Warning: {channel_name}.box not found.")
+        log.warn("Warning: {}.box not found.", channel_name)
 
     simple.ResetCamera()
     return part_rep
@@ -163,10 +168,10 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
 
     global_extent = [dim_x, dim_y, dim_z]
     if ghost_info:
-        print("Ghost Present")
+        log.debug("Ghost Present")
         cut_layers = 1
     else:
-        print("No Ghost Present")
+        log.debug("No Ghost Present")
         cut_layers = 0
     global_bounds = (
         global_bounds[0] + cut_layers * dx,
@@ -176,7 +181,7 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         global_bounds[4] + cut_layers * dz,
         global_bounds[5] - cut_layers * dz,
     )
-    print(f"ResampleToImage: Derived dims {global_extent} from extent {local_extent}, local bounds {local_bounds} and global bounds {global_bounds}")
+    log.debug("ResampleToImage: Derived dims {} from extent {}, local bounds {} and global bounds {}", global_extent, local_extent, local_bounds, global_bounds)
 
     resample = simple.ResampleToImage(registrationName=resample_name, Input=source_proxy)
     resample.UseInputBounds = 0
@@ -198,7 +203,7 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         if point_data.GetNumberOfArrays() > 0:
             array_name = point_data.GetArrayInformation(0).GetName()
     if array_name:
-        print(f"Visualizing Scalar Field: {array_name} ({association})")
+        log.info("Visualizing Scalar Field: {} ({})", array_name, association)
         lut = simple.GetColorTransferFunction(array_name)
         lut.RGBPoints = [-2.00, 0.231373, 0.298039, 0.752941, 
                          0.00, 0.865003, 0.865003, 0.865003, 
@@ -234,7 +239,7 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         sb.Visibility = 1
         rep.SetScalarBarVisibility(view, True)
     else:
-        print("No scalar array found for Volume rendering.")
+        log.warn("No scalar array found for Volume rendering.")
     view.AxesGrid.Visibility = 1
     return rep
 
@@ -411,6 +416,6 @@ def reset_camera(view, selection_name, source_proxy):
             info = rep.Input.GetDataInformation()
             bounds = info.GetBounds()
     if bounds[0] > bounds[1]:
-        print(f"Cannot reset camera: Invalid bounds for {target_proxy.GetLogName()}")
+        log.warn("Cannot reset camera: Invalid bounds for {}", target_proxy.GetLogName())
         return
     auto_camera_from_bounds(view, bounds)
