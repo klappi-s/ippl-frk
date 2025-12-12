@@ -240,7 +240,7 @@ def update_steering_parameter(catalyst_link, proxy_name, param_name, value):
     """Update a property on the steerable proxy."""
     proxy = get_steerable_proxy(catalyst_link, proxy_name)
     if proxy:
-        print(f"[DEBUG] Updating {proxy_name}.{param_name} to {value}")
+        print(f"[DEBUG] Updating {proxy_name}.{param_name} to {value} (type={type(value)}, len={len(value) if isinstance(value, list) else 'N/A'})")
         prop = proxy.GetProperty(param_name)
         if prop:
             def to_int(x):
@@ -270,6 +270,7 @@ def update_steering_parameter(catalyst_link, proxy_name, param_name, value):
                     except Exception:
                         return 0.0
             is_int_prop = prop.IsA("vtkSMIntVectorProperty")
+            
             if isinstance(value, list):
                 flat_val = []
                 for v in value:
@@ -278,11 +279,60 @@ def update_steering_parameter(catalyst_link, proxy_name, param_name, value):
                     else:
                         flat_val.append(v)
                 casted = [to_int(x) if is_int_prop else to_float(x) for x in flat_val]
-                prop.SetElements(casted)
+                
+                # CRITICAL: For steering proxies with use_index='1' and repeat_command='1',
+                # we MUST clear the array first, then set elements to trigger proper command invocations
+                # Get clean command if available
+                clean_cmd = None
+                if hasattr(prop, 'GetCleanCommand') and prop.GetCleanCommand():
+                    clean_cmd = prop.GetCleanCommand()
+                
+                if clean_cmd:
+                    # Call the clean command (usually "Clear") with the array name
+                    # The initial_string in XML is the array name
+                    try:
+                        initial_string = None
+                        if hasattr(prop, 'GetInitialString') and prop.GetInitialString():
+                            initial_string = prop.GetInitialString()
+                        
+                        if initial_string:
+                            # Invoke clean command with array name
+                            proxy_obj = proxy
+                            if hasattr(proxy, 'GetClientSideObject'):
+                                proxy_obj = proxy.GetClientSideObject()
+                            if hasattr(proxy_obj, clean_cmd):
+                                getattr(proxy_obj, clean_cmd)(initial_string)
+                                print(f"[DEBUG] Called {clean_cmd}('{initial_string}') on proxy")
+                    except Exception as e:
+                        print(f"[DEBUG] Could not call clean command: {e}")
+                
+                # Now set all elements - this will trigger repeat_command for each tuple
+                prop.SetNumberOfElements(len(casted))
+                for idx, val in enumerate(casted):
+                    prop.SetElement(idx, val)
+                print(f"[DEBUG] Set {len(casted)} elements for {param_name}")
             else:
                 casted = to_int(value) if is_int_prop else to_float(value)
                 prop.SetElement(0, casted)
+                print(f"[DEBUG] Set 1 element for {param_name}: {casted}")
+            
+            # Verify what was set
+            try:
+                num_elems = prop.GetNumberOfElements()
+                print(f"[DEBUG] After set, property {param_name} has {num_elems} elements")
+            except Exception:
+                pass
+                
             proxy.UpdateVTKObjects()
+            print(f"[DEBUG] UpdateVTKObjects() called for {proxy_name}")
+            
+            # Force update of the pipeline to ensure changes propagate
+            try:
+                if hasattr(proxy, 'UpdatePipeline'):
+                    proxy.UpdatePipeline()
+                    print(f"[DEBUG] UpdatePipeline() called for {proxy_name}")
+            except Exception as e:
+                print(f"[DEBUG] UpdatePipeline failed (may not be needed): {e}")
         else:
              print(f"[WARN] Property {param_name} not found on {proxy_name}")
     else:

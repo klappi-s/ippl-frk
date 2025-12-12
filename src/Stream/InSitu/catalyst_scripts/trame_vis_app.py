@@ -455,12 +455,58 @@ def flush_and_apply_steering(array_data=None):
     
     if array_data:
         # Update state with the values passed from the client
+        # AND update the count for each array proxy based on array length
+        proxy_counts = {}  # Track new counts per proxy
+        
         for key, values in array_data.items():
             try:
                 state[key] = list(values)
                 print(f"[DEBUG] Updated {key}: {state[key]}")
+                
+                # Extract proxy name from key to update count
+                # Keys are like: steer_{safe_name} or steer_{safe_name}_{i}
+                # We need to find which proxy this belongs to and update its count
+                for proxy_def in steerable_proxies:
+                    if proxy_def['type'] == 'array':
+                        proxy_safe_name = proxy_def['safe_name']
+                        # Check if this key belongs to this proxy
+                        if key.startswith(f"steer_"):
+                            # Get the parameter name part
+                            key_suffix = key[6:]  # Remove "steer_" prefix
+                            
+                            # Check if this key matches any parameter in this proxy
+                            flat_params = []
+                            def collect_params(items):
+                                for item in items:
+                                    if item['item_type'] == 'group':
+                                        collect_params(item['children'])
+                                    else:
+                                        flat_params.append(item)
+                            collect_params(proxy_def['children'])
+                            
+                            for param in flat_params:
+                                safe_name = param['safe_name']
+                                # Check if key matches this param (with or without component suffix)
+                                if key == f"steer_{safe_name}" or key.startswith(f"steer_{safe_name}_"):
+                                    # This key belongs to this proxy
+                                    new_count = len(values)
+                                    if proxy_safe_name not in proxy_counts:
+                                        proxy_counts[proxy_safe_name] = new_count
+                                    # All arrays in the same proxy should have the same length
+                                    if proxy_counts[proxy_safe_name] != new_count:
+                                        print(f"[WARN] Inconsistent array lengths for proxy {proxy_safe_name}: {proxy_counts[proxy_safe_name]} vs {new_count}")
+                                    break
+                            
             except Exception as e:
                 print(f"[DEBUG] Error updating {key}: {e}")
+        
+        # Update counts for all affected array proxies
+        for proxy_safe_name, new_count in proxy_counts.items():
+            count_key = f"count_{proxy_safe_name}"
+            old_count = state.get(count_key, 0)
+            if old_count != new_count:
+                print(f"[DEBUG] Updating {count_key}: {old_count} -> {new_count}")
+                state[count_key] = new_count
     
     # Now apply the steering with fresh state
     apply_steering()
