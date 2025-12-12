@@ -152,6 +152,7 @@ class ColorAPI:
                     s.scalar_bar_visible = bool(getattr(sb, 'Visibility', 0))
                 else:
                     s.scalar_bar_visible = bool(rep.GetScalarBarVisibility(view))
+
             else:
                 s.scalar_bar_visible = False
         except Exception:
@@ -183,6 +184,7 @@ class ColorAPI:
             s.rescale_settings_per_source = {}
 
         s.auto_rescale_color = settings.get('auto', True)
+        s.symmetric_rescale = settings.get('symmetric', True)
         s.custom_rescale_min = settings.get('min', 0.0)
         s.custom_rescale_max = settings.get('max', 1.0)
 
@@ -229,6 +231,68 @@ class ColorAPI:
         except Exception:
             s.solid_color = "#ffffff"
 
+        # Initialize Opacity State
+        try:
+            if ca and len(ca) > 1 and ca[1]:
+                sof = simple.GetOpacityTransferFunction(ca[1])
+                lut = simple.GetColorTransferFunction(ca[1])
+                
+                # lut.GetRange() fails in some environments, use RGBPoints to infer range
+                rgb_points = lut.RGBPoints
+                if rgb_points and len(rgb_points) >= 4:
+                    min_val = rgb_points[0]
+                    max_val = rgb_points[-4]
+                else:
+                    min_val = 0.0
+                    max_val = 1.0
+                
+                width = max_val - min_val
+                if width == 0: width = 1.0
+                
+                num_samples = 5
+                
+                # Parse existing points from proxy
+                # Format: [x, y, mid, sharp, ...]
+                points_flat = sof.Points
+                current_points = []
+                if points_flat:
+                    for k in range(0, len(points_flat), 4):
+                        val = points_flat[k]
+                        opacity = points_flat[k+1]
+                        # Normalize x
+                        norm_x = (val - min_val) / width if width > 0 else 0
+                        norm_x = max(0.0, min(1.0, norm_x))
+                        # Store as 0-100
+                        current_points.append({'x': norm_x * 100.0, 'y': opacity})
+                
+                # Ensure at least 2 points
+                if not current_points:
+                    current_points = [{'x': 0.0, 'y': 0.0}, {'x': 100.0, 'y': 1.0}]
+                
+                # Assign IDs for UI tracking
+                for i, p in enumerate(current_points):
+                    p['id'] = i
+                
+                s.opacity_points = current_points
+                s.opacity_next_id = len(current_points)
+            else:
+                # Default linear ramp
+                s.opacity_points = [
+                    {'x': 0.0, 'y': 0.0, 'id': 0},
+                    {'x': 25.0, 'y': 0.25, 'id': 1},
+                    {'x': 50.0, 'y': 0.5, 'id': 2},
+                    {'x': 75.0, 'y': 0.75, 'id': 3},
+                    {'x': 100.0, 'y': 1.0, 'id': 4}
+                ]
+                s.opacity_next_id = 5
+        except Exception as e:
+            print(f"[WARN] Failed to init opacity state: {e}")
+            s.opacity_points = [
+                {'x': 0.0, 'y': 0.0, 'id': 0},
+                {'x': 100.0, 'y': 1.0, 'id': 1}
+            ]
+            s.opacity_next_id = 2
+
         # Representation logic
         try:
             current_rep = rep.Representation
@@ -245,8 +309,8 @@ class ColorAPI:
                 s.available_representations = ['Surface', 'Wireframe', 'Points', 'Outline', 'Volume', 'Feature Edges']
             elif ".Slice" in name:
                 s.available_representations = ['Surface', 'Wireframe', 'Points', 'Outline']
-            elif name.startswith("ippl_sField"):
-                # Prefer Volume for sField
+            elif name.startswith("ippl_sField") or ".Resample" in name:
+                # Prefer Volume for sField and Resample filters
                 s.available_representations = ['Volume', 'Surface', 'Wireframe', 'Points', 'Outline']
             else:
                 # Default fallback (including vector fields)
@@ -431,6 +495,19 @@ class ColorAPI:
         target_rep.Visibility = 1
         target_rep.SetRepresentationType(mode)
         
+        if mode == 'Point Gaussian':
+            # Configure default Gaussian radius based on bounds
+            bounds = target_proxy.GetDataInformation().GetBounds()
+            dx = bounds[1] - bounds[0]
+            dy = bounds[3] - bounds[2]
+            dz = bounds[5] - bounds[4]
+            import math
+            diagonal = math.sqrt(dx*dx + dy*dy + dz*dz)
+            if diagonal > 0:
+                target_rep.GaussianRadius = diagonal / 100.0
+            else:
+                target_rep.GaussianRadius = 0.05
+        
         # Debug: Check if target has data
         t_info = target_proxy.GetDataInformation()
         print(f"[DEBUG] Switched to {target_proxy.GetLogName()}. Cells: {t_info.GetNumberOfCells()}, Bounds: {t_info.GetBounds()}")
@@ -519,21 +596,58 @@ class ColorAPI:
                 return
             assoc = parts[0]
             array_name = parts[1]
-            rep.ColorArrayName = [assoc, array_name]
+            
+            # Check if we are switching to a new array or just refreshing
+            is_new_array = True
+            current_ca = rep.ColorArrayName
+            if current_ca and len(current_ca) > 1 and current_ca[1] == array_name and current_ca[0] == assoc:
+                 is_new_array = False
+
+            if is_new_array:
+                rep.ColorArrayName = [assoc, array_name]
+            
             lut = simple.GetColorTransferFunction(array_name)
             info = proxy.GetDataInformation()
             dinfo = info.GetPointDataInformation() if assoc == 'POINTS' else info.GetCellDataInformation()
             ai = dinfo.GetArrayInformation(array_name)
+            
+            # Check if vector
+            is_vector = False
+            if ai and ai.GetNumberOfComponents() > 1:
+                is_vector = True
+            self.state.color_array_is_vector = is_vector
+            
+            if is_new_array:
+                self.state.current_color_component = 'Magnitude' # Reset to default
+            else:
+                # Sync UI with current LUT state
+                if lut.VectorMode == 'Magnitude':
+                    self.state.current_color_component = 'Magnitude'
+                elif lut.VectorMode == 'Component':
+                    comps = {0: 'X', 1: 'Y', 2: 'Z'}
+                    self.state.current_color_component = comps.get(lut.VectorComponent, 'Magnitude')
+
             if ai:
-                r = ai.GetComponentRange(-1)
+                # Determine component for range
+                comp_idx = -1
+                if not is_new_array and is_vector and lut.VectorMode == 'Component':
+                    comp_idx = lut.VectorComponent
+                
+                r = ai.GetComponentRange(comp_idx)
                 print(f"[DEBUG] Rescaling LUT for {array_name} to {r}")
                 
                 if self.state.auto_rescale_color:
-                    if r[1] > r[0]:
-                        lut.RescaleTransferFunction(r[0], r[1])
+                    min_v, max_v = r[0], r[1]
+                    if self.state.symmetric_rescale:
+                        max_abs = max(abs(min_v), abs(max_v))
+                        min_v = -max_abs
+                        max_v = max_abs
+                        
+                    if max_v > min_v:
+                        lut.RescaleTransferFunction(min_v, max_v)
                     # Update custom range UI to match data
-                    self.state.custom_rescale_min = r[0]
-                    self.state.custom_rescale_max = r[1]
+                    self.state.custom_rescale_min = min_v
+                    self.state.custom_rescale_max = max_v
                 else:
                     # Apply custom range if valid
                     try:
@@ -547,9 +661,24 @@ class ColorAPI:
                             lut.RescaleTransferFunction(r[0], r[1])
 
             rep.LookupTable = lut
+            
+            # Ensure VectorMode is reset to Magnitude initially ONLY if new array
+            if is_vector and is_new_array:
+                lut.VectorMode = 'Magnitude'
+            
             sb = simple.GetScalarBar(lut, view)
             sb.Title = array_name
-            sb.ComponentTitle = 'Magnitude'
+            
+            # Update component title
+            if is_vector:
+                if lut.VectorMode == 'Magnitude':
+                    sb.ComponentTitle = 'Magnitude'
+                elif lut.VectorMode == 'Component':
+                    comps = {0: 'X', 1: 'Y', 2: 'Z'}
+                    sb.ComponentTitle = comps.get(lut.VectorComponent, '')
+            else:
+                sb.ComponentTitle = ''
+
             desired_vis = bool(getattr(self.state, 'scalar_bar_visible', True))
             sb.Visibility = 1 if desired_vis else 0
             try:
@@ -558,6 +687,85 @@ class ColorAPI:
                 pass
             self.state.scalar_bar_visible = desired_vis
 
+        simple.Render()
+        self._safe_view_update()
+
+    def set_color_component(self, mode):
+        print(f"[UI] Set Color Component: {mode}")
+        name = self.state.editing_source
+        if not name: return
+        proxy = self.get_display_proxy(name)
+        if not proxy: return
+        view = simple.GetActiveView()
+        rep = simple.GetRepresentation(proxy, view)
+        if not rep: return
+        
+        ca = rep.ColorArrayName
+        if not ca or len(ca) < 2 or not ca[1]:
+            return
+            
+        array_name = ca[1]
+        lut = simple.GetColorTransferFunction(array_name)
+        
+        # Map mode to ParaView settings
+        # VectorMode: 0=Magnitude, 1=Component, 2=RGB
+        component_idx = -1
+        if mode == 'Magnitude':
+            lut.VectorMode = 'Magnitude'
+            component_title = 'Magnitude'
+        elif mode == 'X':
+            lut.VectorMode = 'Component'
+            lut.VectorComponent = 0
+            component_idx = 0
+            component_title = 'X'
+        elif mode == 'Y':
+            lut.VectorMode = 'Component'
+            lut.VectorComponent = 1
+            component_idx = 1
+            component_title = 'Y'
+        elif mode == 'Z':
+            lut.VectorMode = 'Component'
+            lut.VectorComponent = 2
+            component_idx = 2
+            component_title = 'Z'
+        else:
+            return
+
+        # Rescale to component range
+        info = proxy.GetDataInformation()
+        dinfo = info.GetPointDataInformation() if ca[0] == 'POINTS' else info.GetCellDataInformation()
+        ai = dinfo.GetArrayInformation(array_name)
+        if ai:
+            r = ai.GetComponentRange(component_idx)
+            print(f"[DEBUG] Rescaling LUT for {array_name} component {mode} to {r}")
+            if self.state.auto_rescale_color:
+                min_v, max_v = r[0], r[1]
+                if self.state.symmetric_rescale:
+                    max_abs = max(abs(min_v), abs(max_v))
+                    min_v = -max_abs
+                    max_v = max_abs
+                    
+                print(f"[DEBUG] Rescaling LUT for {array_name} to {min_v} - {max_v} (Symmetric: {self.state.symmetric_rescale})")
+                    
+                if max_v > min_v:
+                    lut.RescaleTransferFunction(min_v, max_v)
+                self.state.custom_rescale_min = min_v
+                self.state.custom_rescale_max = max_v
+            else:
+                 # Apply custom range if valid
+                try:
+                    vmin = float(self.state.custom_rescale_min)
+                    vmax = float(self.state.custom_rescale_max)
+                    if vmax > vmin:
+                         lut.RescaleTransferFunction(vmin, vmax)
+                except Exception:
+                    if r[1] > r[0]:
+                        lut.RescaleTransferFunction(r[0], r[1])
+
+        sb = simple.GetScalarBar(lut, view)
+        if sb:
+            sb.ComponentTitle = component_title
+            
         simple.Render()
         self._safe_view_update()
 
@@ -609,6 +817,17 @@ class ColorAPI:
                     if vmax > vmin:
                          lut.RescaleTransferFunction(vmin, vmax)
                  except Exception:
+                    pass
+            elif self.state.symmetric_rescale:
+                # Re-apply symmetric rescale if auto is enabled
+                try:
+                    r = lut.GetRange()
+                    min_v, max_v = r[0], r[1]
+                    max_abs = max(abs(min_v), abs(max_v))
+                    lut.RescaleTransferFunction(-max_abs, max_abs)
+                    self.state.custom_rescale_min = -max_abs
+                    self.state.custom_rescale_max = max_abs
+                except Exception:
                     pass
 
         except Exception as e:
@@ -714,6 +933,58 @@ class ColorAPI:
         simple.Render()
         self._safe_view_update()
 
+    def apply_auto_rescale(self):
+        print("[UI] Apply Auto Rescale triggered")
+        if not self.state.auto_rescale_color:
+            return
+
+        name = self.state.editing_source
+        if not name: return
+        proxy = self.get_display_proxy(name)
+        if not proxy: return
+        view = simple.GetActiveView()
+        rep = simple.GetRepresentation(proxy, view)
+        if not rep: return
+        
+        ca = rep.ColorArrayName
+        if not ca or len(ca) < 2 or not ca[1]:
+            return
+            
+        array_name = ca[1]
+        assoc = ca[0]
+        lut = simple.GetColorTransferFunction(array_name)
+        
+        info = proxy.GetDataInformation()
+        dinfo = info.GetPointDataInformation() if assoc == 'POINTS' else info.GetCellDataInformation()
+        ai = dinfo.GetArrayInformation(array_name)
+        
+        if ai:
+            # Determine component for range
+            comp_idx = -1
+            if ai.GetNumberOfComponents() > 1:
+                if lut.VectorMode == 'Component':
+                    comp_idx = lut.VectorComponent
+            
+            r = ai.GetComponentRange(comp_idx)
+            print(f"[DEBUG] Auto-rescaling {array_name} (comp {comp_idx}) to {r}")
+            
+            min_v, max_v = r[0], r[1]
+            if self.state.symmetric_rescale:
+                max_abs = max(abs(min_v), abs(max_v))
+                min_v = -max_abs
+                max_v = max_abs
+                
+            print(f"[DEBUG] Applying range: {min_v} to {max_v} (Symmetric: {self.state.symmetric_rescale})")
+            
+            if max_v > min_v:
+                lut.RescaleTransferFunction(min_v, max_v)
+            
+            self.state.custom_rescale_min = min_v
+            self.state.custom_rescale_max = max_v
+            
+            simple.Render()
+            self._safe_view_update()
+
     def save_rescale_settings(self):
         name = self.state.editing_source
         if not name: return
@@ -725,7 +996,97 @@ class ColorAPI:
             
         d[name] = {
             'auto': self.state.auto_rescale_color,
+            'symmetric': self.state.symmetric_rescale,
             'min': self.state.custom_rescale_min,
             'max': self.state.custom_rescale_max
         }
         self.state.rescale_settings_per_source = d
+
+    def update_opacity_points(self, points):
+        print(f"[DEBUG-BACKEND] update_opacity_points called with: {points}")
+        name = self.state.editing_source
+        if not name: 
+            print("[DEBUG-BACKEND] No editing source.")
+            return
+        proxy = self.get_display_proxy(name)
+        if not proxy: 
+            print(f"[DEBUG-BACKEND] No proxy found for {name}")
+            return
+        view = simple.GetActiveView()
+        rep = simple.GetRepresentation(proxy, view)
+        if not rep: 
+            print("[DEBUG-BACKEND] No representation found.")
+            return
+        
+        ca = rep.ColorArrayName
+        if not ca or len(ca) < 2 or not ca[1]:
+            print(f"[DEBUG-BACKEND] Invalid ColorArrayName: {ca}")
+            return
+            
+        array_name = ca[1]
+        print(f"[DEBUG-BACKEND] Updating opacity for array: {array_name}")
+        lut = simple.GetColorTransferFunction(array_name)
+        sof = simple.GetOpacityTransferFunction(array_name)
+        
+        # Get current range
+        # Prefer state values if available as they are the source of truth for the UI
+        # and avoid issues with stale proxy properties
+        try:
+            min_val = float(self.state.custom_rescale_min)
+            max_val = float(self.state.custom_rescale_max)
+            # Validate range
+            if min_val >= max_val:
+                raise ValueError("Invalid state range")
+        except Exception:
+            # Fallback to inferring from LUT
+            rgb_points = lut.RGBPoints
+            if rgb_points and len(rgb_points) >= 4:
+                min_val = rgb_points[0]
+                max_val = rgb_points[-4]
+            else:
+                min_val = 0.0
+                max_val = 1.0
+            
+        width = max_val - min_val
+        
+        if width == 0: width = 1.0
+        
+        print(f"[DEBUG-BACKEND] Calculated range: {min_val} to {max_val}, width: {width}")
+        
+        # Build new points list [x, y, mid, sharp, ...]
+        new_points = []
+        for p in points:
+            try:
+                # x is 0-100, normalize to 0-1
+                norm_x = float(p.get('x', 0.0)) / 100.0
+                opacity = float(p.get('y', 0.0))
+                val = min_val + norm_x * width
+                # Append x, y, midpoint, sharpness
+                new_points.extend([val, opacity, 0.5, 0.0])
+            except Exception as e:
+                print(f"[WARN] Failed to process opacity point {p}: {e}")
+
+        print(f"[DEBUG-BACKEND] Flattened points for ParaView: {new_points}")
+        
+        sof.Points = new_points
+        print(f"[DEBUG-BACKEND] Assigned to sof.Points")
+        
+        # # Ensure the representation is using this SOF (sometimes it gets detached)
+        # Also ensure OpacityTransferFunction is set to 'Piecewise Function'
+
+        if hasattr(rep, 'OpacityTransferFunction'):
+
+            print("rep has an OpacityTransferFunction")
+            rep.OpacityTransferFunction = 'Piecewise Function'
+        else:
+            print("rep has no OpacityTransferFunction")
+
+        if hasattr(rep, 'ScalarOpacityFunction'):
+            print("rep has an attribute ScalarOpacityFunction")
+            rep.ScalarOpacityFunction = sof
+        else:
+            print("rep has no attribute scalar opacity function")
+        
+        
+        simple.Render()
+        self._safe_view_update()

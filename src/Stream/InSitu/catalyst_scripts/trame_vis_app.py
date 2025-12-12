@@ -150,6 +150,12 @@ def extract_ghosts():
     pipe.extract_ghosts(_ctx, state.editing_source)
     state.show_edit_dialog = False
 
+def extract_scalar_field():
+    print(f"[UI] Extract Scalar Field clicked for: {state.editing_source}")
+    from trame_app import trame_pipeline as pipe
+    pipe.extract_scalar_field(_ctx, state.editing_source)
+    state.show_edit_dialog = False
+
 def update_slice_normal(normal):
     print(f"[UI] Update Slice Normal: {normal}")
     ColorAPI(_ctx).set_slice_normal(normal)
@@ -158,10 +164,22 @@ def update_slice_origin(origin):
     # Debounce could be useful here, but for now direct update
     ColorAPI(_ctx).set_slice_origin(origin)
 
+def update_opacity():
+    # This function is now a wrapper around the change handler logic
+    # to ensure consistency (sorting, etc.)
+    _on_opacity_points_change()
+
+def reset_opacity():
+    state.opacity_points = [
+        {'x': 0.0, 'y': 0.0, 'id': 0},
+        {'x': 100.0, 'y': 1.0, 'id': 1}
+    ]
+    state.opacity_next_id = 2
+    update_opacity()
+
 def apply_and_close():
     print(f"[UI] Apply and Close clicked for: {state.editing_source}")
-    # Apply color change while respecting current scalar bar visibility preference
-    update_color_by(state.current_color_array)
+    # Only close the dialog; color changes are applied immediately via state triggers
     state.show_edit_dialog = False
 
 def apply_color_map(preset_key):
@@ -345,6 +363,7 @@ def apply_steering():
     for proxy_def in proxy_defs:
         proxy_name = proxy_def['name']
         proxy_safe_name = proxy_def['safe_name']
+        is_array = proxy_def['type'] == 'array'
         
         # Flatten params for this proxy
         flat_params = []
@@ -357,9 +376,8 @@ def apply_steering():
         collect_params(proxy_def['children'])
         
         # Determine number of items (rows)
-        # For scalar proxy, it's 1. For array proxy, it's in state.
         num_rows = 1
-        if proxy_def['type'] == 'array':
+        if is_array:
             count_key = f"count_{proxy_safe_name}"
             try:
                 num_rows = int(state[count_key])
@@ -378,11 +396,20 @@ def apply_steering():
                         # Vector
                         row_val = []
                         for i in range(param['num_elements']):
-                            key = f"steer_{safe_name}_{row_idx}_{i}"
-                            try:
-                                v = state[key]
-                            except Exception:
-                                v = param['default'][i] if i < len(param['default']) else 0
+                            if is_array:
+                                # Array proxy: state is a list, access via index
+                                key = f"steer_{safe_name}_{i}"
+                                try:
+                                    v = state[key][row_idx]
+                                except Exception:
+                                    v = param['default'][i] if i < len(param['default']) else 0
+                            else:
+                                # Scalar proxy: state is a single value
+                                key = f"steer_{safe_name}_{i}"
+                                try:
+                                    v = state[key]
+                                except Exception:
+                                    v = param['default'][i] if i < len(param['default']) else 0
                             # Replace None with default 0 or parsed default
                             if v is None:
                                 v = param['default'][i] if i < len(param['default']) else 0
@@ -390,21 +417,92 @@ def apply_steering():
                         all_values.append(row_val)
                     else:
                         # Scalar
-                        key = f"steer_{safe_name}_{row_idx}"
-                        try:
-                            v = state[key]
-                        except Exception:
-                            v = param['default'][0] if param['default'] else 0
+                        if is_array:
+                            # Array proxy: state is a list, access via index
+                            key = f"steer_{safe_name}"
+                            try:
+                                v = state[key][row_idx]
+                            except Exception:
+                                v = param['default'][0] if param['default'] else 0
+                        else:
+                            # Scalar proxy: state is a single value
+                            key = f"steer_{safe_name}"
+                            try:
+                                v = state[key]
+                            except Exception:
+                                v = param['default'][0] if param['default'] else 0
                         if v is None:
                             v = param['default'][0] if param['default'] else 0
                         all_values.append(v)
                 
+                print(f"[DEBUG] Sending steering parameter {proxy_name}.{name} = {all_values}")
                 steering_config.update_steering_parameter(link, proxy_name, name, all_values)
                 
             except Exception as e:
                 print(f"[ERROR] Error applying parameter {name}: {e}")
                 import traceback
                 traceback.print_exc()
+
+@ctrl.trigger("flush_and_apply_steering")
+def flush_and_apply_steering(array_data=None):
+    """Apply steering with array values passed directly from client.
+    
+    This is needed because Vue's in-place array mutations don't trigger Trame's
+    change detection. The client passes the current array values directly.
+    """
+    print("[DEBUG] flush_and_apply_steering called")
+    print(f"[DEBUG] Received array_data: {array_data}")
+    
+    if array_data:
+        # Update state with the values passed from the client
+        for key, values in array_data.items():
+            try:
+                state[key] = list(values)
+                print(f"[DEBUG] Updated {key}: {state[key]}")
+            except Exception as e:
+                print(f"[DEBUG] Error updating {key}: {e}")
+    
+    # Now apply the steering with fresh state
+    apply_steering()
+
+@ctrl.trigger("apply_steering_triggered")
+def apply_steering_triggered():
+    """Called after flushState() completes to apply steering with fresh state."""
+    # Force reassignment of all steering array state variables to ensure sync
+    # This is needed because Vue's in-place array mutations may not trigger Trame's change detection
+    for proxy_def in steerable_proxies:
+        if proxy_def['type'] == 'array':
+            proxy_safe_name = proxy_def['safe_name']
+            flat_params = []
+            def collect_params(items):
+                for item in items:
+                    if item['item_type'] == 'group':
+                        collect_params(item['children'])
+                    else:
+                        flat_params.append(item)
+            collect_params(proxy_def['children'])
+            
+            for param in flat_params:
+                safe_name = param['safe_name']
+                if param['num_elements'] > 1:
+                    for i in range(param['num_elements']):
+                        key = f"steer_{safe_name}_{i}"
+                        try:
+                            current = state[key]
+                            if isinstance(current, list):
+                                print(f"[DEBUG] Forcing sync for {key}: {current}")
+                        except Exception:
+                            pass
+                else:
+                    key = f"steer_{safe_name}"
+                    try:
+                        current = state[key]
+                        if isinstance(current, list):
+                            print(f"[DEBUG] Forcing sync for {key}: {current}")
+                    except Exception:
+                        pass
+    
+    apply_steering()
 
 def connect_to_catalyst():
     # Delegated to connection module
@@ -505,6 +603,128 @@ def toggle_axes_grid():
 
 # Initialize steerable proxies
 steerable_proxies = steering_config.parse_steerable_parameters()
+
+# Pre-compute steering array keys for the Apply button's JS handler
+# We need these before the UI is built so we can generate the explicit JS code
+steering_array_keys = []
+for proxy_def in steerable_proxies:
+    if proxy_def['type'] == 'array':
+        flat_params = []
+        def _collect_params(items):
+            for item in items:
+                if item['item_type'] == 'group':
+                    _collect_params(item['children'])
+                else:
+                    flat_params.append(item)
+        _collect_params(proxy_def['children'])
+        for param in flat_params:
+            safe_name = param['safe_name']
+            if param['num_elements'] > 1:
+                for i in range(param['num_elements']):
+                    steering_array_keys.append(f"steer_{safe_name}_{i}")
+            else:
+                steering_array_keys.append(f"steer_{safe_name}")
+print(f"[DEBUG] Steering array keys (computed early): {steering_array_keys}")
+
+# Build the JS code for the Apply button to reassign all arrays before flushing
+if steering_array_keys:
+    # Build explicit reassignments like: steer_pos_0 = [...steer_pos_0]; steer_pos_1 = [...steer_pos_1]; ...
+    reassign_js = "; ".join([f"{k} = [...{k}]" for k in steering_array_keys])
+    steering_apply_click = f"{reassign_js}; flushState(); $nextTick(() => trigger('apply_steering_triggered'))"
+else:
+    steering_apply_click = "flushState(); $nextTick(() => trigger('apply_steering_triggered'))"
+
+# -----------------------------------------------------------------------------
+# Opacity Point Controller Functions (must be defined before UI references them)
+# -----------------------------------------------------------------------------
+def _add_opacity_point():
+    print("[DEBUG-UI] add_opacity_point TRIGGERED")
+    points = list(state.opacity_points)
+    new_id = state.opacity_next_id
+    state.opacity_next_id += 1
+    points.append({'x': 50.0, 'y': 0.5, 'id': new_id})
+    state.opacity_points = points
+
+ctrl.add_opacity_point = _add_opacity_point
+
+def _remove_opacity_point(id_to_remove):
+    print(f"[DEBUG-UI] remove_opacity_point TRIGGERED: id={id_to_remove}")
+    try:
+        id_to_remove = int(id_to_remove)
+    except (ValueError, TypeError):
+        pass
+    points = [p for p in state.opacity_points if p['id'] != id_to_remove]
+    state.opacity_points = points
+
+ctrl.remove_opacity_point = _remove_opacity_point
+
+def _update_opacity_point(index, id, field, value, *extras):
+    print(f"[DEBUG-UI] update_opacity_point TRIGGERED: index={index}, id={id}, field={field}, value={value}")
+    
+    try:
+        idx = int(index)
+    except (ValueError, TypeError):
+        idx = None
+
+    try:
+        search_id = int(id)
+    except (ValueError, TypeError):
+        search_id = id
+
+    points = list(state.opacity_points)
+    print(f"[DEBUG-UI] Snapshot before update: {points}")
+
+    target_index = None
+
+    if idx is not None and 0 <= idx < len(points):
+        candidate_id = points[idx].get('id')
+        try:
+            candidate_id_int = int(candidate_id)
+        except (ValueError, TypeError):
+            candidate_id_int = candidate_id
+        if candidate_id_int == search_id:
+            target_index = idx
+
+    if target_index is None:
+        for i, p in enumerate(points):
+            pid = p.get('id')
+            try:
+                pid_int = int(pid)
+            except (ValueError, TypeError):
+                pid_int = pid
+            if pid_int == search_id:
+                target_index = i
+                break
+
+    if target_index is None:
+        print(f"[DEBUG-UI] No point found with id {search_id}")
+        return
+
+    point = points[target_index]
+    before_val = point.get(field)
+
+    try:
+        new_val = float(value)
+    except (TypeError, ValueError) as err:
+        print(f"[WARN] Invalid incoming value '{value}' ({type(value)}): {err}")
+        return
+
+    try:
+        before_float = float(before_val)
+    except (TypeError, ValueError):
+        before_float = None
+
+    if before_float is not None and abs(before_float - new_val) <= 1e-6:
+        return
+
+    new_point = dict(point)
+    new_point[field] = new_val
+    points[target_index] = new_point
+
+    print(f"[DEBUG-UI] Updating point id={point.get('id')} at index={target_index}: {before_float} -> {new_val}")
+    state.opacity_points = points
+
+ctrl.update_opacity_point = _update_opacity_point
 
 # -----------------------------------------------------------------------------
 # GUI Layout
@@ -637,7 +857,7 @@ with SinglePageLayout(server) as layout:
 
 
 
-                        vuetify3.VBtn("Apply", click=apply_steering, disabled=("!connected",), color="primary", size="small", variant="flat", classes="text-white")
+                        vuetify3.VBtn("Apply", click=steering_apply_click, disabled=("!connected",), color="primary", size="small", variant="flat", classes="text-white")
 
                     vuetify3.VDivider(classes="mb-2")
 
@@ -973,13 +1193,18 @@ with SinglePageLayout(server) as layout:
             with vuetify3.VCard():
                 vuetify3.VCardTitle("Edit Visualization: {{ editing_source }}")
                 with vuetify3.VCardText():
-                    # Extract Slice Button for sField
-                    with vuetify3.VContainer(v_if="editing_source.startsWith('ippl_sField')", classes="pa-0 mb-2"):
+                    # Extract Slice Button for sField or Resampled vField
+                    with vuetify3.VContainer(v_if="(editing_source.startsWith('ippl_sField') || editing_source.includes('.Resample')) && !editing_source.includes('.Slice')", classes="pa-0 mb-2"):
                         with vuetify3.VRow(dense=True):
                             with vuetify3.VCol(cols=6):
                                 vuetify3.VBtn("Extract Slice", click=extract_slice, block=True, color="secondary", variant="tonal")
                             with vuetify3.VCol(cols=6):
-                                vuetify3.VBtn("Extract Ghosts", click=extract_ghosts, block=True, color="deep-orange", variant="tonal")
+                                vuetify3.VBtn("Extract Ghosts", click=extract_ghosts, block=True, color="deep-orange", variant="tonal", disabled=("editing_source.includes('.Ghosts')",))
+                        vuetify3.VDivider(classes="my-2")
+
+                    # Extract Scalar Field Button for vField (only for base vField, not extracted parts)
+                    with vuetify3.VContainer(v_if="editing_source.startsWith('ippl_vField') && !editing_source.includes('.Resample') && !editing_source.includes('.Slice') && !editing_source.includes('.Ghosts')", classes="pa-0 mb-2"):
+                        vuetify3.VBtn("Extract Scalar Field", click=extract_scalar_field, block=True, color="primary", variant="tonal")
                         vuetify3.VDivider(classes="my-2")
 
                     # Slice Controls
@@ -1029,6 +1254,17 @@ with SinglePageLayout(server) as layout:
                         density="compact",
                         variant="outlined",
                     )
+
+                    # Component Selection for Vector Arrays
+                    vuetify3.VSelect(
+                        v_if="color_array_is_vector",
+                        v_model=("current_color_component",),
+                        items=("['Magnitude', 'X', 'Y', 'Z']",),
+                        label="Component",
+                        density="compact",
+                        variant="outlined",
+                        classes="mt-2"
+                    )
                     
                     with vuetify3.VContainer(v_if="current_color_array === 'SOLID'", classes="pa-0"):
                         vuetify3.VLabel(text="Solid Color", classes="text-caption")
@@ -1064,6 +1300,15 @@ with SinglePageLayout(server) as layout:
                         disabled=("current_color_array === 'SOLID'",),
                     )
                     
+                    vuetify3.VSwitch(
+                        v_model=("symmetric_rescale", True),
+                        label="Symmetric Rescale (around 0)",
+                        inset=True,
+                        density="comfortable",
+                        color="primary",
+                        disabled=("current_color_array === 'SOLID' || !auto_rescale_color",),
+                    )
+                    
                     with vuetify3.VContainer(v_if="!auto_rescale_color && current_color_array !== 'SOLID'", classes="pa-0 mb-2"):
                         vuetify3.VLabel(text="Custom Range", classes="text-caption")
                         with vuetify3.VRow(dense=True):
@@ -1085,6 +1330,46 @@ with SinglePageLayout(server) as layout:
                         disabled=("current_color_array === 'SOLID'",),
                         # Rely on state change hook to apply preset
                     )
+                    
+                    vuetify3.VDivider(classes="my-2")
+                    with vuetify3.VContainer(v_if="current_color_array !== 'SOLID'", classes="pa-0"):
+                        vuetify3.VLabel(text="Opacity Map (Normalized)", classes="text-caption")
+                        
+                        # Header
+                        with vuetify3.VRow(dense=True, classes="mb-1"):
+                            with vuetify3.VCol(cols=5): vuetify3.VLabel(text="Position", classes="text-caption")
+                            with vuetify3.VCol(cols=5): vuetify3.VLabel(text="Opacity", classes="text-caption")
+                        
+                        # Dynamic List - bind directly to state array indices
+                        with vuetify3.VContainer(classes="pa-0", style="max-height: 200px; overflow-y: auto;"):
+                            with vuetify3.VRow(v_for="(item, i) in opacity_points", key="item.id", dense=True, classes="align-center mb-1"):
+                                with vuetify3.VCol(cols=5):
+                                    vuetify3.VTextField(
+                                        v_model=("opacity_points[i].x",),
+                                        type="number", min=0, max=100, step="any", density="compact", hide_details=True, variant="outlined"
+                                    )
+                                with vuetify3.VCol(cols=5):
+                                    vuetify3.VSlider(
+                                        v_model=("opacity_points[i].y",),
+                                        min=0, max=1, step=0.01, density="compact", hide_details=True,
+                                        thumb_label="always"
+                                    )
+                                with vuetify3.VCol(cols=2):
+                                    vuetify3.VBtn(icon="mdi-delete", size="x-small", variant="text", color="error", click=(ctrl.remove_opacity_point, "[item.id]"))
+
+                        vuetify3.VBtn("Add Point", click=ctrl.add_opacity_point, block=True, size="small", variant="tonal", classes="mt-2 mb-2")
+
+                        with vuetify3.VRow(dense=True):
+                            with vuetify3.VCol(cols=6):
+                                # Force state sync by reassigning the array, then call update
+                                vuetify3.VBtn(
+                                    "Apply Opacity",
+                                    click="opacity_points = [...opacity_points]; flushState('opacity_points')",
+                                    block=True, size="small", variant="tonal", color="primary"
+                                )
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VBtn("Reset", click=reset_opacity, block=True, size="small", variant="text")
+
                 with vuetify3.VCardActions():
                     vuetify3.VSpacer()
                     vuetify3.VBtn("Cancel", click="show_edit_dialog = False")
@@ -1104,6 +1389,8 @@ state.show_edit_dialog = False
 state.editing_source = ""
 state.color_arrays = []
 state.current_color_array = None
+state.color_array_is_vector = False
+state.current_color_component = 'Magnitude'
 state.solid_color = "#ffffff"
 state.available_representations = []
 state.current_representation = None
@@ -1118,12 +1405,19 @@ state.slice_bounds = [-1, 1, -1, 1, -1, 1]
 state.available_color_maps = []
 state.current_color_map = None
 state.color_map_per_source = {}
+state.symmetric_rescale = True
+state.opacity_points = []
+state.opacity_next_id = 0
+state.loading_opacity = False
 state.default_screenshot_path = _get_workspace_parent_dir()
 state.screenshot_save_path = state.default_screenshot_path
 state.screenshot_menu_open = False
 
 # Initialize state for steerable parameters
 state.selected_steering_proxy = steerable_proxies[0]['name'] if steerable_proxies else None
+
+# Track all steering array keys for state flushing
+steering_array_keys = []
 
 for proxy_def in steerable_proxies:
     proxy_safe_name = proxy_def['safe_name']
@@ -1178,6 +1472,7 @@ for proxy_def in steerable_proxies:
                         val = defaults[def_idx] if def_idx < len(defaults) else "0"
                         vals.append(float(val) if is_double else int(val))
                     state[key] = vals
+                    steering_array_keys.append(key)  # Track for flushing
             else:
                 key = f"steer_{safe_name}"
                 vals = []
@@ -1189,6 +1484,7 @@ for proxy_def in steerable_proxies:
                     else:
                         vals.append(float(val) if is_double else int(val))
                 state[key] = vals
+                steering_array_keys.append(key)  # Track for flushing
         else:
             # Scalar Proxy (Single values)
             if param['num_elements'] > 1:
@@ -1201,6 +1497,10 @@ for proxy_def in steerable_proxies:
                     state[f"steer_{safe_name}"] = bool(int(val))
                 else:
                     state[f"steer_{safe_name}"] = float(val) if is_double else int(val)
+
+# Store the list of steering array keys for client-side flushing
+state.steering_array_keys = steering_array_keys
+print(f"[DEBUG] Steering array keys to flush: {steering_array_keys}")
 
 @ctrl.trigger("add_entry")
 def add_entry(proxy_safe_name):
@@ -1328,12 +1628,57 @@ def _on_live_mode_change(live_mode=None, **kwargs):
 _ctx = Ctx(server=server, state=state, ctrl=ctrl)
 resume_polling(_ctx)
 
-@state.change("auto_rescale_color", "custom_rescale_min", "custom_rescale_max")
+@state.change("auto_rescale_color", "symmetric_rescale")
+def _on_rescale_mode_change(**kwargs):
+    try:
+        ColorAPI(_ctx).apply_auto_rescale()
+    except Exception:
+        pass
+
+@state.change("auto_rescale_color", "custom_rescale_min", "custom_rescale_max", "symmetric_rescale")
 def _on_rescale_settings_change(**kwargs):
     try:
         ColorAPI(_ctx).save_rescale_settings()
     except Exception:
         pass
+
+def update_color_component(value):
+    ColorAPI(_ctx).set_color_component(value)
+
+@state.change("current_color_component")
+def _on_color_component_change(current_color_component=None, **kwargs):
+    if current_color_component:
+        update_color_component(current_color_component)
+
+@state.change("current_color_array")
+def _on_color_array_change(current_color_array=None, **kwargs):
+    if current_color_array:
+        update_color_by(current_color_array)
+
+@state.change("opacity_points")
+def _on_opacity_points_change(**kwargs):
+    print(f"[DEBUG-STATE] _on_opacity_points_change triggered.")
+    if state.loading_opacity:
+        print(f"[DEBUG-STATE] loading_opacity is True, skipping update.")
+        return
+    # Sort points by x before sending
+    points = sorted(state.opacity_points, key=lambda p: float(p['x']))
+
+    print(f"[DEBUG-STATE] Sending points to ColorAPI: {points}")
+    ColorAPI(_ctx).update_opacity_points(points)
+
+# Update the button callback to use the sorted logic too
+def update_opacity():
+    print("[DEBUG-STATE] Manual Apply Opacity triggered via button")
+    _on_opacity_points_change()
+
+def reset_opacity():
+    state.opacity_points = [
+        {'x': 0.0, 'y': 1.0, 'id': 0},
+        {'x': 100.0, 'y': 1.0, 'id': 1}
+    ]
+    state.opacity_next_id = 2
+    update_opacity()
 
 if __name__ == "__main__":
     simple.GetRenderView()

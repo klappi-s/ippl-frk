@@ -225,7 +225,9 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         rep.OpacityArrayName = [association, array_name]
         rep.OpacityTransferFunction = 'Piecewise Function'
         rep.ScalarOpacityFunction = pwf
-        rep.ScalarOpacityUnitDistance = 4.00
+        # Use average spacing for unit distance to ensure visibility
+        avg_spacing = (dx + dy + dz) / 3.0
+        rep.ScalarOpacityUnitDistance = avg_spacing
         sb = simple.GetScalarBar(lut, view)
         sb.Title = array_name
         sb.ComponentTitle = 'Magnitude'

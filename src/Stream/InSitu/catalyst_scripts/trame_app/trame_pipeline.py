@@ -2,7 +2,7 @@
 from typing import Any
 from paraview import simple
 
-from catalystSubroutines import find_source_by_name
+from catalystSubroutines import find_source_by_name, get_global_spatial_bounds
 try:
     from . import trame_render_config as render_config
 except ImportError:
@@ -130,11 +130,14 @@ def extract_slice(ctx: Any, name: str):
     
     # Find the input proxy (MergedBlocks for sField)
     input_proxy = None
-    if name.startswith("ippl_sField"):
+    # Only use MergedBlocks lookup for the base sField source, not derived ones like Ghosts
+    if name.startswith("ippl_sField") and not any(x in name for x in [".Ghosts", ".Resample", ".Slice"]):
         input_proxy = find_source_by_name(f"{name}.MergedBlocks")
     else:
         # Fallback for other types if we ever support them
         input_proxy = get_display_proxy(ctx, name)
+        if not input_proxy:
+            input_proxy = find_source_by_name(name)
         
     if not input_proxy:
         print(f"[WARN] Could not find input proxy for slice extraction on {name}")
@@ -258,8 +261,17 @@ def extract_ghosts(ctx: Any, name: str):
     current_items.append({"id": ghost_name, "name": f"Ghosts {ghost_count} ({base_name})", "visible": True})
     ctx.state.pipeline_items = current_items
     
-    # Show it
+    # Capture visibility of the source before showing the new filter
+    # This prevents the new Show() from permanently hiding the input if it was visible,
+    # but also prevents forcing it visible if it was hidden.
     view = simple.GetActiveView()
+    source_visible = 0
+    source_proxy = get_display_proxy(ctx, name)
+    if source_proxy:
+        s_rep = simple.GetRepresentation(source_proxy, view)
+        if s_rep: source_visible = s_rep.Visibility
+
+    # Show it
     rep = simple.Show(extract_ghosts, view)
     
     # Default to Volume representation for Ghosts (as per user request/trace)
@@ -296,11 +308,10 @@ def extract_ghosts(ctx: Any, name: str):
     else:
         render_config.setup_default_view(extract_ghosts, view)
     
-    # Ensure original source remains visible (in case Show() hid it)
-    original_proxy = get_display_proxy(ctx, name)
-    if original_proxy and original_proxy != extract_ghosts:
-        orig_rep = simple.Show(original_proxy, view)
-        orig_rep.Visibility = 1
+    # Restore original source visibility state
+    if source_proxy:
+        s_rep = simple.GetRepresentation(source_proxy, view)
+        if s_rep: s_rep.Visibility = source_visible
 
     simple.Render()
     if hasattr(ctx.ctrl, 'view_update') and ctx.view_update_enabled:
@@ -332,12 +343,22 @@ def toggle_visibility(ctx: Any, name: str):
         p = find_source_by_name(proxy_name)
         if p:
             rep = simple.GetRepresentation(p, view)
-            if rep: rep.Visibility = 1 if vis else 0
+            if rep: 
+                rep.Visibility = 1 if vis else 0
+                # Toggle scalar bar if coloring is active
+                ca = getattr(rep, 'ColorArrayName', None)
+                if ca and len(ca) > 1 and ca[1]:
+                    rep.SetScalarBarVisibility(view, vis)
 
     def _set_vis_proxy(proxy, vis):
         if proxy:
             rep = simple.GetRepresentation(proxy, view)
-            if rep: rep.Visibility = 1 if vis else 0
+            if rep: 
+                rep.Visibility = 1 if vis else 0
+                # Toggle scalar bar if coloring is active
+                ca = getattr(rep, 'ColorArrayName', None)
+                if ca and len(ca) > 1 and ca[1]:
+                    rep.SetScalarBarVisibility(view, vis)
 
     # Handle compound types
     if name.startswith("ippl_sField"):
@@ -392,3 +413,188 @@ def focus_camera_on(ctx: Any, name: str):
         except Exception as e:
             print(f"[WARN] view_update failed: {e}. Disabling further updates.")
             ctx.view_update_enabled = False
+
+
+def extract_scalar_field(ctx: Any, name: str):
+    print(f"[UI] Extract Scalar Field for: {name}")
+    
+    # Find the input proxy (MergedBlocks for vField)
+    input_proxy = None
+    
+    # If the user selected the MergedBlocks directly
+    if name.endswith(".MergedBlocks"):
+        input_proxy = find_source_by_name(name)
+    else:
+        # Try to find the associated MergedBlocks
+        merged_proxy = find_source_by_name(f"{name}.MergedBlocks")
+        if merged_proxy:
+            input_proxy = merged_proxy
+        else:
+            # Fallback to the source itself (e.g. TrivialProducer)
+            # We explicitly avoid get_display_proxy() here because for vField 
+            # it returns the Glyph filter, but we want the field data.
+            print("find source by name .MergeBlocks failed, source not catalyst extracted ...")
+            input_proxy = find_source_by_name(name)
+        
+    if not input_proxy:
+        print(f"[WARN] Could not find input proxy for scalar extraction on {name}")
+        return
+
+    # Generate unique name
+    base_name = name
+    if base_name.endswith(".MergedBlocks"):
+        base_name = base_name[:-13]
+    
+    resample_count = 1
+    while f"{base_name}.Resample{resample_count}" in ctx.active_proxies:
+        resample_count += 1
+    
+    resample_name = f"{base_name}.Resample{resample_count}"
+    
+    # Logic adapted from setup_scalar_field_view to determine bounds and dimensions
+    base_proxy = simple.FindSource(base_name)
+    if base_proxy:
+        base_proxy.UpdatePipeline()
+        base_info = base_proxy.GetDataInformation()
+        
+        input_proxy.UpdatePipeline()
+        info = input_proxy.GetDataInformation()
+        cinfo = info.GetCellDataInformation()
+        ghost_info = cinfo.GetArrayInformation("vtkGhostType") if cinfo else None
+
+        local_bounds = base_info.GetBounds()
+        local_extent = base_info.GetExtent()
+        global_bounds = info.GetBounds()
+
+        nx = local_extent[1] - local_extent[0] + 1
+        ny = local_extent[3] - local_extent[2] + 1
+        nz = local_extent[5] - local_extent[4] + 1
+
+        lx = local_bounds[1] - local_bounds[0]
+        ly = local_bounds[3] - local_bounds[2]
+        lz = local_bounds[5] - local_bounds[4]
+
+        spacing_x = lx / max(nx - 1, 1)
+        spacing_y = ly / max(ny - 1, 1)
+        spacing_z = lz / max(nz - 1, 1)
+
+        dx = max(spacing_x, 1e-12)
+        dy = max(spacing_y, 1e-12)
+        dz = max(spacing_z, 1e-12)
+
+        gx = global_bounds[1] - global_bounds[0]
+        gy = global_bounds[3] - global_bounds[2]
+        gz = global_bounds[5] - global_bounds[4]
+
+        dim_x = int(round(gx / dx)) - 2
+        dim_y = int(round(gy / dy)) - 2
+        dim_z = int(round(gz / dz)) - 2
+
+        global_extent = [dim_x, dim_y, dim_z]
+        
+        if ghost_info:
+            print("Ghost Present")
+            cut_layers = 1
+        else:
+            print("No Ghost Present")
+            cut_layers = 0
+            
+        sampling_bounds = (
+            global_bounds[0] + cut_layers * dx,
+            global_bounds[1] - cut_layers * dx,
+            global_bounds[2] + cut_layers * dy,
+            global_bounds[3] - cut_layers * dy,
+            global_bounds[4] + cut_layers * dz,
+            global_bounds[5] - cut_layers * dz,
+        )
+        print(f"ResampleToImage: Derived dims {global_extent} from extent {local_extent}, local bounds {local_bounds} and global bounds {global_bounds}")
+        
+        resample = simple.ResampleToImage(registrationName=f"{resample_name}_Internal", Input=input_proxy)
+        resample.UseInputBounds = 0
+        resample.SamplingBounds = sampling_bounds
+        resample.SamplingDimensions = global_extent
+    else:
+        print(f"[WARN] Base proxy {base_name} not found. Using default resampling.")
+        info = input_proxy.GetDataInformation()
+        bounds = info.GetBounds()
+        dx = bounds[1] - bounds[0]
+        dy = bounds[3] - bounds[2]
+        dz = bounds[5] - bounds[4]
+        max_dim = 100
+        max_len = max(dx, dy, dz)
+        if max_len > 0:
+            nx = int(max_dim * dx / max_len)
+            ny = int(max_dim * dy / max_len)
+            nz = int(max_dim * dz / max_len)
+        else:
+            nx, ny, nz = 100, 100, 100
+        resample = simple.ResampleToImage(registrationName=f"{resample_name}_Internal", Input=input_proxy)
+        resample.UseInputBounds = 1
+        resample.SamplingDimensions = [nx, ny, nz]
+    
+    resample.UpdatePipeline()
+    
+    # Rename array using Calculator to force separate LUT
+    final_proxy = resample
+    
+    info = resample.GetDataInformation()
+    pd = info.GetPointDataInformation()
+    if pd.GetNumberOfArrays() > 0:
+        array_name = pd.GetArrayInformation(0).GetName()
+        new_array_name = f"{array_name}_extracted"
+        
+        calc = simple.Calculator(registrationName=resample_name, Input=resample)
+        calc.AttributeType = 'Point Data'
+        calc.ResultArrayName = new_array_name
+        calc.Function = f'"{array_name}"'
+        calc.UpdatePipeline()
+        final_proxy = calc
+    else:
+        # Fallback: rename internal to public if no array to rename
+        simple.RenameSource(resample_name, resample)
+        final_proxy = resample
+
+    # Register proxy
+    ctx.active_proxies[resample_name] = final_proxy
+    
+    # Add to pipeline items
+    current_items = list(ctx.state.pipeline_items)
+    current_items.append({"id": resample_name, "name": f"Resample {resample_count} ({base_name})", "visible": True})
+    ctx.state.pipeline_items = current_items
+    
+    # Capture visibility of the source (Glyphs)
+    view = simple.GetActiveView()
+    source_visible = 0
+    source_proxy = get_display_proxy(ctx, name)
+    if source_proxy:
+        s_rep = simple.GetRepresentation(source_proxy, view)
+        if s_rep: source_visible = s_rep.Visibility
+
+    # Show it
+    rep = simple.Show(final_proxy, view)
+    rep.SetRepresentationType('Volume')
+    
+    # Explicitly configure coloring for Volume
+    info = final_proxy.GetDataInformation()
+    pd = info.GetPointDataInformation()
+    if pd.GetNumberOfArrays() > 0:
+        # Prefer the renamed array if available
+        target_array = new_array_name if final_proxy == calc else pd.GetArrayInformation(0).GetName()
+        print(f"[Auto] Coloring Resample Volume by {target_array} (Magnitude)")
+        simple.ColorBy(rep, ('POINTS', target_array, 'Magnitude'))
+        rep.RescaleTransferFunctionToDataRange(True, True)
+        rep.SetScalarBarVisibility(view, True)
+    else:
+        render_config.setup_default_view(final_proxy, view)
+    
+    # Restore original source visibility state
+    if source_proxy:
+        s_rep = simple.GetRepresentation(source_proxy, view)
+        if s_rep: s_rep.Visibility = source_visible
+
+    simple.Render()
+    if hasattr(ctx.ctrl, 'view_update') and ctx.view_update_enabled:
+        try:
+            ctx.ctrl.view_update()
+        except Exception:
+            pass

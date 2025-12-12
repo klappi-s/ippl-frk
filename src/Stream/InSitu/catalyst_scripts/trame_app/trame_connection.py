@@ -142,13 +142,23 @@ def extract_data(ctx: Any):
     channel_name = state.selected_source
     if not channel_name: return
     if channel_name in ctx.active_proxies:
-        print(f"Source {channel_name} is already active.")
-        return
+        # Special check for particles: if one component is missing, allow re-extraction
+        if channel_name.startswith("ippl_particles"):
+            bunch_key = f"{channel_name}.bunch"
+            box_key = f"{channel_name}.box"
+            if bunch_key in ctx.active_proxies and box_key in ctx.active_proxies:
+                 print(f"Source {channel_name} is already fully active.")
+                 return
+            print(f"Partial particle source detected. Re-extracting missing components for {channel_name}...")
+        else:
+            print(f"Source {channel_name} is already active.")
+            return
     proxies_to_extract = [channel_name]
     if channel_name.startswith("ippl_sField"):
         proxies_to_extract.append(f"{channel_name}.MergedBlocks")
     elif channel_name.startswith("ippl_vField"):
         proxies_to_extract.append(f"{channel_name}.Glyph")
+        proxies_to_extract.append(f"{channel_name}.MergedBlocks")
     elif channel_name.startswith("ippl_particles"):
         proxies_to_extract.append(f"{channel_name}.bunch")
         proxies_to_extract.append(f"{channel_name}.box")
@@ -186,15 +196,20 @@ def extract_data(ctx: Any):
         
         if channel_name.startswith("ippl_particles"):
             # Split particle source into Bunch and Box
-            current_items.append({"id": f"{channel_name}.bunch", "name": f"{channel_name} (Bunch)", "visible": True})
-            ctx.active_proxies[f"{channel_name}.bunch"] = new_proxy # new_proxy is the bunch
+            bunch_id = f"{channel_name}.bunch"
+            if not any(item['id'] == bunch_id for item in current_items):
+                current_items.append({"id": bunch_id, "name": f"{channel_name} (Bunch)", "visible": True})
+            ctx.active_proxies[bunch_id] = new_proxy # new_proxy is the bunch
             
             box_proxy = find_source_by_name(f"{channel_name}.box")
             if box_proxy:
-                current_items.append({"id": f"{channel_name}.box", "name": f"{channel_name} (Box)", "visible": True})
-                ctx.active_proxies[f"{channel_name}.box"] = box_proxy
+                box_id = f"{channel_name}.box"
+                if not any(item['id'] == box_id for item in current_items):
+                    current_items.append({"id": box_id, "name": f"{channel_name} (Box)", "visible": True})
+                ctx.active_proxies[box_id] = box_proxy
         else:
-            current_items.append({"id": channel_name, "name": channel_name, "visible": True})
+            if not any(item['id'] == channel_name for item in current_items):
+                current_items.append({"id": channel_name, "name": channel_name, "visible": True})
             
         state.pipeline_items = current_items
         view = simple.GetActiveView()
