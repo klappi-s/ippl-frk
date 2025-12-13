@@ -1,7 +1,7 @@
 # Parametrized steering double and int ranges: (activates sliders)
 # used in proxy writer
-# for vectore properties with tuple not size 1, range will not trigger slider widget.
-# possibly able to extend more...
+# for vector properties with tuple not size 1, range will not trigger slider widget in the ParaViewclient (will trigger slider in the Trame APP)
+# possibility to extend more...
 
 ranges:
   double_vector_single1:
