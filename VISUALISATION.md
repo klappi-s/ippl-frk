@@ -11,16 +11,54 @@ This framework enables  real-time visualization and parameter steering for IPPL 
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Supported Data Types](#supported-data-types)
-3. [Creating Registries](#creating-registries)
-4. [Using the CatalystAdaptor](#using-the-catalystadaptor)
-5. [Building and Compiling](#building-and-compiling)
-6. [Environment Variables](#environment-variables)
-7. [Running an Example](#running-an-example)
-8. [Connecting with ParaView GUI](#connecting-with-paraview-gui)
-9. [Connecting with Trame Application](#connecting-with-trame-application)
-10. [Complete Example](#complete-example)
+- [In-Situ Visualization and Steering Framework for IPPL (WIP)](#in-situ-visualization-and-steering-framework-for-ippl-wip)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Supported Data Types](#supported-data-types)
+    - [Visualization Types](#visualization-types)
+    - [Steering Types](#steering-types)
+      - [Primitive Types](#primitive-types)
+      - [Vector](#vector)
+      - [Compound Types](#compound-types)
+  - [Creating Registries](#creating-registries)
+    - [1. Visualization Registry](#1-visualization-registry)
+    - [2. Steering Registry](#2-steering-registry)
+    - [3. Registering Enums](#3-registering-enums)
+    - [4. Registering Custom Structs](#4-registering-custom-structs)
+    - [5. Arrays of Steerable Types](#5-arrays-of-steerable-types)
+  - [Using the CatalystAdaptor](#using-the-catalystadaptor)
+    - [Key Methods](#key-methods)
+    - [Initialization](#initialization)
+    - [During Time-Stepping](#during-time-stepping)
+    - [Finalization](#finalization)
+  - [Building and Compiling](#building-and-compiling)
+    - [Prerequisites](#prerequisites)
+    - [CMake Configuration](#cmake-configuration)
+    - [Compilation](#compilation)
+  - [Environment Variables for execution](#environment-variables-for-execution)
+    - [Core Catalyst Configuration (Defintions Mandatory!!!)](#core-catalyst-configuration-defintions-mandatory)
+    - [Main Switches](#main-switches)
+  - [| `IPPL_CATALYST_GHOST_MASKS` | `ON`/`OFF` | `OFF`| Specifies how to avoid Ghost Cell visualisation  1  |](#-ippl_catalyst_ghost_masks--onoff--off-specifies-how-to-avoid-ghost-cell-visualisation--1--)
+    - [Advanced IPPL Catalyst Configuration Options](#advanced-ippl-catalyst-configuration-options)
+  - [| `CATALYST_PROXYS_PATH`               | `<path>` | 2 | Proxy XML for magnetic field steering |](#-catalyst_proxys_path----------------path--2--proxy-xml-for-magnetic-field-steering-)
+    - [Steering Interface manipulation:](#steering-interface-manipulation)
+  - [Possible Visualisation Methods](#possible-visualisation-methods)
+    - [Method 1: Live Connection with ParaView client](#method-1-live-connection-with-paraview-client)
+    - [Method 2: Live Connection with trame application](#method-2-live-connection-with-trame-application)
+    - [Method 3: In Situ Visualization with PNG extraction](#method-3-in-situ-visualization-with-png-extraction)
+    - [Method 4: vtk extraction and Post-hoc Visualization](#method-4-vtk-extraction-and-post-hoc-visualization)
+  - [Trame web UI](#trame-web-ui)
+    - [Preparing trame](#preparing-trame)
+    - [Starting the Trame Server](#starting-the-trame-server)
+    - [Debug Levels](#debug-levels)
+    - [Using Web UI](#using-web-ui)
+  - [Example](#example)
+    - [Running AlineSight](#running-alinesight)
+  - [Troubleshooting](#troubleshooting)
+    - [Common Issues](#common-issues)
+    - [Debug Tips](#debug-tips)
+    - [Known Bugs](#known-bugs)
+- [TODOs:](#todos)
 
 ---
 
@@ -33,6 +71,8 @@ The IPPL in-situ visualization framework allows you to:
 - **Connect** to ParaView GUI or a custom Trame web application
 
 The framework is based on ParaView Catalyst 2.0 and uses **Conduit** for data exchange.
+
+All code regarding this implementation can be found inside `ippl/src/Stream`.
 
 ---
 
@@ -195,6 +235,14 @@ steer_registry->add("param_sets",   param_sets);
 
 The `CatalystAdaptor` class is the main interface to Catalyst.
 
+### Key Methods
+
+- **`InitializeRuntime(vis_reg, steer_reg)`**: Initialize Catalyst with registries
+- **`Remember_now(label)`**: Mark a visualization channels for "early visualisation".
+- **`ExecuteRuntime(iteration, time)`**: Execute the Catalyst pipeline (send data, update steering)
+- **`Finalize()`**: Clean up Catalyst resources
+
+
 ### Initialization
 
 ```cpp
@@ -226,17 +274,19 @@ public:
 ```cpp
 void advance() {
     // ... simulation logic ...
-    
     #ifdef IPPL_ENABLE_CATALYST
+    
 // Mark which channels should be visualized with data from an earlier point (in case the data gets overwritten or deleted befor the call to ExecuteRuntime). Be aware this creates a full copy of the data!
+
     cat_vis.Remember_now("density");
     // You can remember multiple channels
     // cat_vis.Remember_now("electric");
     
-    // Execute: Point of visualisation. Halts simulation, sends current state of data to Catalyst, and fetches steering updates. The **original"" object of the steerable parameters are then overwritten via their references in the steering registries. For Vis entries that have been called with Remember_now, not their current data but their previously made copy is visualized.
-    cat_vis.ExecuteRuntime(it, time);
-    #endif
+// Execute: Point of visualisation. Halts simulation, sends current state of data to Catalyst, and fetches steering updates. The **original"" object of the steerable parameters are then overwritten via their references in the steering registries. For Vis entries that have been called with Remember_now, not their current data but their previously made copy is visualized.
     
+    cat_vis.ExecuteRuntime(it, time);
+    
+    #endif
     // ... continue simulation ...
 }
 ```
@@ -248,13 +298,6 @@ void advance() {
 cat_vis.Finalize();
 #endif
 ```
-
-### Key Methods
-
-- **`InitializeRuntime(vis_reg, steer_reg)`**: Initialize Catalyst with registries
-- **`Remember_now(label)`**: Mark a visualization channels for "early visualisation".
-- **`ExecuteRuntime(iteration, time)`**: Execute the Catalyst pipeline (send data, update steering)
-- **`Finalize()`**: Clean up Catalyst resources
 
 ---
 
@@ -276,9 +319,8 @@ A `cmake.sh` script should include:
 ```bash
 #!/bin/bash
 CMAKE_ARGS=(
-  -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_CXX_STANDARD=20
-  
+
   # Enable Catalyst
   -DIPPL_ENABLE_CATALYST=ON
   -DCATALYST_HINT_PATH="/path/to/catalyst/lib/cmake/catalyst-2.0"
@@ -360,8 +402,154 @@ Bug: The yaml parser currently only supports double space as indenting format (n
 (TODO: switch to json)
 
 
-## Running an Example
+---
 
+## Possible Visualisation Methods
+The underlying methods can also be "combined". But certain combination might lead to some bugs.
+### Method 1: Live Connection with ParaView client
+
+<!-- (CMAKE/Compilation needs to have Catalyst live enabled) -->
+1. **Start your simulation** 
+2. **Open ParaView** (use the same version as specified in `CATALYST_IMPLEMENTATION_PATH` )
+
+3. **Connect to Catalyst**:
+   - `Catalyst` → `Connect...`
+   - Host: `localhost`, Port: `22222` (default)
+   - Click `OK`
+
+4. **extract live surces**:
+   - In the Pipeline Browser, you'll see Catalyst sources
+   - Click on the catalyst extract symbol to nable the "Play" button in the toolbar to start receiving updates
+   - Adjust timestep frequency as needed
+
+5. **Visualize**: Full versatitlity of the ParaView client.
+   - Apply filters (e.g., Glyph for particles, Slice for fields)
+   - Color by different attributes
+   - The view updates as the simulation progresses
+  
+### Method 2: Live Connection with trame application
+See chapter [Trame web UI](#trame-web-ui) for how to install and use.
+
+1. **Start your simulation** 
+
+2. **Launch trame application** 
+    - The Trame server will print a URL (typically `http://localhost:8080`)
+    - Open this URL in your web browser
+
+5. **Connect to Catalyst**:
+   - In the browser UI specify: Host: `localhost`, Port: `22222` (default)
+   - Click `CONNECT
+
+5. **Extract Live sources**:
+   - In the Pipeline Browser, search for sources and click Init
+   - Default visualisation (similar to png extraction) is automatically used.
+   - Activate Live switch to enable live updates.
+
+6. **Visualize** Click on a source's edit visualisation to see availlable optiosn:
+   - Some basic Filters and more.
+   - Filters (Slice, Extract Component, Extract GhostCells)
+   - Color by different attributes
+   - Edit opacity mapand choose from standard colour mappins
+
+### Method 3: In Situ Visualization with PNG extraction
+
+1. Set `IPPL_CATALYST_PNG=ON` in runscript.
+2. Start your simulation. 
+3. Simulation generates `.png` files in a `data_xxx/` directory
+
+If you wan't to avoid PNG extraction for certain elements without having to recompile your ippl simulation just set the  corrsponding variable: `CATALYST_EXTRACTOR_SCRIPT_<label>` to an empty python file and the png extraction for this specific entry will be disabled.
+
+
+### Method 4: vtk extraction and Post-hoc Visualization
+
+1. Set `IPPL_CATALYST_VTK=ON` in run script.
+2. Start your simulation. 
+3. Simulation generates `.vtm` or `.vtp` files in the `data_xxx/` directory
+4. Open ParaView
+5. `File` → `Open` → Select the generated files
+6. Apply desired filters and visualizations
+
+
+---
+## Trame web UI
+
+We provide a basic trame based (https://kitware.github.io/trame/) **web-based interactive UI**. It's current implementation should provide the most important features to imitate the ParaView client, needed for live visualisation. We mainly provide this, since the official ParaView binaries for ios based systems don't provide catalyst live support. Meaning even for remote run simulation, one can't live connect to this simulation with the local ParaView client.
+
+### Preparing trame
+To ensure compatibility one can use the pvpython executable to run the trame script.
+Problem is trame modules are not preinstalled in the pvpython executable. You can check with
+```bash 
+./pvpython -c "import trame"
+```
+So instead go on and download the python version (3.9, 3.10,...) as is used for the pvpython executable. If you don't know what version is used you can check with:
+```bash 
+./pvpython -c "import sys; print(sys.version)"
+-> 3.10.13 (main, Dec 30 2024, 00:03:26) [GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]
+```
+meaning download python 3.10. With this python version create and setup a virtual environment with venv, as described on (https://kitware.github.io/trame/guide/tutorial/setup.html).
+
+```bash
+
+cd /path/to/ParaView-5.XX.X-MPI-<your-os>-Python3.XX-<your-architecture>
+
+python3.10 -m venv trame_env
+source ./trame_env/bin/activate
+python -m pip install --upgrade pip
+pip install trame
+pip install trame-vuetify trame-vtk 
+pip install vtk                     
+```
+
+### Starting the Trame Server
+From then on you can run the trame application directly with:
+```bash
+
+export PV_PREFIX=/path/to/ParaView-5.XX.X-MPI-<your-os>-Python3.XX-<your-architecture>
+export PVPYTHON=${PV_PREFIX}/bin/pvpython
+export CATALYST_FOLDER=/path/to/ippl/src/Stream/InSitu/catalyst_scripts/
+
+$PVPYTHON --venv ${PV_PREFIX}/trame_env ${CATALYST_FOLDER}/trame_vis_app.py --server --debug 1
+```
+
+### Debug Levels
+
+- `--debug -1`: Silent mode (errors only)
+- `--debug 0`: Default (UI interactions only)
+- `--debug 1`: Moderate (UI + operation summaries)
+- `--debug 2`: Detailed (everything)
+
+### Using Web UI
+Should be self explanatory and intuitive.
+
+<!-- 
+### Trame vs ParaView GUI
+
+| Feature | ParaView GUI | Trame App |
+|---------|--------------|-----------|
+| **Access** | Desktop application | Web browser |
+| **Steering UI** | Manual proxy loading | Automatic UI generation |
+| **Ease of Use** | Requires PV knowledge | User-friendly web interface |
+| **Customization** | Limited | Highly customizable (Python) |
+| **Versatilis** | Access to all fiters and PV settings | Only Bas |
+| **Remote Access(?????)** | VNC/X11 forwarding | Direct HTTP access | -->
+
+
+
+
+
+
+
+---
+
+## Example
+
+A complte working example can found with the alpine/AlpineSight example.
+
+<!-- to compile and run do the following: -->
+
+
+---
+### Running AlineSight
 Example run script:
 
 ```bash
@@ -399,153 +587,17 @@ mkdir data
 
 # Run simulation (adjust grid size, particle count, timesteps as needed)
 $MPIEXEC -np 2 ./AlpineSight 8 8 8 4096 22222 FFT 0.05 LeapFrog \
-    --overallocate 1.0 --info 1
+    --overallocate 1.0 --info 4
+
 ```
 
 
 ---
 
-## Visualisation Approaches
-The underlying methods can also be "combined". But certain combination might lead to some bugs.
-### Method 1: Live Connection with ParaView client
-
-<!-- (CMAKE/Compilation needs to have Catalyst live enabled) -->
-1. **Start your simulation** 
-2. **Open ParaView** (use the same version as specified in `CATALYST_IMPLEMENTATION_PATH` )
-
-3. **Connect to Catalyst**:
-   - `Catalyst` → `Connect...`
-   - Host: `localhost`, Port: `22222` (default)
-   - Click `OK`
-
-4. **extract live surces**:
-   - In the Pipeline Browser, you'll see Catalyst sources
-   - Click on the catalyst extract symbol to nable the "Play" button in the toolbar to start receiving updates
-   - Adjust timestep frequency as needed
-
-5. **Visualize**:
-   - Apply filters (e.g., Glyph for particles, Slice for fields)
-   - Color by different attributes
-   - The view updates as the simulation progresses
-  
-### Method 2: Live Connection with trame application
-
-1. **Start your simulation** 
-
-2. **Launch trame application** (use pvpython executable from the ParaView binaries as specified in `CATALYST_IMPLEMENTATION_PATH` )
-
-3. **Connect to Catalyst**:
-   - specify: Host: `localhost`, Port: `22222` (default)
-   - Click `CONNECT
-
-4. **Extract Live sources**:
-   - In the Pipeline Browser, you'll see Catalyst sources
-   - Click on the catalyst extract symbol to nable the "Play" button in the toolbar to start receiving updates
-   - Adjust timestep frequency as needed
-
-5. **Visualize**:
-   - Apply filters (e.g., Glyph for particles, Slice for fields)
-   - Color by different attributes
-   - The view updates as the simulation progresses
-
-### Method 3: In Situ Visualization with PNG extractio
-
-1. Set `IPPL_CATALYST_PNG=ON` in runscript.
-2. Start your simulation. 
-3. Simulation generates `.png` files in a `data_xxx/` directory
-
-If you wan't to avoid PNG extraction for certain elements without having to recompile your ippl simulation just set the  corrsponding variable: `CATALYST_EXTRACTOR_SCRIPT_<label>` to an empty python file and the png extraction for this specific entry will be disabled.
-
-
-### Method 4: vtk extraction and Post-hoc Visualization
-
-1. Set `IPPL_CATALYST_VTK=ON` in run script.
-2. Start your simulation. 
-3. Simulation generates `.vtm` or `.vtp` files in the `data_xxx/` directory
-4. Open ParaView
-5. `File` → `Open` → Select the generated files
-6. Apply desired filters and visualizations
 
 ---
 
-## Configuration and Connectiion with Trame Application
-
-Trame provides a **web-based interactive UI**. It's current implementation should provide the most important features of the ParaView client, needed for live visualisation. We mainly provide this, since the official ParaView binaries for ios based systems don't provide catalyst support. Meaning even for remote run simulation, one can't live connect to this simulation with the local ParaView client.
-
-
-### Starting the Trame Server
-
-Create a launch script (`launch_trame.sh`):
-
-```bash
-#!/bin/bash
-
-PV_PREFIX=/path/to/ParaView-5.13.2-MPI-Linux-Python3.10-x86_64
-CATALYST_FOLDER=${PWD}/ippl-frk/src/Stream/InSitu/catalyst_scripts/
-PVPYTHON=${PV_PREFIX}/bin/pvpython
-
-# Launch Trame application
-$PVPYTHON ${CATALYST_FOLDER}/trame_vis_app.py --server --debug 1
-```
-
-Run the Trame server:
-```bash
-./launch_trame.sh
-```
-
-### Debug Levels
-
-- `--debug -1`: Silent mode (errors only)
-- `--debug 0`: Default (UI interactions only)
-- `--debug 1`: Moderate (UI + operation summaries)
-- `--debug 2`: Detailed (everything)
-
-### Accessing the Web UI
-
-1. The Trame server will print a URL (typically `http://localhost:8080`)
-2. Open this URL in your web browser
-3. You'll see:
-   - **Rendering viewport** (3D visualization)
-   - **Pipeline browser** (active sources/filters)
-   - **Steering controls** (dynamically generated from your registry)
-   - **Color controls** (color by attributes, color maps, etc.)
-
-### Using Steering Controls
-
-- **Scalars**: Sliders or text boxes
-- **Vectors**: Three inputs for X, Y, Z components
-- **Booleans**: Toggle switches
-- **Buttons**: Click to trigger (resets automatically)
-- **Enums**: Dropdown menus with registered choices
-- **Arrays**: Expandable sections with add/remove/edit controls
-- **Structs**: Grouped controls for all members
-
-Changes are applied in real-time to the running simulation.
-
-### Trame vs ParaView GUI
-
-| Feature | ParaView GUI | Trame App |
-|---------|--------------|-----------|
-| **Access** | Desktop application | Web browser |
-| **Steering UI** | Manual proxy loading | Automatic UI generation |
-| **Ease of Use** | Requires PV knowledge | User-friendly web interface |
-| **Customization** | Limited | Highly customizable (Python) |
-| **Remote Access** | VNC/X11 forwarding | Direct HTTP access |
-
----
-
-## Complete Example
-
-A complte working example can found with the alpine/AlpineSight example.
-
-<!-- to compile and run do the following: -->
-
----
-
-
----
-
-# Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -588,19 +640,42 @@ fi
 ```
 
 2. **ParaView version mismatch:**
-   - Verify `CATALYST_IMPLEMENTATION_PATHS` points to same location as the running paraview client.
-  <!-- give example error -->
+The following error might appearing in the console running the paraview client,
+It means `CATALYST_IMPLEMENTATION_PATHS` does likely not point to the same ParaView Binary as the client currently running.
+
+```
+(   9.514s) [paraview        ]vtkTCPNetworkAccessMana:532    ERR| vtkTCPNetworkAccessManager (0x35359300): Server connect id did not match regular expression on server.  This shouldn't happen.
+(   9.523s) [paraview        ]vtkTCPNetworkAccessMana:346    ERR| vtkTCPNetworkAccessManager (0x35359300): 
+************************************************************************
+Connection failed during handshake.  Unknown error parsing the handshake string
+************************************************************************
+```
+
+  
 
 3. **Steering not working**
-   - Confirm `IPPL_CATALYST_STEER=ON`
    - Check that struct and enum types are registered before `InitializeRuntime`
    - Verify proxy XML file is generated
+  
+3.1 **"No array named  present" error/warnings in the simulation log (catalyst error):**
+```
+(   9.435s) [pvbatch.0       ]vtkInSituInitialization:692    ERR| No array named 'steerable_field_f_array:some_label' present. Skipping.
+```
+If this arrray is currently a steering array  with no elements, this warning can be ignored/is expected adn won't cause any actual errors. Else it means the UI fails to provide data to Catalyst to create the backward data channel to the UI (should not happen please create a git ISSUE).
 
+
+3.2 **Execute()::FetchSteerableChannel(label) | no backward result present; skipping (ippl warning).**
+
+Messages like these mean, that in the Simulation the Ctalyst Adaptor expects data, but Catalyst has not provided any. This is an expected log, when you haven't opened the ParaView or trame ui. If an instance of a Steering Interace is active, this shoud also not happend (please create a GitHub Issue).
+
+
+
+
+---
 ### Debug Tips
 
-- Set `--info 5` flag to see detailed IPPL output
+- Set `--info 5` flag to see detailed IPPL output (detailed visualisation outputs require minimal output level 4)
 - Use `--debug 2` with Trame for verbose logging
-- Check `data/` directory for generated files
 - Review ParaView's Output Messages panel for Catalyst logs
 
 ---
@@ -609,15 +684,13 @@ fi
 
 - The steering sliders and textfields for the Opacity function, don't "appear" to change/react to interactions, but as soon as you click apply, the changes will take effect!!
 - With png extaction enabled, if the ParaView client is opened and connected after the catalyst script has created the PNG extractor the png extraction will "break" after a couple of timesteps, this is a "paraview problem" and should be ammended in future Paraview versions.
-
+- currently when closing the trame app and opening again the trame steering parameters .. will be reset to initial values and not the current values and might lead to some bugs ...
 ---
 ---
 
 # TODOs:
 
 - json confiuration for UI layout
-- currently when closing the trame app and opening again the trame steering parameters .. will be reset to initial values and not the current values and might lead to some bugs ...
-- properly et output level
 
 
 <!-- 
