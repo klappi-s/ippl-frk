@@ -223,7 +223,6 @@ class CatalystAdaptor {
     const char* catalyst_vtk  ;
     const char* ghost_mask  ;
     const char* proxy_option;
-    const char* associate_;
     std::string associate;
 
     const bool vis_enabled;
@@ -262,7 +261,6 @@ public:
                 catalyst_vtk(std::getenv("IPPL_CATALYST_VTK")),
                 ghost_mask(std::getenv("IPPL_CATALYST_GHOST_MASKS")),
                 proxy_option(std::getenv("IPPL_CATALYST_PROXY_OPTION")),
-                associate_(std::getenv("IPPL_CATALYST_ASSOCIATE")),
                 vis_enabled(catalyst_vis && std::string(catalyst_vis) == "ON"),
                 steer_enabled(catalyst_steer && std::string(catalyst_steer) == "ON"),
                 png_extracts(catalyst_png && std::string(catalyst_png) == "ON"),
@@ -270,16 +268,8 @@ public:
                 use_ghost_masks(ghost_mask && std::string(ghost_mask) == "ON"),
                 source_dir(std::filesystem::path(CATALYST_ADAPTOR_ABS_DIR) / "Stream" / "InSitu")
     {
+        associate="element";
         
-        
-        associate = std::string(associate_);
-
-        // if(!associate) associate = "element";
-        if(! (associate==std::string("vertex"))   )   associate="element";
-
-        ca_m << associate << endl;
-
-
         ca_m.setOutputLevel(outputLevel_);
         
         #if defined(MPI_VERSION)
@@ -351,16 +341,6 @@ public:
         const std::string env_var,
         const std::filesystem::path default_file_path
     );
-
-
-
-    bool replace_in_file(const std::string& input_filename,
-                     const std::string& output_filename,
-                     const std::string& search_string,
-                     const std::string& replace_string);
-
-    bool create_new_proxy_file(const std::string & label);
-
 
 
     // ==========================================================
