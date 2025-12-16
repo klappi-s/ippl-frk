@@ -993,9 +993,17 @@ void CatalystAdaptor::InitializeRuntime(
                            const std::shared_ptr<VisRegistryRuntime>& visReg,
                            const std::shared_ptr<VisRegistryRuntime>& steerReg
                         ) {
+if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
 
 
     ca_m << level4 <<"::Initialize() START============================================================= 0" << endl;
+
+    int all_ready = 1;
+    #if defined(MPI_VERSION)
+        MPI_Allreduce(MPI_IN_PLACE, &all_ready, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    #endif
+    ca_m << level4 <<"::InitializeRuntime() Ranks ready for catalyst int: " << all_ready << " ranks" << endl;  
+    
     
         // if ( !(catalyst_steer && std::string(catalyst_steer) == "OFF") ){
         // m << "Catalyst Visualisation was deactivated via setting env variable IPPL_CATALYST_VIS=OFF"
@@ -1057,6 +1065,9 @@ void CatalystAdaptor::InitializeRuntime(
             cfg_yaml = std::move(default_cfg_yaml);
         } // else leave empty -> ProxyWriter proceeds without config
     }
+
+
+
     proxyWriter.initialize(proxy_path, cfg_yaml);
     if (steer_enabled ) {
         // set_node_script(node["catalyst/proxies/proxy_e/filename"],
@@ -1089,12 +1100,6 @@ void CatalystAdaptor::InitializeRuntime(
 
 
 
-
-
-
-
-
-
     ca_m << level4 <<"::Initialize()   Printing Conduit node passed to catalyst_initialize() =>" << endl;
     // ca_m << level4 <<node.to_json() << endl;
     ca_m << level4 <<node.to_yaml() << endl;
@@ -1115,6 +1120,8 @@ void CatalystAdaptor::InitializeRuntime(
 
 
 void CatalystAdaptor::Remember_now(const std::string label){
+if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+
     // Validate inputs and state
     auto it  = forceHostCopy.find(label);
     if (it == forceHostCopy.end()){
@@ -1138,36 +1145,46 @@ void CatalystAdaptor::Remember_now(const std::string label){
 }
 
 void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* default = ippl::Comm->rank() */) {
+    if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+
+
     ca_m << level4 <<"::Execute() START =============================================================== 0" << endl;
     
-                
+
+    
+    static IpplTimings::TimerRef TMRcatalyst_execute = IpplTimings::getTimer("catalyst_execute");
+    static IpplTimings::TimerRef TMRexecVizVisitor   = IpplTimings::getTimer("execVizVisitor");
+    static IpplTimings::TimerRef TMRexecSteerVisitor = IpplTimings::getTimer("execSteerVisitor");
+
+
     auto state = node["catalyst/state"];
     state["cycle"].set(cycle);
     state["time"].set(time);
     state["domain_id"].set(rank);
     // state["multiblock"].set(1);
     
-    #if defined(MPI_VERSION)
-    // state["mpi_rank"].set(static_cast<int64_t>(rank));
-    // state["mpi_size"].set(static_cast<int64_t>(ippl::Comm->size()));
-    #endif
 
-    // m << "Catalyst Visualisation was deactivated via setting env variable IPPL_CATALYST_VIS=OFF" << endl;
+    IpplTimings::startTimer(TMRexecVizVisitor);
     if ( !(catalyst_vis && std::string(catalyst_vis) == "OFF") ){
-        // forward Node: add visualisation channels
+        // edit forward Node: add visualisation channels
         ExecuteVisitor execV{*this};
         visRegistry->for_each(execV); 
-
     }
+    IpplTimings::stopTimer(TMRexecVizVisitor);
+
+
+    IpplTimings::startTimer(TMRexecSteerVisitor);
     if (catalyst_steer && std::string(catalyst_steer) == "ON") {
-        // forward Node: add steering channels
+        // edit forward Node: add steering channels
         SteerForwardVisitor steerV{*this};
         steerRegistry->for_each(steerV); 
     }
+    IpplTimings::stopTimer(TMRexecSteerVisitor);
 
 
 
     if(cycle == 0){
+
         #if defined(MPI_VERSION)
         MPI_Barrier(MPI_COMM_WORLD);
             ca_m << level4 <<"::Execute() [rank = 0]  Printing first Conduit Node passed from  to catalyst_execute() ==>" << endl;
@@ -1177,11 +1194,6 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
             if(ca_m.getOutputLevel() > 0 && ippl::Comm->rank()==1) node.print();
         MPI_Barrier(MPI_COMM_WORLD);
         #endif
-        
-        
-        
-        
-        
         // if(level >= 5 && ippl::Comm->rank()==0)  node.print();
 
         ca_m    << "::Execute() During first catalyst_execute() catalyst will "     << endl
@@ -1190,35 +1202,57 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
                 << "             the initialize() and the execute()."               << endl;
     }
 
+
     
-    ca_m << level4 <<"::Execute()::catalyst_execute() ==>" << endl;
     // Conduit Node Forward pass to Catalyst
-
-    Kokkos::fence();
-
-    #if defined(MPI_VERSION)
-    MPI_Barrier(MPI_COMM_WORLD);
-    #endif
-    #if defined(MPI_VERSION)
-    int all_ready = 1;
-    MPI_Allreduce(MPI_IN_PLACE, &all_ready, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    ca_m << level4 <<"::Execute() All ranks ready for catalyst_execute: " << all_ready << " ranks" << endl;  
-    #endif
+    // this is very slow need to check if this or the call in the pipeline if it's this
+    // it might be due to the MPI AllReduce call.... which would be weird but explanatory ....
+    // try without unneeded MPI calls.....
+    // problem we have mpi calls in the python scrits maybe arguments are better ... but only during init... so ok??
 
     
-    catalyst_status err = catalyst_execute(conduit_cpp::c_node(&node));
-    #if defined(MPI_VERSION)
-    MPI_Barrier(MPI_COMM_WORLD);
-    #endif
+    // Kokkos::fence();
+    // #if defined(MPI_VERSION)
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // #endif
 
-    Kokkos::fence();
+
+    // int all_ready = 1;
+    // #if defined(MPI_VERSION)
+    //     MPI_Allreduce(MPI_IN_PLACE, &all_ready, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    // #endif
+    // ca_m << level4 <<"::Execute() All ranks ready for catalyst_execute: " << all_ready << " ranks" << endl;  
+        
+        
+    ca_m << level4 <<"::Execute()::catalyst_execute() ==>" << endl;
+    IpplTimings::startTimer(TMRcatalyst_execute);
+        catalyst_status err = catalyst_execute(conduit_cpp::c_node(&node));
+    IpplTimings::stopTimer(TMRcatalyst_execute);
+
+
+    // #if defined(MPI_VERSION)
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // #endif
+    // Kokkos::fence();
+
 
     if (err != catalyst_status_ok) {
         std::cerr << "::Execute()   Failed to execute Catalyst (runtime path): " << err << std::endl;
     }
 
     if (catalyst_steer && std::string(catalyst_steer) == "ON") {
-        fetchResults();
+        
+        static IpplTimings::TimerRef TMRfetchResult = IpplTimings::getTimer("fetchSteerParameters");
+        IpplTimings::startTimer(TMRfetchResult);
+
+            fetchResults();
+            // backward Node: fetch updated steering values
+            SteerFetchVisitor fetchV{*this};
+            steerRegistry->for_each(fetchV);
+
+        IpplTimings::stopTimer(TMRfetchResult);
+
+
         if(true){
         // if(cycle == 0){
         // if(true){
@@ -1227,12 +1261,13 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
             ca_m << level4 <<results.to_yaml() << endl;
 
         }
-        // backward Node: fetch updated steering values
-        SteerFetchVisitor fetchV{*this};
-        steerRegistry->for_each(fetchV);
 
     }
-        Kokkos::fence();
+
+
+        // Kokkos::fence();
+
+
         viewRegistry.clear();
         ghostMaskCache.clear();
         node.reset();
@@ -1244,6 +1279,8 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
 
 
 void CatalystAdaptor::Finalize() {
+    if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+
     conduit_cpp::Node node;
     catalyst_status err = catalyst_finalize(conduit_cpp::c_node(&node));
     if (err != catalyst_status_ok) {

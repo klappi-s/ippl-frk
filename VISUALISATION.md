@@ -7,7 +7,6 @@ This guide explains how to use the **in-situ visualization and steering framewor
 This framework enables real-time visualization and parameter steering for IPPL simulations with minimal code changes.
 
 
----
 
 ## Table of Contents
 
@@ -38,9 +37,7 @@ This framework enables real-time visualization and parameter steering for IPPL s
   - [Environment Variables for execution](#environment-variables-for-execution)
     - [Core Catalyst Configuration (Definitions Mandatory)](#core-catalyst-configuration-definitions-mandatory)
     - [Main Switches](#main-switches)
-  - [| `IPPL_CATALYST_GHOST_MASKS` | `ON`/`OFF` | `OFF`| Specifies how to avoid Ghost Cell visualization 1 |](#-ippl_catalyst_ghost_masks--onoff--off-specifies-how-to-avoid-ghost-cell-visualization-1-)
     - [Advanced IPPL Catalyst Configuration Options](#advanced-ippl-catalyst-configuration-options)
-  - [| `CATALYST_EXTRACTOR_SCRIPT_<label>`| `<path>` | 2 | Path to custom PNG extractor script for specific registry entry |](#-catalyst_extractor_script_label-path--2--path-to-custom-png-extractor-script-for-specific-registry-entry-)
     - [Steering Interface Manipulation](#steering-interface-manipulation)
   - [Possible Visualization Methods](#possible-visualization-methods)
     - [Method 1: Live Connection with ParaView Client](#method-1-live-connection-with-paraview-client)
@@ -52,6 +49,10 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Starting the Trame Server](#starting-the-trame-server)
     - [Debug Levels](#debug-levels)
     - [Using Web UI](#using-web-ui)
+  - [Remote Visualisation](#remote-visualisation)
+    - [Remote with ParaView](#remote-with-paraview)
+    - [Remote with trame](#remote-with-trame)
+  - [Profiling](#profiling)
   - [Example](#example)
     - [Running AlpineSight](#running-alpinesight)
   - [Troubleshooting](#troubleshooting)
@@ -59,7 +60,6 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Debug Tips](#debug-tips)
     - [Known Bugs](#known-bugs)
 - [TODOs:](#todos)
-  - [Ascent leftovers](#ascent-leftovers)
 
 ---
 
@@ -75,7 +75,7 @@ The framework is based on ParaView Catalyst 2.0 and uses **Conduit** for data ex
 
 All code regarding this implementation can be found inside `ippl/src/Stream`.
 
----
+
 
 ## Supported Data Types
 
@@ -112,7 +112,7 @@ For **steering** (interactive parameter control), the following types are suppor
 
 **Note**: Nested structs and Structures-of-Arrays (SoA) are currently not supported.
 
----
+
 
 ## Creating Registries
 
@@ -230,7 +230,7 @@ steer_registry->add("positions",    positions);
 steer_registry->add("param_sets",   param_sets);
 ```
 
----
+
 
 ## Using the CatalystAdaptor
 
@@ -300,7 +300,7 @@ cat_vis.Finalize();
 #endif
 ```
 
----
+
 
 ## Building and Compiling
 
@@ -342,7 +342,13 @@ A `cmake.sh` script should include:
 ```bash
 #!/bin/bash
 CMAKE_ARGS=(
-  -DCMAKE_CXX_STANDARD=20
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_CXX_STANDARD=20 
+  -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON
+  -DIPPL_ENABLE_FFT=ON 
+  -DIPPL_ENABLE_SOLVERS=ON 
+  -DIPPL_ENABLE_ALPINE=ON 
+  -DIPPL_ENABLE_TESTS=OFF 
 
   # Enable Catalyst
   -DIPPL_ENABLE_CATALYST=ON
@@ -359,7 +365,7 @@ cmake "${CMAKE_ARGS[@]}" /path/to/ippl
 **Important**: Ensure all components (IPPL, Catalyst, ParaView) use the **same MPI implementation** to avoid runtime conflicts.
 
 
----
+
 
 ## Environment Variables for execution
 
@@ -373,7 +379,7 @@ Control framework behavior via environment variables in your run script:
 | `CATALYST_IMPLEMENTATION_PATHS` | Path to Catalyst implementation inside the ParaView binary (e.g., `$path/to/ParaView-5.12.0/lib/catalyst`) |
 | `CATALYST_IMPLEMENTATION_NAME` | Implementation name (currently always: `"paraview"`) |
 
----
+
 ### Main Switches
 
 | Variable | Values | Default | Description |
@@ -383,7 +389,6 @@ Control framework behavior via environment variables in your run script:
 | `IPPL_CATALYST_PNG`         | `ON`/`OFF` | `OFF`| Enable PNG image extraction |
 | `IPPL_CATALYST_VTK`         | `ON`/`OFF` | `OFF`| Enable VTK file extraction |
 | `IPPL_CATALYST_GHOST_MASKS` | `ON`/`OFF` | `OFF`| Specifies how to avoid Ghost Cell visualization <sup>1</sup> |
----
 
 
 
@@ -402,12 +407,16 @@ For most use cases there will be no need to change these. The user should only u
 | `CATALYST_PROXYS_PATH`             | `<path>` | <sup>2</sup> | Proxy XML for magnetic field steering  |
 | `CATALYST_PIPELINE_PATH`           | `<path>` | <sup>2</sup> | Path to custom Catalyst Python script  |
 | `CATALYST_EXTRACTOR_SCRIPT_<label>`| `<path>` | <sup>2</sup> | Path to custom PNG extractor script for specific registry entry |
----
+
+
+
+
 
 
 <sup>1</sup> : *`ON`/`OFF` runs simulation normally and provides a switch if you write the `catalyst_proxy.xml` file (at path `src/Stream/InSitu/catalyst_scripts/`). `PRODUCE_ONLY` writes the `catalyst_proxy.xml` file and aborts simulation run.*
 
 <sup>2</sup>: *The default scripts that are used and would be overwritten with these variables can be found in the folder:* `${IPPL_DIR}/src/Stream/InSitu/catalyst_scripts/...` 
+
 
 
 ### Steering Interface Manipulation
@@ -430,7 +439,7 @@ ranges:
 (TODO: switch to JSON?)
 
 
----
+
 
 ## Possible Visualization Methods
 The underlying methods can also be "combined". But certain combinations might lead to some bugs.
@@ -500,7 +509,6 @@ If you want to avoid PNG extraction for certain elements without having to recom
 6. Apply desired filters and visualizations.
 
 
----
 ## Trame Web UI
 
 We provide a basic Trame based (https://kitware.github.io/trame/) **web-based interactive UI**. Its current implementation should provide the most important features to imitate the ParaView client, needed for live visualization. We mainly provide this, since the official ParaView binaries for macOS based systems don't provide Catalyst live support. Meaning even for remote run simulation, one can't live connect to this simulation with the local ParaView client.
@@ -564,13 +572,28 @@ The interface is designed to be self-explanatory and intuitive.
 | **Versatility** | Access to all filters and PV settings | Only Basic |
 | **Remote Access** | VNC/X11 forwarding | Direct HTTP access | -->
 
+## Remote Visualisation
+A main interest is running simulation on a cluster, rendering the visualisation on cluster, but acceessing a the visualisation and steering inrerface locall. We shortly described here how you cann live visualize remote run Simulation locally with the paraview client and the trame app.
+
+### Remote with ParaView
+TODO
+
+### Remote with trame
+
+TODO
 
 
+## Profiling
+
+We use certain internal timer to time different Catalyst subroutines. These will be listed in the timing.dat file with all the other timings.
+
+- catalyst_execute
+- execVizVisitor
+- execSteerVisitor
+- fetchSteerParameters
+(TODO? add timer for intialisation subroutines ...initViz, initSteer, produceProxy)
 
 
-
-
----
 
 ## Example
 
@@ -579,7 +602,6 @@ A complete working example can be found with the `alpine/AlpineSight` example.
 <!-- to compile and run do the following: -->
 
 
----
 ### Running AlpineSight
 
 Build script example:
@@ -745,7 +767,6 @@ $MPIEXEC -np 2 ./AlpineSight 8 8 8 4096 22222 FFT 0.05 LeapFrog \
 ```
 
 
----
 ## Troubleshooting
 
 ### Common Issues
@@ -806,7 +827,13 @@ Messages like these mean that in the Simulation the Catalyst Adaptor expects dat
 
 # TODOs:
 
-- JSON configuration for UI layout
+
+when apply is pressed... unpush buttons for trame
+
+particle visibility toggle doesn't work ...
+
+
+add methods to avoid data of certain data attributes ..
 
 
 <!-- 
@@ -824,35 +851,27 @@ For advanced customization, refer to:
 - `VisRegistryRuntime.h`
 - `ProxyWriter.h` (for custom proxy XML generation)
 
---- -->
+-->
 
 
-todo:
 
-export IPPL_CATALYST_STEER=ON
 
+<!-- 
 ## Ascent leftovers
 ```bash
 # ==========================================================
-
-
 # opneMP
 # MPICC=mpicc \
 # MPICXX=mpicxx \
 # -DCATALYST_HINT_PATH="/home/klappi/AddApp/catalyst/install/lib/cmake/catalyst-2.0"
 # now paraview binary with openMP only MPI -> problematic later on connecting catalyst and paraview ...
-
-
 # #   example for ascent on jülich, maybe want to use newer /maybe no hint needed
 # #   /p/software/default/stages/2024/software/Ascent/20240122-gpsmpi-2023a/lib64/cmake/ascent
-
-
-
 # #####################################################################
 # ASCENT
 # Ascent Adaptor will try fetch from environment, else swap to default
 # #####################################################################
 # export ASCENT_ACTIONS_PATH=${IPPL_DIR}/src/Stream/InSitu/ascent_scripts/ascent_actions_default.yaml
-
-
 ```
+
+ -->

@@ -414,7 +414,13 @@ public:
             /* Register enum choices globally for experiment_enum */
             // Labels 'experiment' and 'enum_single' will now pick up choices from type-based registry
             // CatalystAdaptor::
-            cat_vis.InitializeRuntime(runtime_vis_registry, runtime_steer_registry);
+
+
+        static IpplTimings::TimerRef CAinit = IpplTimings::getTimer("CAinit");
+        IpplTimings::startTimer(CAinit);
+        cat_vis.InitializeRuntime(runtime_vis_registry, runtime_steer_registry);
+        IpplTimings::startTimer(CAinit);
+
 
     
         #endif
@@ -542,6 +548,12 @@ public:
         static IpplTimings::TimerRef domainDecomposition = IpplTimings::getTimer("loadBalance");
         static IpplTimings::TimerRef SolveTimer          = IpplTimings::getTimer("solve");
 
+
+        #ifdef IPPL_ENABLE_CATALYST
+        static IpplTimings::TimerRef TMR_CAremember   = IpplTimings::getTimer("CAremember");
+        static IpplTimings::TimerRef TMR_CAexecute    = IpplTimings::getTimer("CAexecute");
+        #endif
+
         double alpha                            = this->alpha_m;
         double Bext                             = this->Bext_m;
         double DrInv                            = this->DrInv_m;
@@ -609,15 +621,11 @@ public:
         
         
 #ifdef IPPL_ENABLE_CATALYST
-        // CatalystAdaptor::
+        IpplTimings::startTimer(TMR_CAremember);
         cat_vis.Remember_now("density");
+        IpplTimings::stopTimer(TMR_CAremember);
 #endif
-
-
-
-
 #ifdef IPPL_ENABLE_ASCENT
-
         std::vector<AscentAdaptor::ParticlePair<T, Dim>> particles_asc = {
             {"particle", std::shared_ptr<ParticleContainer<T, Dim> >(pc)},
         };
@@ -627,11 +635,9 @@ public:
             // {"phi", Ascent    ::FieldVariant<T, Dim>(&this->fcontainer_m->getPhi())},
         };
         ippl::AscentAdaptor::Execute(it, this->time_m ,  particles_asc, fields_asc);
-
 #endif
 
-
-        // Field solve-> vis density
+        // Field solve: charge density -(insitu)->  potential -> EField
         IpplTimings::startTimer(SolveTimer);
         this->fsolver_m->runSolver();
         IpplTimings::stopTimer(SolveTimer); 
@@ -642,7 +648,9 @@ public:
 
 
 #ifdef IPPL_ENABLE_CATALYST
+        IpplTimings::startTimer(TMR_CAexecute);
         cat_vis.ExecuteRuntime(it, this->time_m);
+        IpplTimings::stopTimer(TMR_CAexecute); 
 #endif
 
 
@@ -683,7 +691,7 @@ public:
         // sleep(1);
         std::cout << "PTManager: sleeping a quarter second..." << std::endl;
         // sleep(1); only takes int
-        std::this_thread::sleep_for(250ms);
+        // std::this_thread::sleep_for(250ms);
 
     }
 
