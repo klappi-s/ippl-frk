@@ -36,44 +36,6 @@
 #include "Stream/InSitu/ProxyWriter.h"
 #include "Stream/Registry/RegistryHelper.h"
 
-// #include "Stream/InSitu/VisBaseAdaptor.h"
-
-
-/* catalyst header defined the following: */
-//   catalyst_status catalyst_initialize(const conduit_node* params);
-//   catalyst_status catalyst_finalize(const conduit_node* params);
-//   catalyst_status catalyst_about(conduit_node* params);
-//   catalyst_status catalyst_results(conduit_node* params);
-
-
-// ############################################
-// Possible TODO:
-// 
-// DONE:
-// - figure out why the field and particles work differetnly adapt vis frame for particles
-// - iterate over all attributes for visualisation
-// - reduce virtual function calls get rid of execute_FIeld set_data and execute particle this
-// - added attribute names to ParticleAttribBase
-// - improve avoidance of ghost duplicates 
-// - remember functionality to allow visualisation for potetnial and density at the same time ..
-// - full versatile steering ...
-// - extend and test for multirank (MPI 2 rank local works)
-// - at least avoid regenerating the same ghost data by caching logic
-// - use same channel for all steerable channels backwards and forwards
-// - improved versatile sttering
-// 
-// NEXT: 
-// - test 2D
-// - test GPU
-// - use same channel (topology and mesh) for all vis fields?
-// SoA supprt (currently only Array of Structs ...)
-// - figure outs: multi-mesh multirank bugs...(not as easy to use a simple mesh...)
-// 
-// MAYBE:
-// - move exec_entry purely to the visitor structure???
-// - test no copy visualisation
-// 
-// ############################################
 
 namespace ippl{
 
@@ -287,28 +249,6 @@ public:
         // ca_warn.setMessageLevel(5);
 
 
-        /* 
-            Default Message and Output Level are set to global Message and Output Level.
-
-            When Inform Output level are set to e.g 3, messages from this inform with
-            level bigger than 3 {4,5} are no longer printed because MessageLevel>OutPutLevel.
-
-            Message Level will always be 1 and Output according to setting...
-
-
-            so if the output level is fixed e.g via global output level and not changed,
-            I can give my message a low level eg 2 so my message will be printed for most verboity levels
-            globalOutputLevel >=  informMessageLevel 2-5 and only not printed for very low verbosity levels 
-            0,1 = globalOutputLevel < informMessageLevel = 2 wont likely be pri
-            But Message Level is reset to minimum after message has been sent, so this is useless for me atm
-            why ?? why no alternatve
-            and why is [2] in print statment -_-
-
-            so i need to manually level every message which, then let the user overwrite with setOutpt
-            if he wants to overwrite the global verbosits option for visualisation.
-
-            Currently Message Level are forced to 1 so any output level other than 0 will print everything ...
-        */
 
         ca_m << "::CatalystAdaptor()   Global        Output  Level setting: " << ippl::Info->getOutputLevel() << endl;
         ca_m << "::CatalystAdaptor()   Catalyst Info Output  Level setting: " << ca_m.getOutputLevel() << endl;
@@ -637,12 +577,6 @@ public:
     void AddSteerableChannel(const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label);
 
 
-    /* maybe use function overloading instead ... */
-        // const std::string value_path = ... 
-        // steerable_scalar_backwardpass = static_cast<T>(results[value_path].value());
-        // steerable_scalar_backwardpass = results[value_path].value()[0];
-        /* ????? this should work?? */
-        // if constexpr (std::is_same_v<std::remove_cvref_t<T>, double>) {
 
     /**
      * @brief Fetches the value of a steerable channel from Catalyst results.
@@ -680,13 +614,6 @@ public:
     // LinMaps, std::vector<LinMap>). Nested structs are intentionally not
     // supported yet. Must be called before adding the struct instance to a
     // runtime registry.
-    // Example:
-    //   struct SimParams { double temp; int steps; ippl::Button reset; };
-    //   ippl::CatalystAdaptor::RegisterStructMembers<SimParams>(
-    //        "temperature", &SimParams::temp,
-    //        "steps",       &SimParams::steps,
-    //        "reset_btn",   &SimParams::reset);
-    //   SimParams params; steerRegistry->add("simulation", params);
     template<typename T, typename... Args>
     static void RegisterStructMembers(Args&&... args);
 

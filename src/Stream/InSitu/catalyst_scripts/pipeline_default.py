@@ -6,41 +6,12 @@ and forwards/fetches steerable parameters between the simulation an
 
 # script-version: 2.0
 # for more details check https://www.paraview.org/paraview-docs/latest/cxx/CatalystPythonScriptsV2.html
-
-########################################################
-######################################################## 
-# Main paraview catalyst script. Includes VTK extractors,
-# steering capabilities and updating pipelines of all channels 
-# Visualizes 3D particles. (ParticleContainer/ParticleBase)
-# 
-#  DONE:
-#  - Make Steering more Versatile
-#  - Together with CPP don't rely on hard coded attributes
-#  - additionally pass field string to have constistent bounds
-#    and don't have to guess reference frame ...
-#  - figure out how to also display glyphs inside the PV 
-#    client GUI (worked when wasnt in a separate script ...)
-# 
-# Possible TODO:
-#  - (alternative or additionally) write working MACROS for inaccessible PV settings  
-#  - Colouring in GUI
-#  - currently png extractors rely on velocity attribute
-#  - maybe we want to use resample to image data as a pipeline filter since:
-#    png extraction seems to be better rendered this way once te filte is configured properly...
-#  - default coluring live: try to look at pvpython script (generated with trace) to see how we might be able to colour etc our life filter ...
-#  - switch yaml to json range options 
-#  - instead of many env variables work with json file and maybe json catalyst pipeline like example ...
-#  - remove element associate env option can do this direct in python with filters ...
+.
 # BUG: if pv client is opened after Simulation has completed first execute
 # the created PNG extractor show up in the clients pipeline browser
 # Iam not sure how to avoid this. This will break the View needed for
 # the extractor to work properly and png extaction starrts failing ca
 # 3 timesteps after the client was opened.
-
-
-
-
-
 ########################################################
 ########################################################
 
@@ -189,46 +160,14 @@ def print_info_(s, level=0):
 
 #### disable automatic camera rest on 'Show'
 # paraview.simple._DisableFirstRenderCameraReset()
-
-# view = CreateRenderView()
-# view.UseColorPaletteForBackground = 0
-# view.Background = [1,1,1]
-
-
-
-# generalSettings = GetSettingsProxy('GeneralSettings')
-# iOSettings = GetSettingsProxy('IOSettings')
-# renderViewInteractionSettings = GetSettingsProxy('RenderViewInteractionSettings')
-# renderViewSettings = GetSettingsProxy('RenderViewSettings')
-# representedArrayListSettings = GetSettingsProxy('RepresentedArrayListSettings')
 colorPalette = GetSettingsProxy('ColorPalette')
 
-# print(colorPalette.__dict__)
-# {'Observed': None, 'ObserverTag': -1, '_Proxy__Properties': 
-# {'BackgroundColor': <weakref at 0x7f0972576b10; dead>, 
-#  'BackgroundColor2': <weakref at 0x7f0972576bb0; dead>, ''
-#  'BackgroundColorMode': <weakref at 0x7f0972577060; dead>, 
-#  'BorderColor': <weakref at 0x7f0972576c50; dead>, 
-#  'EdgeColor': <weakref at 0x7f0972576cf0; dead>, 
-#  'ForegroundColor': <weakref at 0x7f0972576ac0; dead>, 
-#  'InteractiveSelectionColor': <weakref at 0x7f0972576d40; dead>, 
-#  'InteractiveWidgetColor': <weakref at 0x7f0972576de0; dead>, ''
-#  'LoadPalette': <weakref at 0x7f0972576ed0; dead>, 
-#  'SelectionColor': <weakref at 0x7f0972576e30; dead>, 
-#  'SurfaceColor': <weakref at 0x7f0972576ca0; dead>, 
-#  'TextAnnotationColor': <weakref at 0x7f0972576f70; dead>, 
-#  'WidgetColor': <weakref at 0x7f0972577010; dead>}, 
 
-
-
-
-# also changes colour of rendered texts... ...
-# LoadPalette(paletteName='WhiteBackground')
 colorPalette.BackgroundColorMode = 'Gradient'
 
+colorPalette.Background = [0.0, 0.0, 0.0]
 # colorPalette.Background = [0.0, 0.8, 1.0]
 # colorPalette.Background = [0.3333333333333333, 1.0, 1.0]
-colorPalette.Background = [0.0, 0.0, 0.0]
 
 
 colorPalette.Background2 = [0.9, 0.9, 0.9]
@@ -421,22 +360,6 @@ for cname in parsed.channel_names:
             _log(f"Attaching VTPC extractor to complete multimesh particle proxy '{cname}'")
             _extractors[cname] = create_VTM_extractor(cname, proxy, 1)
         
-
-        # DOESNT WORK....
-        # Option 2: Extract only specific blocks (e.g., just particles without helper)
-        # Uncomment the following to extract only the main particle block:
-        # if parsed.VTKextract == "ON":
-        #     particles_block = ExtractBlock(
-        #         registrationName=f"{cname}_main_extract_opt2",
-        #         Input=proxy, 
-        #         Selectors=['//main']
-        #     )
-        #     particles_block.UpdatePipeline()
-        #     _log(f"Attaching VTPD extractor (via MergeBlocks) to MAIN particle block only '{cname}'")
-        #     _extractors[cname+"_main_only"] = create_extractor_from_single_block(cname+"_main", particles_block, 1)
-
-
-
 
 
     if "sField" in cname:
@@ -656,10 +579,6 @@ print_info_("=== Printing Proxy Overview ============"[0:40]+"1")
 # ------------------------------------------------------------------------------
 def catalyst_initialize():
     print_info_("catalyst_initialize()"+exp_string)
-    print_info("#################################################")
-    print_info("OPEN PV CLIENT NOW")
-    time.sleep(1)
-    print_info("#################################################")
     
 # ------------------------------------------------------------------------------
 
@@ -735,7 +654,8 @@ def catalyst_execute(info):
 
 
     if options.EnableCatalystLive:
-        time.sleep(2)
+        # time.sleep(0)
+        pass
             
 # ------------------------------------------------------------------------------
 

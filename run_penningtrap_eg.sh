@@ -6,18 +6,11 @@ export PENNINGTRAP_BINDIR=./build/alpine
 # #####################################################################
 #  (Important) CONFIGURE PARAVIEW CATALYST VERSION
 # #####################################################################
-
-# These two !!needed!! environment Variables will be automatically set when loading modules on 
-# julich system. When running elsewhere they need to be set manually most of the time.
-
+# automatically set on juelich clusters
 PV_PREFIX="/.../ParaView-5.XX.X-MPI-Linux-Python3.10-x86_64"
 
 export CATALYST_IMPLEMENTATION_PATHS="${PV_PREFIX}/lib/catalyst"
 export CATALYST_IMPLEMENTATION_NAME="paraview"
-
-# on jureca eg. after loading modules succesfully should result to something like:: 
-# echo $CATALYST_IMPLEMENTATION_PATHS 
-# /p/software/jurecadc/stages/2024/software/ParaView/5.12.0-RC2-gpsmpi-2023a/lib64/catalyst
 
 
 # #####################################################################
@@ -31,12 +24,10 @@ export CATALYST_IMPLEMENTATION_NAME="paraview"
 #  any/"OFF": (default)
 export IPPL_CATALYST_VIS=ON
 
-
 # "ON":
 #  any/"OFF": (default)
 export IPPL_CATALYST_STEER=ON
 
-#  activate/deactivate extractors (frequencies can be overwritten in scripts directly for now)
 
 # "ON":
 #  any/"OFF": (default)
@@ -56,18 +47,9 @@ export IPPL_CATALYST_PROXY_OPTION=ON
 #  any/"OFF": (default) <-> cutting GHOST_MASKS <->  works
 export IPPL_CATALYST_GHOST_MASKS=OFF
 
-#######################################################################
-# DON'T CHANGE FOR NOW
-# TODO: remove option...
-
-# any/"element" (default)
-# "vertex"
-export IPPL_CATALYST_ASSOCIATE="element"
 
 
 
-#######################################################################
-# DON'T USE FOR NOW:
 # #####################################################################
 # Catalyst Adaptor will try to fetch paths via these environment variables
 #  else switch to # harcoded preconfigured defaults inside IPPL src directory
@@ -90,14 +72,6 @@ export IPPL_CATALYST_ASSOCIATE="element"
 
 
 
-# #####################################################################
-# ASCENT
-# Ascent Adaptor will try fetch from environment, else swap to default
-# #####################################################################
-# export ASCENT_ACTIONS_PATH=${IPPL_DIR}/src/Stream/InSitu/ascent_scripts/ascent_actions_default.yaml
-
-
-
 cd ${PENNINGTRAP_BINDIR}
 
 rm -rd data
@@ -114,20 +88,6 @@ mkdir data
 
 
 ./AlpineSight 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-
-
-# ###################################################################################
-# Configuraion for Catalyst has been removed, AlpineSight as main Alpine exampl for vis.
-# ###################################################################################
-
-# # ./PenningTrap 4 4 4 512 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-# ./PenningTrap 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-
-# ./BumponTailInstability 4 4 4 512  20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-# ./BumponTailInstability 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-
-# ./LandauDamping 4 4 4 512  20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
-# ./LandauDamping 8 8 8 4096 20 FFT 0.05 LeapFrog --overallocate 1.0  --info 5
 
 
 

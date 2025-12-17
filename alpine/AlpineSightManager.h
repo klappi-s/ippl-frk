@@ -57,17 +57,6 @@ struct LinMap{
     ippl::Vector<double, 3> z_row;
 };
 
-// class BasicMaps{
-//     std::vector<double> time;
-// }
-
-struct LinMaps{
-    
-    std::vector<double> time;
-    std::vector<ippl::Vector<double, 3>> x_row;
-    std::vector<ippl::Vector<double, 3>> y_row;
-    std::vector<ippl::Vector<double, 3>> z_row;
-};
 
 struct AffineMap{
     double time;
@@ -99,18 +88,6 @@ public:
     using FieldContainer_t = FieldContainer<T, Dim>;
     using FieldSolver_t= FieldSolver<T, Dim>;
     using LoadBalancer_t= LoadBalancer<T, Dim>;
-
-    // AlpineSightManager(size_type totalP_, int nt_, Vector_t<int, Dim> &nr_, double lbt_,
-    //                      std::string& solver_, std::string& stepMethod_)
-    //     : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_),
-    //         scaleFactor(30),
-    //         electric_scale(30),
-    //         magnetic_scale({30,30,30}),
-    //         button_m(false),
-    //         switch_m(false),
-    //         e_m(PenningTrap) {
-    //     }
-
 
     AlpineSightManager(size_type totalP_, int nt_, Vector_t<int, Dim>& nr_, double lbt_,
                        std::string& solver_, std::string& stepMethod_,
@@ -216,18 +193,6 @@ private:
     std::vector<LinMap>                   LinMap_array;
     std::vector<SimParams>                SimpParams_arrays;
     
-
-    // SoA 
-    
-    // bool   switch_sin;
-    // LinMaps lm_m;              // original SoA representation (kept for comparison/testing)
-    // bool vis_init;
-    // ippl::Button reset_button;
-    // ippl::Button    button_useless;
-    // LinMap sLinMap2_m;
-
-
-
 
 
     Vector_t<double, Dim> length_m;
@@ -411,9 +376,7 @@ public:
                                         runtime_vis_registry->add("potential",        this->fcontainer_m->getRho() );
                                         runtime_vis_registry->add("electrostatic",    this->fcontainer_m->getE() );
                                         
-            /* Register enum choices globally for experiment_enum */
-            // Labels 'experiment' and 'enum_single' will now pick up choices from type-based registry
-            // CatalystAdaptor::
+
 
 
         static IpplTimings::TimerRef CAinit = IpplTimings::getTimer("CAinit");
@@ -656,10 +619,6 @@ public:
 
 
 
-
-
-
-
         IpplTimings::startTimer(PTimer);
         auto R2view = pc->R.getView();
         auto P2view = pc->P.getView();
@@ -689,7 +648,7 @@ public:
 
         // std::cout << "PTManager: sleeping a second..." << std::endl;
         // sleep(1);
-        std::cout << "PTManager: sleeping a quarter second..." << std::endl;
+        // std::cout << "PTManager: sleeping a quarter second..." << std::endl;
         // sleep(1); only takes int
         // std::this_thread::sleep_for(250ms);
 

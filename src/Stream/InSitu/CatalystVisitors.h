@@ -24,18 +24,19 @@
 
 /* 
 We can do case distinctions here or later... 
-Templating everythithing trivially from here allows for straightforward implementation of the actual function overloads
-makes everyhting easier to develop...
-but we can do case distinction of valid and invalid overloads here...
+Currently we only check for permission to use the current type. The basic templated implementations in this file redirecting to the real
+case distinction in the actual function overloads inside Catalyst____.hpp files.
 */
 
 
 /* 
+fails because overload is identical ... -> cheat by reference variation ...
+
 cant overload identical function with requires conditions
 since requires does not affect signature so they end up with identical singature
 but we can switch reference or constness of arguments like the label, changiing function signature allowing 
-for early throwing of exception without having to create new function itself
-fails because overload is identical ... -> cheat by reference variation ...*/
+for early throwing of exception (in this file) instead of the additional function overloading in the hpp files.
+*/
 
 
 
@@ -100,13 +101,6 @@ inline constexpr bool AllowedSteerType_v =
     || is_std_vector_of_ippl_vector<std::decay_t<T>>::value
     ; 
 
-// template<class T>
-// inline constexpr bool AllowedSteerType2_v =
-//     AllowedSteerType_v<T>
-//     || is_std_vector_any<std::decay_t<T>>::value
-//     ; 
-    
-
 
 template<class T>
 inline constexpr bool AllowedVisType_v = is_particle_v<T> || is_field_v<T>;
@@ -133,7 +127,7 @@ inline constexpr bool AllowedRegistryTypeOrShared_v =
 
 
 
-/* in the advanced version we might want to get rid of this virtual function call */
+/* we might want to get rid of this virtual function call */
 /**
  * @struct CatalystAdaptor::InitVisitor
  * @brief Builds Conduit channel metadata for registered fields/particles.
@@ -250,8 +244,3 @@ struct CatalystAdaptor::SteerFetchVisitor {
 
 
 }
-
-
-
-// NOTE: runtime registry currently stores by value; to mutate you need stored reference or pointer.
-// If registry adjusted to store reference_wrapper<S>, update dispatch accordingly.

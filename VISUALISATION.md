@@ -59,7 +59,11 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Common Issues](#common-issues)
     - [Debug Tips](#debug-tips)
     - [Known Bugs](#known-bugs)
-- [TODOs:](#todos)
+- [Concerning devs:](#concerning-devs)
+  - [TODOs](#todos)
+    - [BaseAdaptor for future ...](#baseadaptor-for-future-)
+    - [TODO's taken from files...](#todos-taken-from-files)
+  - [Comments / Notes](#comments--notes)
 
 ---
 
@@ -542,8 +546,8 @@ pip install vtk
 From then on you can run the Trame application directly with:
 ```bash
 
-export PV_PREFIX=/path/to/ParaView-5.XX.X-MPI-<your_os>-Python3.XX-<your_architecture>
 # EG: ParaView-5.13.3-MPI-Linux-Python3.10-x86_64"
+export PV_PREFIX=/path/to/ParaView-5.XX.X-MPI-<your_os>-Python3.XX-<your_architecture>
 export PVPYTHON=${PV_PREFIX}/bin/pvpython
 export CATALYST_FOLDER=/path/to/ippl/src/Stream/InSitu/catalyst_scripts/
 
@@ -606,20 +610,18 @@ A complete working example can be found with the `alpine/AlpineSight` example.
 
 Build script example:
 ```bash
-# when multiple mpi version installed guarantee correct used version like:
-export MPICC=/path/to/mpich/bin/mpicc
-export MPICXX=/path/to/mpich/bin/mpicxx
-export MPIEXEC=/path/to/ParaView-5.XX.X-MPI-<your_os>-Python3.10-<your_architecture>/lib/mpiexec
+## when multiple mpi version installed guarantee correct used version like:
+# export MPICC=/path/to/mpich/bin/mpicc
+# export MPICXX=/path/to/mpich/bin/mpicxx
+# export MPIEXEC=/path/to/ParaView-5.XX.X-MPI-<your_os>-Python3.10-<your_architecture>/lib/mpiexec
 
 CMAKE_ARGS=(
   -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_CXX_STANDARD=20 
   -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON
-  -DMPI_C_COMPILER="${MPICC}"
-  -DMPI_CXX_COMPILER="${MPICXX}"
-  -DMPIEXEC_EXECUTABLE="${MPIEXEC}"
-)
-CMAKE_ARGS+=(
+  # -DMPI_C_COMPILER="${MPICC}"
+  # -DMPI_CXX_COMPILER="${MPICXX}"
+  # -DMPIEXEC_EXECUTABLE="${MPIEXEC}"
   -DIPPL_ENABLE_FFT=ON 
   -DIPPL_ENABLE_SOLVERS=ON 
   -DIPPL_ENABLE_ALPINE=ON 
@@ -765,6 +767,12 @@ $MPIEXEC -np 2 ./AlpineSight 8 8 8 4096 22222 FFT 0.05 LeapFrog \
     --overallocate 1.0 --info 4
 
 ```
+Trame  script example
+```bash
+
+export CATALYST_FOLDER=${PWD}/src/Stream/InSitu/catalyst_scripts/
+```
+
 
 
 ## Troubleshooting
@@ -824,16 +832,300 @@ Messages like these mean that in the Simulation the Catalyst Adaptor expects dat
 - Currently when closing the Trame app and opening again, the Trame steering parameters will be reset to initial values and not the current values, which might lead to some bugs.
 ---
 ---
+---
+---
 
-# TODOs:
 
 
+
+
+
+
+
+
+# Concerning devs:
+
+## TODOs
 when apply is pressed... unpush buttons for trame
 
 particle visibility toggle doesn't work ...
 
 
+
+
 add methods to avoid data of certain data attributes ..
+
+currently we rely on the tostring function and the enum registration function... only one is actually needed ... figure 
+to strin g only for logging atm tough....
+```
+// Helper currently not needed for steering
+// string's are directly registered via register enum function
+std::string to_string(experiment_enum c) {
+    switch (c) {
+        case experiment_enum::PenningTrap:
+            return "PenningTrap";
+        case experiment_enum::LandauDamping:
+            return "LandauDamping";
+        case experiment_enum::UniformPlasma:
+            return "UniformPlasma";
+        default:
+            return "Unknown";
+    }
+}
+```
+
+### BaseAdaptor for future ...
+```cpp
+// #include "Stream/InSitu/VisBaseAdaptor.h"
+```
+
+### TODO's taken from files...
+pipeline_default.py
+```python
+########################################################
+######################################################## 
+# Main paraview catalyst script. Includes VTK extractors,
+# steering capabilities and updating pipelines of all channels 
+# Visualizes 3D particles. (ParticleContainer/ParticleBase)
+# 
+#  DONE:
+#  - Make Steering more Versatile
+#  - Together with CPP don't rely on hard coded attributes
+#  - additionally pass field string to have constistent bounds
+#    and don't have to guess reference frame ...
+#  - figure out how to also display glyphs inside the PV 
+#    client GUI (worked when wasnt in a separate script ...)
+# 
+# Possible TODO:
+#  - (alternative or additionally) write working MACROS for inaccessible PV settings  
+#  - Colouring in GUI
+#  - currently png extractors rely on velocity attribute
+#  - maybe we want to use resample to image data as a pipeline filter since:
+#    png extraction seems to be better rendered this way once te filte is configured properly...
+#  - default coluring live: try to look at pvpython script (generated with trace) to see how we might be able to colour etc our life filter ...
+#  - switch yaml to json range options 
+#  - instead of many env variables work with json file and maybe json catalyst pipeline like example ...
+#  - remove element associate env option can do this direct in python with filters ..
+```
+
+CatalystAdaptor.h
+```cpp
+// ############################################
+// Possible TODO:
+// 
+// DONE:
+// - figure out why the field and particles work differetnly adapt vis frame for particles
+// - iterate over all attributes for visualisation
+// - reduce virtual function calls get rid of execute_FIeld set_data and execute particle this
+// - added attribute names to ParticleAttribBase
+// - improve avoidance of ghost duplicates 
+// - remember functionality to allow visualisation for potetnial and density at the same time ..
+// - full versatile steering ...
+// - extend and test for multirank (MPI 2 rank local works)
+// - at least avoid regenerating the same ghost data by caching logic
+// - use same channel for all steerable channels backwards and forwards
+// - improved versatile sttering
+// 
+// NEXT: 
+// - test 2D
+// - test GPU
+// - use same channel (topology and mesh) for all vis fields?
+// SoA supprt (currently only Array of Structs ...)
+// - figure outs: multi-mesh multirank bugs...(not as easy to use a simple mesh...)
+// 
+// MAYBE:
+// - move exec_entry purely to the visitor structure???
+// - test no copy visualisation
+// 
+// ############################################
+```
+
+
+
+
+
+
+## Comments / Notes
+
+Kokkos mirros
+```cpp
+// ==============================================================================================
+// CHANNEL EXECUTIONERS =========================================================================
+// ==============================================================================================
+
+// ▶ create_mirror_view:           allocates data only if the host process cannot access view’s data, 
+//                                  otherwise hostView references the same data.
+// ▶ create_mirror:                always allocates data.
+// ▶ create_mirror_view_and_copy:  allocates data if necessary and also copies data.
+// Reminder: Kokkos never performs a hidden deep copy
+
+// If needed, deep copy the view’s updated array back to the
+// hostView’s array to write file, etc.
+// Kokkos :: d e ep c op y ( hostView , view );
+               
+
+            /* options can diverge in the following levels:
+            /type =="mesh" or multimesh
+            channels/ *** /data/fields/     *** -> changes
+                               /coordsets/  *** -> stays the same
+                               /topologies/ *** -> stays the same for al
+        
+            Currently we are using the same topology and mesh we can
+            technically reuse the same channel ->
+            but for advanced uses might not be the case
+            the labeling og coordsets and topologies in accordances with 
+            the layouts ids of ippl would be interesting    */
+
+```
+
+ippl inform
+```cpp
+
+        /* 
+            Default Message and Output Level are set to global Message and Output Level.
+
+            When Inform Output level are set to e.g 3, messages from this inform with
+            level bigger than 3 {4,5} are no longer printed because MessageLevel>OutPutLevel.
+
+            Message Level will always be 1 and Output according to setting...
+
+
+            so if the output level is fixed e.g via global output level and not changed,
+            I can give my message a low level eg 2 so my message will be printed for most verboity levels
+            globalOutputLevel >=  informMessageLevel 2-5 and only not printed for very low verbosity levels 
+            0,1 = globalOutputLevel < informMessageLevel = 2 wont likely be pri
+            But Message Level is reset to minimum after message has been sent, so this is useless for me atm
+            why ?? why no alternatve
+            and why is [2] in print statment -_-
+
+            so i need to manually level every message which, then let the user overwrite with setOutpt
+            if he wants to overwrite the global verbosits option for visualisation.
+
+            Currently Message Level are forced to 1 so any output level other than 0 will print everything ...
+        */
+```
+
+catalyst
+```cpp
+/* catalyst header defined the following: */
+  catalyst_status catalyst_initialize(const conduit_node* params);
+  catalyst_status catalyst_finalize(const conduit_node* params);
+  catalyst_status catalyst_about(conduit_node* params);
+  catalyst_status catalyst_results(conduit_node* params);
+```
+
+view registry
+```cpp
+
+/* instead of maps storing kokkos view in scope we use the ViewRegistry to keep everything in frame .... and be totally type indepedent
+we can set with name (but since we likely will not have the need to ever retrieve we can just stire nameless
+to redzcede unncessary computin type ...) */
+
+```
+
+steering 
+```cpp
+
+
+// struct of arrays not yet supported ... TODO?
+struct LinMaps{
+    
+    std::vector<double> time;
+    std::vector<ippl::Vector<double, 3>> x_row;
+    std::vector<ippl::Vector<double, 3>> y_row;
+    std::vector<ippl::Vector<double, 3>> z_row;
+};
+
+
+
+
+// Helper currently not needed for steering
+// string's are directly registered via register enum function
+std::string to_string(experiment_enum c) {
+    switch (c) {
+        case experiment_enum::PenningTrap:
+            return "PenningTrap";
+        case experiment_enum::LandauDamping:
+            return "LandauDamping";
+        case experiment_enum::UniformPlasma:
+            return "UniformPlasma";
+        default:
+            return "Unknown";
+    }
+}
+
+
+```
+
+
+changing defaults for catalyst in paraview gui:
+
+```python
+
+
+
+
+
+#### disable automatic camera rest on 'Show'
+# paraview.simple._DisableFirstRenderCameraReset()
+
+# view = CreateRenderView()
+# view.UseColorPaletteForBackground = 0
+# view.Background = [1,1,1]
+
+
+
+# generalSettings = GetSettingsProxy('GeneralSettings')
+# iOSettings = GetSettingsProxy('IOSettings')
+# renderViewInteractionSettings = GetSettingsProxy('RenderViewInteractionSettings')
+# renderViewSettings = GetSettingsProxy('RenderViewSettings')
+# representedArrayListSettings = GetSettingsProxy('RepresentedArrayListSettings')
+colorPalette = GetSettingsProxy('ColorPalette')
+
+# print(colorPalette.__dict__)
+# {'Observed': None, 'ObserverTag': -1, '_Proxy__Properties': 
+# {'BackgroundColor': <weakref at 0x7f0972576b10; dead>, 
+#  'BackgroundColor2': <weakref at 0x7f0972576bb0; dead>, ''
+#  'BackgroundColorMode': <weakref at 0x7f0972577060; dead>, 
+#  'BorderColor': <weakref at 0x7f0972576c50; dead>, 
+#  'EdgeColor': <weakref at 0x7f0972576cf0; dead>, 
+#  'ForegroundColor': <weakref at 0x7f0972576ac0; dead>, 
+#  'InteractiveSelectionColor': <weakref at 0x7f0972576d40; dead>, 
+#  'InteractiveWidgetColor': <weakref at 0x7f0972576de0; dead>, ''
+#  'LoadPalette': <weakref at 0x7f0972576ed0; dead>, 
+#  'SelectionColor': <weakref at 0x7f0972576e30; dead>, 
+#  'SurfaceColor': <weakref at 0x7f0972576ca0; dead>, 
+#  'TextAnnotationColor': <weakref at 0x7f0972576f70; dead>, 
+#  'WidgetColor': <weakref at 0x7f0972577010; dead>}, 
+
+
+
+# also changes colour of rendered texts... ...
+# LoadPalette(paletteName='WhiteBackground')
+colorPalette.BackgroundColorMode = 'Gradient'
+
+# colorPalette.Background = [0.0, 0.8, 1.0]
+# colorPalette.Background = [0.3333333333333333, 1.0, 1.0]
+colorPalette.Background = [0.0, 0.0, 0.0]
+
+
+colorPalette.Background2 = [0.9, 0.9, 0.9]
+# colorPalette.Background2 = [0.97, 0.97, 0.97]
+
+# # Properties modified on colorPalette
+colorPalette.Foreground = [0.8, 0.0, 0.0]
+colorPalette.Edges = [1.0, 0.0, 0.0]
+colorPalette.Surface = [1.0, 0.0, 0.0]
+
+
+# # 1. Set default representation to "Points"
+# renderViewSettings.DefaultRepresentation = 'Points'
+# colorPalette.Surface = [1.0, 0.0, 0.0]  # [R, G, B] for Red
+# renderViewSettings.DefaultPointSize = 10
+# renderViewSettings.DefaultRenderPointsAsSpheres = 1  # 1 means True
+
+```
+
 
 
 <!-- 

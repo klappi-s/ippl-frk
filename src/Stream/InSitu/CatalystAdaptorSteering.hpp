@@ -14,15 +14,6 @@
 
 namespace ippl{
 
-// =====================================================================================
-// SIMPLE STRUCT STEERING META (Initial Implementation)
-// =====================================================================================
-// Supports user-defined structs composed ONLY of existing steerable member types.
-// No nesting, no arrays-of-struct (AoS/SoA) yet. Each member is exposed as:
-//   <rootLabel>/<memberName>
-// Member names are sanitized ( '/' -> '_' ). Registration builds three lambdas
-// invoked by runtime registry visitors (Init/Fwd/Fetch).
-
 namespace detail {
 
 // Label sanitation: replace '/' to avoid unintended Conduit subtree splitting.
@@ -284,7 +275,7 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const ippl::Vector<
 
 
 // =============================================================
-// Generic std::vector<T> steerables (AoS-of-struct members)
+// Generic std::vector<T> steerables (Array-of-struct members)
 // Supports arithmetic, bool and ippl::Button as element types.
 // =============================================================
 template<typename Elem>
@@ -338,20 +329,6 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<E
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
     script_args.append().set_string(alabel);
 
-    // Create a dedicated forward mesh channel for this struct array prefix, once.
-    // std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
-    // auto steerable_channel = node[std::string("catalyst/channels/") + mesh_name];
-    // if(!steerable_channel.has_child("type")){
-    //     steerable_channel["type"].set("mesh");
-    //     auto data = steerable_channel["data"];
-    //     data["coordsets/coords/type"].set_string("explicit");
-    //     // minimal placeholder coordinates (will be resized in AddSteerableChannel)
-    //     data["coordsets/coords/values/x"].set(std::vector<double>{0.0});
-    //     data["topologies/sMesh_topo/type"].set("unstructured");
-    //     data["topologies/sMesh_topo/coordset"].set("coords");
-    //     data["topologies/sMesh_topo/elements/shape"].set("point");
-    //     data["topologies/sMesh_topo/elements/connectivity"].set(std::vector<int32_t>{0});
-    // }
 }
 
 // Init: std::vector<ippl::Vector<T,Dim>> steerables
@@ -376,18 +353,6 @@ void CatalystAdaptor::InitSteerableChannel( [[maybe_unused]] const std::vector<i
     conduit_cpp::Node script_args = node["catalyst/scripts/script/args"];
     script_args.append().set_string(alabel);
 
-    // std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
-    // auto steerable_channel = node[std::string("catalyst/channels/") + mesh_name];
-    // if(!steerable_channel.has_child("type")){
-    //     steerable_channel["type"].set("mesh");
-    //     auto data = steerable_channel["data"];
-    //     data["coordsets/coords/type"].set_string("explicit");
-    //     data["coordsets/coords/values/x"].set(std::vector<double>{0.0});
-    //     data["topologies/sMesh_topo/type"].set("unstructured");
-    //     data["topologies/sMesh_topo/coordset"].set("coords");
-    //     data["topologies/sMesh_topo/elements/shape"].set("point");
-    //     data["topologies/sMesh_topo/elements/connectivity"].set(std::vector<int32_t>{0});
-    // }
 }
 
 

@@ -2,11 +2,6 @@
 #include "Stream/InSitu/CatalystAdaptor.h"
 
 #include "Ippl.h"
-
-/* instead of maps storing kokkos view in scope we use the ViewRegistry to keep everything in frame .... and be totally type indepedent
-we can set with name (but since we likely will not have the need to ever retrieve we can just stire nameless
-to redzcede unncessary computin type ...) */
-
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -211,35 +206,6 @@ void CatalystAdaptor::init_entry([[maybe_unused]] const T& entry, const std::str
                 <<  "   ==>Channel will not be registered in Conduit Node." << endl;
 }
   
-
-
-// ==============================================================================================
-// CHANNEL EXECUTIONERS =========================================================================
-// ==============================================================================================
-
-// ▶ create_mirror_view:           allocates data only if the host process cannot access view’s data, 
-//                                  otherwise hostView references the same data.
-// ▶ create_mirror:                always allocates data.
-// ▶ create_mirror_view_and_copy:  allocates data if necessary and also copies data.
-// Reminder: Kokkos never performs a hidden deep copy
-
-// If needed, deep copy the view’s updated array back to the
-// hostView’s array to write file, etc.
-// Kokkos :: d e ep c op y ( hostView , view );
-               
-
-            /* options can diverge in the following levels:
-            /type =="mesh" or multimesh
-            channels/ *** /data/fields/     *** -> changes
-                               /coordsets/  *** -> stays the same
-                               /topologies/ *** -> stays the same for al
-        
-            Currently we are using the same topology and mesh we can
-            technically reuse the same channel ->
-            but for advanced uses might not be the case
-            the labeling og coordsets and topologies in accordances with 
-            the layouts ids of ippl would be interesting    */
-
 
 
 
@@ -1028,13 +994,9 @@ if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
     
     // If PNG extraction requested, run init visitor over visualization registry
     // init_entry will also add channel names here into the node.
-
-    
     InitVisitor initV{*this};
     visRegistry->for_each(initV);
 
-  
-    
 
     args.append().set_string("--verbosity");
     args.append().set_string(std::to_string(ca_m.getOutputLevel()));
@@ -1070,19 +1032,9 @@ if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
 
     proxyWriter.initialize(proxy_path, cfg_yaml);
     if (steer_enabled ) {
-        // set_node_script(node["catalyst/proxies/proxy_e/filename"],
-        //                 "CATALYST_PROXYS_PATH_E",
-        //                 source_dir / "catalyst_scripts" / "proxy_default_electric.xml");
-        // set_node_script(node["catalyst/proxies/proxy_m/filename"],
-        //                 "CATALYST_PROXYS_PATH_M",
-        //                 source_dir / "catalyst_scripts" / "proxy_default_magnetic.xml");
-
-
         SteerInitVisitor steerInitV{*this};
         steerRegistry->for_each(steerInitV);
     } 
-    // else {
-    // }
     set_node_script(    node["catalyst/proxies/proxy_/filename"],
         "CATALYST_PROXYS_PATH",
         proxy_path
@@ -1204,11 +1156,6 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
 
 
     
-    // Conduit Node Forward pass to Catalyst
-    // this is very slow need to check if this or the call in the pipeline if it's this
-    // it might be due to the MPI AllReduce call.... which would be weird but explanatory ....
-    // try without unneeded MPI calls.....
-    // problem we have mpi calls in the python scrits maybe arguments are better ... but only during init... so ok??
 
     
     // Kokkos::fence();
@@ -1216,12 +1163,11 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
     // MPI_Barrier(MPI_COMM_WORLD);
     // #endif
 
-
     // int all_ready = 1;
     // #if defined(MPI_VERSION)
     //     MPI_Allreduce(MPI_IN_PLACE, &all_ready, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     // #endif
-    // ca_m << level4 <<"::Execute() All ranks ready for catalyst_execute: " << all_ready << " ranks" << endl;  
+    // ca_m << level4 <<"::Execute() All ranks ready for catalyst_execute:    " << all_ready << " ranks" << endl;  
         
         
     ca_m << level4 <<"::Execute()::catalyst_execute() ==>" << endl;
@@ -1229,11 +1175,8 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
         catalyst_status err = catalyst_execute(conduit_cpp::c_node(&node));
     IpplTimings::stopTimer(TMRcatalyst_execute);
 
+    /* catalyst execute seems to be the current bottleneck of a medium sized simulation... */
 
-    // #if defined(MPI_VERSION)
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // #endif
-    // Kokkos::fence();
 
 
     if (err != catalyst_status_ok) {
@@ -1263,9 +1206,6 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
         }
 
     }
-
-
-        // Kokkos::fence();
 
 
         viewRegistry.clear();
