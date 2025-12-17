@@ -117,7 +117,7 @@ int main(int argc, char* argv[]) {
         #endif
         IpplTimings::stopTimer(mainTimer);
 
-        // IpplTimings::print();
+        IpplTimings::print();
         IpplTimings::print(std::string("timing.dat"));
 
 

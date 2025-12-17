@@ -50,7 +50,8 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Debug Levels](#debug-levels)
     - [Using Web UI](#using-web-ui)
   - [Remote Visualisation](#remote-visualisation)
-    - [Remote with ParaView](#remote-with-paraview)
+    - [Remote Prep (for merlin6 and gwendolen)](#remote-prep-for-merlin6-and-gwendolen)
+    - [Remote with ParaView (not supported for mac currently)](#remote-with-paraview-not-supported-for-mac-currently)
     - [Remote with trame](#remote-with-trame)
   - [Profiling](#profiling)
   - [Example](#example)
@@ -389,6 +390,7 @@ Control framework behavior via environment variables in your run script:
 | Variable | Values | Default | Description |
 |----------|--------|---------|-------------|
 | `IPPL_CATALYST_VIS`         | `ON`/`OFF` | `ON` | Enable/disable visualization |
+| `IPPL_CATALYST_STEER`       | `ON`/`OFF` | `OFF` | Enable/disable live viz |
 | `IPPL_CATALYST_STEER`       | `ON`/`OFF` | `OFF`| Enable/disable steering |
 | `IPPL_CATALYST_PNG`         | `ON`/`OFF` | `OFF`| Enable PNG image extraction |
 | `IPPL_CATALYST_VTK`         | `ON`/`OFF` | `OFF`| Enable VTK file extraction |
@@ -576,15 +578,102 @@ The interface is designed to be self-explanatory and intuitive.
 | **Versatility** | Access to all filters and PV settings | Only Basic |
 | **Remote Access** | VNC/X11 forwarding | Direct HTTP access | -->
 
-## Remote Visualisation
+## Remote Visualisation 
 A main interest is running simulation on a cluster, rendering the visualisation on cluster, but acceessing a the visualisation and steering inrerface locall. We shortly described here how you cann live visualize remote run Simulation locally with the paraview client and the trame app.
 
-### Remote with ParaView
-TODO
+### Remote Prep (for merlin6 and gwendolen)
+
+1. Allocate resources
+    login into merlin 6 (or merlin 7)
+    ```bash
+    [A | usr@merlin-l-001]  salloc --cluster=gmerlin6 --partition=gwendolen --account=gwendolen --nodes=1 --gpus=1 --ntasks=10 --time=00:35:00
+    [A | usr@merlin-g-100] 
+    ```
+    This will open the terminal in a new shell on a compute node eg. merlin-g-100.
+
+2. Tunnel to Compute Node and open second shell on the compute node:
+    ```bash
+    [B | usr@localmachine]  ssh -L 11111:merlin-g-100.psi.ch:11111 usr@merlin-l-001.psi.ch # tunnel
+    [B | usr@merlin-l-001]  ssh merlin-g-100 # enter allocated compute node
+    [B | usr@merlin-g-100] 
+    ```
+
+3. In both terminals load following modules:
+    ```bash 
+    module purge
+    module load Pmodules/2.0.2
+    module use merlin
+    module load gcc/13.2.0 mpich/4.3.2
+    module load cmake/3.26.3 
+    module load  paraview/5.13.3-egl  
+    ```
+
+
+
+
+### Remote with ParaView (not supported for mac currently)
+4. (paraview:)  Start a paraview server
+    ```bash
+    [B | usr@merlin-g-100] mpiexec.hydra pvserver --sp=11111 
+    Waiting for client...
+    Connection URL: cs://merlin-g-100.psi.ch:11111
+    Accepting connection(s): merlin-g-100.psi.ch:11111
+    
+    ```
+
+5. (paraview:) Connect to this paraview server with a local paraview client. You can do this in the paraview GUI or directly with a third terminal:
+
+    ```bash 
+    [C | usr@localmachine] paraview --server-url=cs://localhost:11111 --live=22222
+
+    ```
+    As response to this in terminal B you should see:
+    ```
+    [B] ... 
+    Client connected.
+    (  23.190s) [pvserver.0      ]  vtkLiveInsituLink.cxx:398   INFO| Listening for primary Catalyst connection on `merlin-g-100.psi.ch:22222`
+    Accepting connection(s): merlin-g-100.psi.ch:22222
+    ``` 
+
+
+6. (paraview:) Run your simulation, which was written with the ippl catalyst adaptor:
+    ```bash
+    # important: needs to use mpiexec.hydra not srun for this configuration to work with current settings.
+    [A | usr@merlin-g-100] bash run_mySimViz.sh
+    ```
+
+
+    If the simulation connects successfully to the paraview client terminal B will print the last line a second time (or some other confirmation).
+    ```
+    [B] ...
+    Accepting connection(s): merlin-g-100.psi.ch:22222
+    ```
+
+
+
+
 
 ### Remote with trame
+4. (trame:) launch your trame application . Mke it availlabe to your local machine by directly sending it through the port of your ssh tunnel.
 
-TODO
+    ```bash
+    export TRAME_ENV=/path/to/trame_env
+    export CATALYST_FOLDER=/path/to/ippl/src/Stream/InSitu/catalyst_scripts/
+    
+    mpiexec.hydra -np 1 pvpython --venv ${TRAME_ENV} ${CATALYST_FOLDER}/trame_vis_app.py --debug 1  --server --port 11111 --host 0.0.0.0
+    ```
+5.    Connect your web browser to http://localhost:11111 which then should opene the web ui, whose server is hosted by the cluster.
+
+
+
+6. (trame:) Run your simulation, which was written with the ippl catalyst adaptor:
+    ```bash
+    # important: needs to use mpiexec.hydra not srun for the viz config to work with current cluster settings.
+    [A | usr@merlin-g-100] bash run_mySimViz.sh
+    ```
+
+
+
 
 
 ## Profiling
@@ -713,6 +802,11 @@ export CATALYST_IMPLEMENTATION_NAME="paraview"
 #  any/"OFF": (default)
 export IPPL_CATALYST_VIS=ON
 
+
+# "ON":
+#  any/"OFF": (default)
+export IPPL_CATALYST_LIVE=ON
+
 # "ON":
 #  any/"OFF": (default)
 export IPPL_CATALYST_STEER=ON
@@ -802,18 +896,20 @@ Connection failed during handshake.  Unknown error parsing the handshake string
    - Check that struct and enum types are registered before `InitializeRuntime`.
    - Verify proxy XML file is generated.
   
-3.1 **"No array named ... present" error/warnings in the simulation log (Catalyst error):**
-```
-(   9.435s) [pvbatch.0       ]vtkInSituInitialization:692    ERR| No array named 'steerable_field_f_array:some_label' present. Skipping.
-```
-If this array is currently a steering array with no elements, this warning can be ignored/is expected and won't cause any actual errors. Else it means the UI fails to provide data to Catalyst to create the backward data channel to the UI (should not happen, please create a git ISSUE).
+    3.1 **"No array named ... present" error/warnings in the simulation log (Catalyst error):**
+    ```
+    (   9.435s) [pvbatch.0       ]vtkInSituInitialization:692    ERR| No array named 'steerable_field_f_array:some_label' present. Skipping.
+    ```
+    If this array is currently a steering array with no elements, this warning can be ignored/is expected and won't cause any actual errors. Else it means the UI fails to provide data to Catalyst to create the backward data channel to the UI (should not happen, please create a git ISSUE).
 
 
-3.2 **Execute()::FetchSteerableChannel(label) | no backward result present; skipping (IPPL warning).**
+    3.2   **Execute()::FetchSteerableChannel(label) | no backward result present; skipping (IPPL warning).**
 
-Messages like these mean that in the Simulation the Catalyst Adaptor expects data, but Catalyst has not provided any. This is an expected log when you haven't opened the ParaView or Trame UI. If an instance of a Steering Interface is active, this should also not happen (please create a GitHub Issue).
+    Messages like these mean that in the Simulation the Catalyst Adaptor expects data, but Catalyst has not provided any. This is an expected log when you haven't opened the ParaView or Trame UI. If an instance of a Steering Interface is active, this should also not happen (please create a GitHub Issue).
 
+4. **Bad Performance**
 
+If you don't need the *live* or *steering*  feature don't activate it. Even if not used in the client GUI or the web UI actiavtig the features with the environment variables will impact performance (significantly). 
 
 
 ---

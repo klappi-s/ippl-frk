@@ -6,7 +6,6 @@ and forwards/fetches steerable parameters between the simulation an
 
 # script-version: 2.0
 # for more details check https://www.paraview.org/paraview-docs/latest/cxx/CatalystPythonScriptsV2.html
-.
 # BUG: if pv client is opened after Simulation has completed first execute
 # the created PNG extractor show up in the clients pipeline browser
 # Iam not sure how to avoid this. This will break the View needed for
@@ -199,6 +198,7 @@ parser.add_argument("--steer_channel_names", nargs="*",
 
 parser.add_argument("--verbosity", type=int, default="1", help="Communicate the catalyst Output Level from the simulation")
 parser.add_argument("--VTKextract", default="OFF", help="Enable the VTK extracts of all incoming channels")
+parser.add_argument("--live",       default="OFF", help="Enable options.CatalystLive")
 parser.add_argument("--steer",      default="OFF", help="Enable steering from catalyst python side")
 parser.add_argument("--show_forward_channels", default="OFF", help="Show forward steerable channels in the GUI (PVTrivialProducer)")
 parser.add_argument("--experiment_name", default="_", help="Needed to correctly for safe folder.")
@@ -230,19 +230,27 @@ print_info_(f"Parsed steering option:         {parsed.steer}")
 # Catalyst options
 # ------------------------------------------------------------------------------
 options = catalyst.Options()
+
+if parsed.live == "ON":
+    options.EnableCatalystLive = 1
+else:
+    options.EnableCatalystLive = 0
+
+
+    
+
 options.GlobalTrigger = 'Time Step'
-options.EnableCatalystLive = 1
 options.CatalystLiveTrigger = 'Time Step'
 options.CatalystLiveURL = 'localhost:22222' #is also default
 options.ExtractsOutputDirectory = 'data_vtk_extracts_' + exp_string
 
 
-
+steer_enabled = parsed.live == "ON" and parsed.steer == "ON"
 
 # ------------------------------------------------------------------------------
 # Proactively remove the forward 0D mesh source from the GUI if it was auto-created
 # ------------------------------------------------------------------------------
-if parsed.steer == "ON" and parsed.show_forward_channels == "OFF":
+if steer_enabled and parsed.show_forward_channels == "OFF":
     try:
         src = paraview.simple.FindSource("steerable_channel_0D_mesh")
         if src is not None:
@@ -466,7 +474,7 @@ steer_channel_readers = {}
 steer_channel_senders = {}
 steer_channels = {}
 
-if parsed.steer == "ON":
+if steer_enabled:
     if parsed.steer_channel_names :
         print_info_("===CREATING STEERABLES============="[0:40]+"|0")
 
@@ -619,7 +627,7 @@ def catalyst_execute(info):
 
 
 
-    if parsed.steer == "ON" and  parsed.show_forward_channels == "ON":
+    if steer_enabled and  parsed.show_forward_channels == "ON":
         for name, reader in steer_channel_readers.items():
         # for name, (reader, sender) in steer_channels.items():
             reader.UpdatePipeline()
@@ -627,7 +635,7 @@ def catalyst_execute(info):
 
     # Not needed anymore ... 
     # # Always update backward senders to ensure result mesh generation
-    # if parsed.steer == "ON":
+    # if steer_enabled:
     #     # Unique sender proxies
     #     updated = set()
     #     for sender in steer_channel_senders.values():
@@ -654,7 +662,7 @@ def catalyst_execute(info):
 
 
     if options.EnableCatalystLive:
-        # time.sleep(0)
+        time.sleep(1)
         pass
             
 # ------------------------------------------------------------------------------

@@ -180,19 +180,21 @@ class CatalystAdaptor {
     
     /* taken from environemnt can be const... */
     const char* catalyst_vis  ;
+    const char* catalyst_live  ;
     const char* catalyst_steer;
     const char* catalyst_png  ;
     const char* catalyst_vtk  ;
-    const char* ghost_mask  ;
+    const char* catalyst_ghost_mask  ;
     const char* proxy_option;
-    std::string associate;
-
+    
     const bool vis_enabled;
+    const bool live_enabled;
     const bool steer_enabled;
     const bool png_extracts ;
     const bool vtk_extracts ;
     const bool use_ghost_masks;
-
+    
+    std::string associate;
     const std::filesystem::path source_dir;
 
     std::unordered_map<std::string, bool> forceHostCopy;    
@@ -218,19 +220,25 @@ public:
                 ca_m("CatalystAdaptor::", 0),  // Only print on rank 0
                 ca_warn("CatalystAdaptor_WARNING", std::cerr, INFORM_ALL_NODES), 
                 catalyst_vis(std::getenv("IPPL_CATALYST_VIS")),
+                catalyst_live(std::getenv("IPPL_CATALYST_LIVE")),
                 catalyst_steer(std::getenv("IPPL_CATALYST_STEER")),
                 catalyst_png(std::getenv("IPPL_CATALYST_PNG")),
                 catalyst_vtk(std::getenv("IPPL_CATALYST_VTK")),
-                ghost_mask(std::getenv("IPPL_CATALYST_GHOST_MASKS")),
+                catalyst_ghost_mask(std::getenv("IPPL_CATALYST_GHOST_MASKS")),
                 proxy_option(std::getenv("IPPL_CATALYST_PROXY_OPTION")),
-                vis_enabled(catalyst_vis && std::string(catalyst_vis) == "ON"),
-                steer_enabled(catalyst_steer && std::string(catalyst_steer) == "ON"),
-                png_extracts(catalyst_png && std::string(catalyst_png) == "ON"),
-                vtk_extracts(catalyst_vtk && std::string(catalyst_vtk) == "ON"),
-                use_ghost_masks(ghost_mask && std::string(ghost_mask) == "ON"),
+                vis_enabled( ! (catalyst_vis        && std::string(catalyst_vis)    == "OFF") ),
+                live_enabled(   catalyst_live       && std::string(catalyst_live)   == "ON"),
+                steer_enabled(  catalyst_steer      && std::string(catalyst_steer)  == "ON"),
+                png_extracts(   catalyst_png        && std::string(catalyst_png)    == "ON"),
+                vtk_extracts(   catalyst_vtk        && std::string(catalyst_vtk)    == "ON"),
+                use_ghost_masks(catalyst_ghost_mask && std::string(catalyst_ghost_mask) == "ON"),
                 source_dir(std::filesystem::path(CATALYST_ADAPTOR_ABS_DIR) / "Stream" / "InSitu")
     {
         associate="element";
+
+        if(!live_enabled){
+            catalyst_live ="OFF";
+        }
         
         ca_m.setOutputLevel(outputLevel_);
         

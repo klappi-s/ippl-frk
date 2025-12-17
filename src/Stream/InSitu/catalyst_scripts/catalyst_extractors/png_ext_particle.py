@@ -305,7 +305,7 @@ SetActiveSource(pNG1)
 from paraview import catalyst
 options = catalyst.Options()
 options.GlobalTrigger = 'Time Step'
-options.EnableCatalystLive = 1
+options.EnableCatalystLive = 0
 options.CatalystLiveTrigger = 'Time Step'
 options.ExtractsOutputDirectory = 'data_png_extracts_' + exp_string
 # ------------------------------------------------------------------------------

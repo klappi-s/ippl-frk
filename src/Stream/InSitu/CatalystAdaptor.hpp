@@ -959,7 +959,7 @@ void CatalystAdaptor::InitializeRuntime(
                            const std::shared_ptr<VisRegistryRuntime>& visReg,
                            const std::shared_ptr<VisRegistryRuntime>& steerReg
                         ) {
-if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+if ( !vis_enabled) return;
 
 
     ca_m << level4 <<"::Initialize() START============================================================= 0" << endl;
@@ -1004,6 +1004,9 @@ if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
 
     args.append().set_string("--VTKextract");
     args.append().set_string(std::string(catalyst_vtk));
+
+    args.append().set_string("--live");
+    args.append().set_string(std::string(catalyst_live));
 
     args.append().set_string("--steer");
     args.append().set_string(std::string(catalyst_steer));
@@ -1072,7 +1075,7 @@ if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
 
 
 void CatalystAdaptor::Remember_now(const std::string label){
-if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+if ( !vis_enabled) return;
 
     // Validate inputs and state
     auto it  = forceHostCopy.find(label);
@@ -1097,7 +1100,7 @@ if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
 }
 
 void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* default = ippl::Comm->rank() */) {
-    if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+    if ( !vis_enabled) return;
 
 
     ca_m << level4 <<"::Execute() START =============================================================== 0" << endl;
@@ -1117,7 +1120,7 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
     
 
     IpplTimings::startTimer(TMRexecVizVisitor);
-    if ( !(catalyst_vis && std::string(catalyst_vis) == "OFF") ){
+    if ( !!vis_enabled){
         // edit forward Node: add visualisation channels
         ExecuteVisitor execV{*this};
         visRegistry->for_each(execV); 
@@ -1219,7 +1222,7 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
 
 
 void CatalystAdaptor::Finalize() {
-    if ( (catalyst_vis && std::string(catalyst_vis) == "OFF") ) return;
+    if ( !vis_enabled) return;
 
     conduit_cpp::Node node;
     catalyst_status err = catalyst_finalize(conduit_cpp::c_node(&node));
