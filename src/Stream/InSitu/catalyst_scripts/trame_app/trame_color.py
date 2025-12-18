@@ -147,18 +147,24 @@ class ColorAPI:
         else:
             s.current_color_array = 'SOLID'
 
+        # Check per-source scalar bar setting first, fall back to actual visibility state
         try:
-            view = simple.GetActiveView()
-            if ca and len(ca) > 1 and ca[1]:
-                lut = simple.GetColorTransferFunction(ca[1])
-                sb = simple.GetScalarBar(lut, view)
-                if sb is not None:
-                    s.scalar_bar_visible = bool(getattr(sb, 'Visibility', 0))
-                else:
-                    s.scalar_bar_visible = bool(rep.GetScalarBarVisibility(view))
-
+            scalar_bar_per_source = getattr(s, 'scalar_bar_per_source', {})
+            if name in scalar_bar_per_source:
+                s.scalar_bar_visible = bool(scalar_bar_per_source[name])
             else:
-                s.scalar_bar_visible = False
+                # Fall back to checking actual scalar bar visibility
+                view = simple.GetActiveView()
+                if ca and len(ca) > 1 and ca[1]:
+                    # Use representation's own LUT if available (important for slices with UseSeparateColorMap)
+                    lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(ca[1])
+                    sb = simple.GetScalarBar(lut, view)
+                    if sb is not None:
+                        s.scalar_bar_visible = bool(getattr(sb, 'Visibility', 0))
+                    else:
+                        s.scalar_bar_visible = bool(rep.GetScalarBarVisibility(view))
+                else:
+                    s.scalar_bar_visible = False
         except Exception:
             s.scalar_bar_visible = False
 
@@ -188,13 +194,24 @@ class ColorAPI:
             s.rescale_settings_per_source = {}
 
         s.auto_rescale_color = settings.get('auto', True)
-        s.symmetric_rescale = settings.get('symmetric', True)
         s.custom_rescale_min = settings.get('min', 0.0)
         s.custom_rescale_max = settings.get('max', 1.0)
 
+        if name.startswith("ippl_sField") or ".Resample" in name:
+            s.symmetric_rescale  = settings.get('symmetric', True)
+        else:
+            s.symmetric_rescale  = settings.get('symmetric', False)
+        
         # Initialize Slice state if applicable
         if ".Slice" in name:
             try:
+                # Ensure slice uses separate color map to avoid affecting parent volume
+                if hasattr(rep, 'UseSeparateColorMap'):
+                    if not rep.UseSeparateColorMap:
+                        log.info("Enabling separate color map for slice {}", name)
+                        rep.UseSeparateColorMap = 1
+                        simple.Render()
+
                 # Assuming SliceType is Plane
                 normal = list(proxy.SliceType.Normal)
                 origin = list(proxy.SliceType.Origin)
@@ -238,8 +255,9 @@ class ColorAPI:
         # Initialize Opacity State
         try:
             if ca and len(ca) > 1 and ca[1]:
-                sof = simple.GetOpacityTransferFunction(ca[1])
-                lut = simple.GetColorTransferFunction(ca[1])
+                # Prefer per-representation transfer functions (critical for slices with UseSeparateColorMap)
+                sof = getattr(rep, 'ScalarOpacityFunction', None) or simple.GetOpacityTransferFunction(ca[1])
+                lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(ca[1])
                 
                 # lut.GetRange() fails in some environments, use RGBPoints to infer range
                 rgb_points = lut.RGBPoints
@@ -312,17 +330,22 @@ class ColorAPI:
             elif ".Ghosts" in name:
                 s.available_representations = ['Surface', 'Wireframe', 'Points', 'Outline', 'Volume', 'Feature Edges']
             elif ".Slice" in name:
+                # Slices only have Cell Data, so Volume rendering is not possible
                 s.available_representations = ['Surface', 'Wireframe', 'Points', 'Outline']
             elif name.startswith("ippl_sField") or ".Resample" in name:
                 # Prefer Volume for sField and Resample filters
-                s.available_representations = ['Volume', 'Surface', 'Wireframe', 'Points', 'Outline']
+                s.available_representations = ['Volume', 'Surface', 'Points', 'Outline', 'Wireframe'] #, 'Feature Edges']
             else:
                 # Default fallback (including vector fields)
                 s.available_representations = ['Surface', 'Wireframe', 'Points', 'Outline']
+            
+            # Set flag for whether opacity TF editing is supported (only Volume reps)
+            s.supports_opacity_tf = (s.current_representation == 'Volume')
         except Exception as e:
             log.warn("Failed to setup representation options: {}", e)
             s.available_representations = []
             s.current_representation = None
+            s.supports_opacity_tf = False
 
     def set_slice_normal(self, normal):
         log.ui("Set Slice Normal: {}", normal)
@@ -419,14 +442,12 @@ class ColorAPI:
                 info = proxy.GetDataInformation()
                 pd = info.GetPointDataInformation()
                 found_name = None
-                if pd.GetArrayInformation("density"):
-                    found_name = "density"
-                else:
-                    for i in range(pd.GetNumberOfArrays()):
-                        arr = pd.GetArrayInformation(i)
-                        if arr.GetName():
-                            found_name = arr.GetName()
-                            break
+                # Find the first available point data array (no hardcoded preference)
+                for i in range(pd.GetNumberOfArrays()):
+                    arr = pd.GetArrayInformation(i)
+                    if arr and arr.GetName():
+                        found_name = arr.GetName()
+                        break
                 
                 if found_name:
                     log.info("Auto-selected Point Array: {}", found_name)
@@ -436,6 +457,9 @@ class ColorAPI:
 
         try:
             rep.SetRepresentationType(mode)
+            
+            # Update flag for whether opacity TF editing is supported (only Volume reps)
+            self.state.supports_opacity_tf = (mode == 'Volume')
             
             # For Volume rendering, we often need to rescale the transfer function 
             # and opacity map to the current data range to make it visible.
@@ -561,6 +585,9 @@ class ColorAPI:
         self._validate_color_selection(target_rep)
         self._validate_color_selection(target_rep)
         
+        # Update flag for whether opacity TF editing is supported (only Volume reps)
+        s.supports_opacity_tf = (mode == 'Volume')
+        
         self._safe_view_update()
 
     def update_color_by(self, value):
@@ -576,14 +603,17 @@ class ColorAPI:
         if not rep:
             return
 
-        # Hide previous scalar bar, if any, before switching
+        # Hide previous scalar bar for THIS representation only (not the global one)
+        # Use the representation's own LUT to avoid hiding other sources' scalar bars
         try:
             prev_ca = rep.ColorArrayName
             if prev_ca and len(prev_ca) > 1 and prev_ca[1]:
-                lut_prev = simple.GetColorTransferFunction(prev_ca[1])
-                sb_prev = simple.GetScalarBar(lut_prev, view)
-                if sb_prev:
-                    sb_prev.Visibility = 0
+                # Use representation's own LUT, not the global one
+                lut_prev = getattr(rep, 'LookupTable', None)
+                if lut_prev:
+                    sb_prev = simple.GetScalarBar(lut_prev, view)
+                    if sb_prev:
+                        sb_prev.Visibility = 0
         except Exception:
             pass
 
@@ -610,7 +640,8 @@ class ColorAPI:
             if is_new_array:
                 rep.ColorArrayName = [assoc, array_name]
             
-            lut = simple.GetColorTransferFunction(array_name)
+            # Prefer per-representation LUT (critical for slices with UseSeparateColorMap)
+            lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(array_name)
             info = proxy.GetDataInformation()
             dinfo = info.GetPointDataInformation() if assoc == 'POINTS' else info.GetCellDataInformation()
             ai = dinfo.GetArrayInformation(array_name)
@@ -665,6 +696,22 @@ class ColorAPI:
                             lut.RescaleTransferFunction(r[0], r[1])
 
             rep.LookupTable = lut
+
+            # If this representation uses separate color maps AND is Volume representation,
+            # ensure its scalar opacity function is *not* the global one.
+            # Note: Only Volume reps have ScalarOpacityFunction; Surface/Wireframe don't.
+            try:
+                rep_type = str(getattr(rep, 'Representation', 'Surface')).strip("'\"")
+                if getattr(rep, 'UseSeparateColorMap', 0) and rep_type == 'Volume':
+                    sof = getattr(rep, 'ScalarOpacityFunction', None)
+                    if not sof:
+                        # Force ParaView to allocate a per-representation PWF by assigning one
+                        # (use a fresh instance to avoid mutating the parent's global PWF).
+                        sof = simple.CreatePiecewiseFunction([0.0, 0.0, 1.0, 1.0])
+                        rep.ScalarOpacityFunction = sof
+                    rep.OpacityTransferFunction = 'Piecewise Function'
+            except Exception:
+                pass
             
             # Ensure VectorMode is reset to Magnitude initially ONLY if new array
             if is_vector and is_new_array:
@@ -707,9 +754,10 @@ class ColorAPI:
         ca = rep.ColorArrayName
         if not ca or len(ca) < 2 or not ca[1]:
             return
-            
+			
         array_name = ca[1]
-        lut = simple.GetColorTransferFunction(array_name)
+        # Prefer per-representation LUT (critical for slices with UseSeparateColorMap)
+        lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(array_name)
         
         # Map mode to ParaView settings
         # VectorMode: 0=Magnitude, 1=Component, 2=RGB
@@ -798,7 +846,12 @@ class ColorAPI:
         if not ca or len(ca) < 2 or not ca[1]:
             return
         array_name = ca[1]
-        lut = simple.GetColorTransferFunction(array_name)
+        
+        # Prefer representation's specific transfer functions
+        lut = getattr(rep, 'LookupTable', None)
+        if not lut:
+            lut = simple.GetColorTransferFunction(array_name)
+            
         preset_map = {
             'cool_to_warm': 'Cool to Warm',
             'cool_to_warm_ext': 'Cool to Warm (Extended)',
@@ -879,13 +932,24 @@ class ColorAPI:
                 rep.SetScalarBarVisibility(view, bool(desired_vis))
                 ca = rep.ColorArrayName
                 if ca and len(ca) > 1 and ca[1]:
-                    lut = simple.GetColorTransferFunction(ca[1])
+                    # Use representation's own LUT if available (important for slices with UseSeparateColorMap)
+                    lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(ca[1])
                     sb = simple.GetScalarBar(lut, view)
                     if sb:
                         sb.Visibility = 1 if desired_vis else 0
             except Exception:
                 pass
         self.state.scalar_bar_visible = desired_vis
+        
+        # Track per-source scalar bar visibility
+        if name:
+            try:
+                d = dict(self.state.scalar_bar_per_source)
+                d[name] = bool(desired_vis)
+                self.state.scalar_bar_per_source = d
+            except Exception:
+                self.state.scalar_bar_per_source = { name: bool(desired_vis) }
+        
         simple.Render()
         self._safe_view_update()
 
@@ -931,7 +995,12 @@ class ColorAPI:
             return
             
         array_name = ca[1]
-        lut = simple.GetColorTransferFunction(array_name)
+        
+        # Prefer representation's specific transfer functions
+        lut = getattr(rep, 'LookupTable', None)
+        if not lut:
+            lut = simple.GetColorTransferFunction(array_name)
+            
         lut.RescaleTransferFunction(vmin, vmax)
         
         simple.Render()
@@ -956,7 +1025,11 @@ class ColorAPI:
             
         array_name = ca[1]
         assoc = ca[0]
-        lut = simple.GetColorTransferFunction(array_name)
+        
+        # Prefer representation's specific transfer functions
+        lut = getattr(rep, 'LookupTable', None)
+        if not lut:
+            lut = simple.GetColorTransferFunction(array_name)
         
         info = proxy.GetDataInformation()
         dinfo = info.GetPointDataInformation() if assoc == 'POINTS' else info.GetCellDataInformation()
@@ -1028,9 +1101,41 @@ class ColorAPI:
             return
             
         array_name = ca[1]
-        log.debug("Updating opacity for array: {}", array_name)
-        lut = simple.GetColorTransferFunction(array_name)
-        sof = simple.GetOpacityTransferFunction(array_name)
+        log.debug("Updating opacity for array: {} on source: {}", array_name, name)
+        
+        # Check if this representation supports ScalarOpacityFunction (only Volume reps do)
+        # Surface/Wireframe reps (like slices) use a single Opacity scalar, not a piecewise function
+        rep_type = getattr(rep, 'Representation', 'Surface')
+        if hasattr(rep_type, 'GetData'):
+            rep_type = rep_type.GetData()
+        rep_type = str(rep_type).strip("'\"")
+        
+        supports_opacity_tf = rep_type == 'Volume'
+        if not supports_opacity_tf:
+            log.debug("Representation '{}' does not support opacity transfer function editing (only Volume does)", rep_type)
+            return
+        
+        # Prefer per-representation TFs (critical for slices with UseSeparateColorMap)
+        use_separate = getattr(rep, 'UseSeparateColorMap', 0)
+        log.debug("UseSeparateColorMap: {}", use_separate)
+
+        lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(array_name)
+
+        sof = getattr(rep, 'ScalarOpacityFunction', None)
+        global_sof = simple.GetOpacityTransferFunction(array_name)
+        # If we're editing a volume with separate color map, never write into the global/shared PWF.
+        if use_separate and (not sof or sof == global_sof):
+            sof = simple.CreatePiecewiseFunction([0.0, 0.0, 1.0, 1.0])
+            try:
+                rep.ScalarOpacityFunction = sof
+            except AttributeError:
+                # Rep doesn't support ScalarOpacityFunction, fall back to global
+                log.debug("Rep doesn't support ScalarOpacityFunction, using global")
+                sof = global_sof
+        elif not sof:
+            sof = global_sof
+
+        log.debug("Final LUT: {}, SOF: {}", lut, sof)
         
         # Get current range
         # Prefer state values if available as they are the source of truth for the UI

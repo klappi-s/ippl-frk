@@ -1386,7 +1386,7 @@ with SinglePageLayout(server) as layout:
                     )
                     
                     vuetify3.VDivider(classes="my-2")
-                    with vuetify3.VContainer(v_if="current_color_array !== 'SOLID'", classes="pa-0"):
+                    with vuetify3.VContainer(v_if="current_color_array !== 'SOLID' && supports_opacity_tf", classes="pa-0"):
                         vuetify3.VLabel(text="Opacity Map (Normalized)", classes="text-caption")
                         
                         # Header
@@ -1459,10 +1459,12 @@ state.slice_bounds = [-1, 1, -1, 1, -1, 1]
 state.available_color_maps = []
 state.current_color_map = None
 state.color_map_per_source = {}
+state.scalar_bar_per_source = {}  # Track per-source scalar bar visibility
 state.symmetric_rescale = True
 state.opacity_points = []
 state.opacity_next_id = 0
 state.loading_opacity = False
+state.supports_opacity_tf = False  # Only true for Volume representations
 state.default_screenshot_path = _get_workspace_parent_dir()
 state.screenshot_save_path = state.default_screenshot_path
 state.screenshot_menu_open = False

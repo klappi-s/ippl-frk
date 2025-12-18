@@ -57,6 +57,58 @@ def get_display_proxy(ctx: Any, name: str):
 def remove_proxy(ctx: Any, name: str):
     log.ui("Remove Source clicked: {}", name)
     
+    # Before deleting, hide scalar bar for this source if it was enabled
+    # This prevents orphaned scalar bars when slices are removed
+    try:
+        view = simple.GetActiveView()
+        display_proxy = get_display_proxy(ctx, name)
+        if display_proxy and view:
+            rep = simple.GetRepresentation(display_proxy, view)
+            if rep:
+                # Hide the scalar bar for this representation
+                try:
+                    rep.SetScalarBarVisibility(view, False)
+                except Exception:
+                    pass
+                # Also try to hide via the LUT's scalar bar directly
+                ca = getattr(rep, 'ColorArrayName', None)
+                if ca and len(ca) > 1 and ca[1]:
+                    try:
+                        lut = simple.GetColorTransferFunction(ca[1])
+                        sb = simple.GetScalarBar(lut, view)
+                        if sb:
+                            # Only hide if no other active source needs this scalar bar
+                            # Check if any other source (besides this one) has scalar bar enabled for same array
+                            should_hide = True
+                            scalar_bar_per_source = getattr(ctx.state, 'scalar_bar_per_source', {})
+                            for other_name, has_bar in scalar_bar_per_source.items():
+                                if other_name != name and has_bar:
+                                    # Check if this other source uses the same array
+                                    other_proxy = get_display_proxy(ctx, other_name)
+                                    if other_proxy:
+                                        other_rep = simple.GetRepresentation(other_proxy, view)
+                                        if other_rep:
+                                            other_ca = getattr(other_rep, 'ColorArrayName', None)
+                                            if other_ca and len(other_ca) > 1 and other_ca[1] == ca[1]:
+                                                # Another source uses the same array and has scalar bar visible
+                                                should_hide = False
+                                                break
+                            if should_hide:
+                                sb.Visibility = 0
+                    except Exception:
+                        pass
+        # Clean up per-source scalar bar tracking
+        if hasattr(ctx.state, 'scalar_bar_per_source'):
+            try:
+                d = dict(ctx.state.scalar_bar_per_source)
+                if name in d:
+                    del d[name]
+                    ctx.state.scalar_bar_per_source = d
+            except Exception:
+                pass
+    except Exception as e:
+        log.warn("Error cleaning up scalar bar for {}: {}", name, e)
+    
     # Try to find proxy in active_proxies first
     p = ctx.active_proxies.get(name)
     
@@ -111,6 +163,17 @@ def remove_proxy(ctx: Any, name: str):
         if sibling not in ctx.active_proxies and parent in ctx.active_proxies:
             log.debug("Cleaning up parent key {} from active_proxies", parent)
             del ctx.active_proxies[parent]
+    
+    # Clean up per-source settings (color_map, rescale_settings)
+    for attr_name in ['color_map_per_source', 'rescale_settings_per_source']:
+        if hasattr(ctx.state, attr_name):
+            try:
+                d = dict(getattr(ctx.state, attr_name))
+                if name in d:
+                    del d[name]
+                    setattr(ctx.state, attr_name, d)
+            except Exception:
+                pass
         
     new_items = [item for item in ctx.state.pipeline_items if item['id'] != name]
     ctx.state.pipeline_items = new_items
@@ -145,6 +208,28 @@ def extract_slice(ctx: Any, name: str):
         log.warn("Could not find input proxy for slice extraction on {}", name)
         return
 
+    # Get the parent's representation to copy color settings
+    view = simple.GetActiveView()
+    parent_rep = None
+    parent_array_name = None
+    parent_association = None
+    parent_lut = None
+    parent_pwf = None
+    
+    # For scalar fields, the parent representation is the Resample proxy
+    if name.startswith("ippl_sField"):
+        resample_proxy = find_source_by_name(f"{name}_Resample")
+        if resample_proxy:
+            parent_rep = simple.GetRepresentation(resample_proxy, view)
+    
+    if parent_rep:
+        ca = getattr(parent_rep, 'ColorArrayName', None)
+        if ca and len(ca) >= 2 and ca[1]:
+            parent_association = ca[0]
+            parent_array_name = ca[1]
+            parent_lut = simple.GetColorTransferFunction(parent_array_name)
+            parent_pwf = simple.GetOpacityTransferFunction(parent_array_name)
+
     # Generate unique name
     base_name = name
     if base_name.endswith(".MergedBlocks"):
@@ -178,12 +263,125 @@ def extract_slice(ctx: Any, name: str):
     ctx.state.pipeline_items = current_items
     
     # Show it
-    view = simple.GetActiveView()
     rep = simple.Show(slice_filter, view)
     rep.SetRepresentationType('Surface')
     
-    # Apply default coloring if possible
-    render_config.setup_default_view(slice_filter, view)
+    # Apply parent's color settings if available
+    if parent_array_name and parent_lut:
+        # IMPORTANT: Enable separate color map FIRST, before any color operations.
+        # This ensures the slice gets its own independent LUT.
+        if hasattr(rep, 'UseSeparateColorMap'):
+            rep.UseSeparateColorMap = 1
+        
+        # Create a truly separate LUT for this slice by using a unique registration name.
+        # The key insight: GetColorTransferFunction(name) returns a global LUT keyed by 'name'.
+        # By using a unique name like "density.Slice1", we get a brand new LUT.
+        slice_lut_name = f"{parent_array_name}.{slice_name}"
+        slice_lut = simple.GetColorTransferFunction(slice_lut_name)
+        
+        # Copy color transfer function settings from parent
+        try:
+            slice_lut.RGBPoints = list(parent_lut.RGBPoints)
+            slice_lut.ColorSpace = parent_lut.ColorSpace
+            slice_lut.NanColor = list(parent_lut.NanColor)
+            if hasattr(parent_lut, 'VectorMode'):
+                slice_lut.VectorMode = parent_lut.VectorMode
+            if hasattr(parent_lut, 'VectorComponent'):
+                slice_lut.VectorComponent = parent_lut.VectorComponent
+        except Exception as e:
+            log.warn("Failed to copy LUT settings to slice: {}", e)
+        
+        # Set the color array and assign the slice's own LUT
+        rep.ColorArrayName = [parent_association, parent_array_name]
+        rep.LookupTable = slice_lut
+        
+        # Copy the opacity transfer function normalized points
+        if parent_pwf:
+            # Get parent's opacity points and range
+            parent_points = list(parent_pwf.Points)
+            
+            if parent_points and len(parent_points) >= 4:
+                # Get the range from the parent LUT
+                rgb_points = parent_lut.RGBPoints
+                if rgb_points and len(rgb_points) >= 4:
+                    min_val = rgb_points[0]
+                    max_val = rgb_points[-4]
+                else:
+                    min_val = parent_points[0]
+                    max_val = parent_points[-4]
+                
+                width = max_val - min_val
+                if width == 0:
+                    width = 1.0
+                
+                # Normalize parent opacity points to 0-1 range
+                normalized_points = []
+                for k in range(0, len(parent_points), 4):
+                    val = parent_points[k]
+                    opacity = parent_points[k + 1]
+                    mid = parent_points[k + 2]
+                    sharp = parent_points[k + 3]
+                    norm_x = (val - min_val) / width
+                    normalized_points.append({'norm_x': norm_x, 'opacity': opacity, 'mid': mid, 'sharp': sharp})
+                
+                # Get the slice's data range
+                slice_info = slice_filter.GetDataInformation()
+                slice_pinfo = slice_info.GetPointDataInformation()
+                slice_cinfo = slice_info.GetCellDataInformation()
+                
+                slice_array_info = None
+                if parent_association == 'POINTS' and slice_pinfo:
+                    slice_array_info = slice_pinfo.GetArrayInformation(parent_array_name)
+                elif parent_association == 'CELLS' and slice_cinfo:
+                    slice_array_info = slice_cinfo.GetArrayInformation(parent_array_name)
+                
+                # Use parent range for consistency
+                slice_min = min_val
+                slice_max = max_val
+                slice_width = slice_max - slice_min
+                if slice_width == 0:
+                    slice_width = 1.0
+                
+                # Note: Surface representations (used for slices) do NOT support
+                # ScalarOpacityFunction - that's only for Volume representations.
+                # The opacity TF code is kept here in case the slice is later
+                # changed to Volume representation, but for Surface slices it's a no-op.
+                # For now, we skip trying to set opacity TF for Surface reps.
+                rep_type = str(getattr(rep, 'Representation', 'Surface')).strip("'\"")
+                if rep_type == 'Volume':
+                    # Build new opacity points for the slice in the same normalized range
+                    new_pwf_points = []
+                    for np in normalized_points:
+                        new_val = slice_min + np['norm_x'] * slice_width
+                        new_pwf_points.extend([new_val, np['opacity'], np['mid'], np['sharp']])
+                    
+                    # Create a NEW per-representation opacity transfer function for the slice.
+                    try:
+                        slice_pwf = simple.CreatePiecewiseFunction([0.0, 0.0, 1.0, 1.0])
+                        slice_pwf.Points = new_pwf_points
+                        rep.OpacityTransferFunction = 'Piecewise Function'
+                        rep.ScalarOpacityFunction = slice_pwf
+                    except Exception as e:
+                        log.warn("Failed to set slice opacity function: {}", e)
+        
+        # Show scalar bar using the slice's own LUT (not parent's)
+        slice_lut = rep.LookupTable
+        if slice_lut:
+            sb = simple.GetScalarBar(slice_lut, view)
+            if sb:
+                sb.Visibility = 1
+        rep.SetScalarBarVisibility(view, True)
+        
+        # Track the slice's scalar bar visibility in per-source state
+        try:
+            d = dict(ctx.state.scalar_bar_per_source)
+            d[slice_name] = True
+            ctx.state.scalar_bar_per_source = d
+        except Exception:
+            ctx.state.scalar_bar_per_source = { slice_name: True }
+    else:
+        # Fallback: Apply default coloring if no parent settings available
+        render_config.setup_default_view(slice_filter, view)
     
     simple.Render()
     if hasattr(ctx.ctrl, 'view_update') and ctx.view_update_enabled:
@@ -282,33 +480,82 @@ def extract_ghosts(ctx: Any, name: str):
     # However, the trace shows SetRepresentationType('Volume') working on ExtractGhostCells.
     rep.SetRepresentationType('Volume')
 
-    # Color by GhostType if available
+    # Color by RankID if available (preferred), otherwise GhostType
     info = extract_ghosts.GetDataInformation()
     cinfo = info.GetCellDataInformation()
-    ghost_array_name = None
-    if cinfo.GetArrayInformation("GhostType"):
-        ghost_array_name = "GhostType"
-    elif cinfo.GetArrayInformation("vtkGhostType"):
-        ghost_array_name = "vtkGhostType"
+    pinfo = info.GetPointDataInformation()
+    
+    color_array_name = None
+    color_association = None
+    
+    # Prefer RankID (Point or Cell data)
+    if pinfo and pinfo.GetArrayInformation("RankID"):
+        color_array_name = "RankID"
+        color_association = 'POINTS'
+    elif cinfo and cinfo.GetArrayInformation("RankID"):
+        color_array_name = "RankID"
+        color_association = 'CELLS'
+    # Fallback to GhostType
+    elif cinfo and cinfo.GetArrayInformation("GhostType"):
+        color_array_name = "GhostType"
+        color_association = 'CELLS'
+    elif cinfo and cinfo.GetArrayInformation("vtkGhostType"):
+        color_array_name = "vtkGhostType"
+        color_association = 'CELLS'
         
-    if ghost_array_name:
-        # Trace uses ColorBy with CELLS association
-        simple.ColorBy(rep, ('CELLS', ghost_array_name))
+    if color_array_name and color_association:
+        simple.ColorBy(rep, (color_association, color_array_name))
         
         # Rescale for Volume
         rep.RescaleTransferFunctionToDataRange(True, True)
         rep.SetScalarBarVisibility(view, True)
         
+        # Set default opacity transfer function for ghosts: full opacity (1.0) everywhere
+        # This means opacity = 1 at position 0% and opacity = 1 at position 100%
+        try:
+            lut = rep.LookupTable
+            if lut:
+                rgb_points = lut.RGBPoints
+                if rgb_points and len(rgb_points) >= 4:
+                    min_val = rgb_points[0]
+                    max_val = rgb_points[-4]
+                else:
+                    min_val = 0.0
+                    max_val = 1.0
+                
+                # Create opacity function with full opacity at both ends
+                # Format: [x, y, midpoint, sharpness, ...]
+                pwf = simple.GetOpacityTransferFunction(color_array_name)
+                pwf.Points = [min_val, 0.6, 0.5, 0.0, max_val, 0.6, 0.5, 0.0]
+                
+                # Also set on representation if it supports it
+                if hasattr(rep, 'ScalarOpacityFunction'):
+                    rep.ScalarOpacityFunction = pwf
+        except Exception as e:
+            log.warn("Failed to set ghost opacity function: {}", e)
+        
         # Debug: Check range
-        array_info = cinfo.GetArrayInformation(ghost_array_name)
+        if color_association == 'CELLS':
+            array_info = cinfo.GetArrayInformation(color_array_name)
+        else:
+            array_info = pinfo.GetArrayInformation(color_array_name)
         if array_info:
             rng = array_info.GetComponentRange(0)
-            log.debug("{} range: {}", ghost_array_name, rng)
+            log.debug("{} range: {}", color_array_name, rng)
             
         # Also list other available arrays for debugging
         log.debug("Available Cell Arrays: {}", [cinfo.GetArrayInformation(i).GetName() for i in range(cinfo.GetNumberOfArrays())])
     else:
         render_config.setup_default_view(extract_ghosts, view)
+    
+    # Set per-source rescale settings: disable symmetric rescale for ghosts
+    # (RankID values are typically 0, 1, 2, ... and symmetric around 0 doesn't make sense)
+    try:
+        d = dict(ctx.state.rescale_settings_per_source)
+        d[ghost_name] = {'auto': True, 'symmetric': False, 'min': 0.0, 'max': 1.0}
+        ctx.state.rescale_settings_per_source = d
+    except Exception:
+        ctx.state.rescale_settings_per_source = {ghost_name: {'auto': True, 'symmetric': False, 'min': 0.0, 'max': 1.0}}
     
     # Restore original source visibility state
     if source_proxy:
@@ -364,11 +611,18 @@ def toggle_visibility(ctx: Any, name: str):
 
     # Handle compound types
     if name.startswith("ippl_sField"):
-        _set_vis(f"{name}_Resample", is_visible)
-        _set_vis(f"{name}.MergedBlocks", is_visible)
-        # Also toggle base proxy if it exists in active_proxies
-        if name in ctx.active_proxies:
-            _set_vis_proxy(ctx.active_proxies[name], is_visible)
+        # If Resample proxy exists (Volume), toggle it and ensure raw data (Surface) is hidden
+        # to prevent it from blocking the volume view.
+        if find_source_by_name(f"{name}_Resample"):
+            _set_vis(f"{name}_Resample", is_visible)
+            _set_vis(f"{name}.MergedBlocks", False)
+            if name in ctx.active_proxies:
+                _set_vis_proxy(ctx.active_proxies[name], False)
+        else:
+            _set_vis(f"{name}.MergedBlocks", is_visible)
+            # Also toggle base proxy if it exists in active_proxies
+            if name in ctx.active_proxies:
+                _set_vis_proxy(ctx.active_proxies[name], is_visible)
             
     elif name.startswith("ippl_vField"):
         _set_vis(f"{name}_Glyph", is_visible)
@@ -378,8 +632,18 @@ def toggle_visibility(ctx: Any, name: str):
             _set_vis_proxy(ctx.active_proxies[name], is_visible)
             
     elif name.startswith("ippl_particles"):
-        _set_vis(f"{name}.bunch", is_visible)
-        _set_vis(f"{name}.box", is_visible)
+        # Handle both the base particle source and the individual .bunch/.box components
+        if name.endswith(".bunch") or name.endswith(".box"):
+            # Direct component - just toggle that specific proxy
+            proxy = ctx.active_proxies.get(name)
+            if proxy:
+                _set_vis_proxy(proxy, is_visible)
+            else:
+                _set_vis(name, is_visible)
+        else:
+            # Base particle source - toggle both bunch and box
+            _set_vis(f"{name}.bunch", is_visible)
+            _set_vis(f"{name}.box", is_visible)
         
     else:
         # Standard proxy

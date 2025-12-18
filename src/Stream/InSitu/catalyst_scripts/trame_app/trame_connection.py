@@ -178,6 +178,7 @@ def extract_data(ctx: Any):
         primary_proxy_name = f"{channel_name}.bunch"
     found_data = False
     new_proxy = None
+    last_error = None
     for i in range(50):
         live.ProcessServerNotifications()
         p_proxy = find_source_by_name(primary_proxy_name)
@@ -185,13 +186,26 @@ def extract_data(ctx: Any):
             try:
                 p_proxy.UpdatePipeline()
                 info = p_proxy.GetDataInformation()
-                if info.GetNumberOfPoints() > 0 or info.GetNumberOfCells() > 0:
+                num_pts = info.GetNumberOfPoints()
+                num_cls = info.GetNumberOfCells()
+                if num_pts > 0 or num_cls > 0:
                     found_data = True
                     new_proxy = p_proxy
+                    log.debug("Found data for {}: {} points, {} cells", primary_proxy_name, num_pts, num_cls)
                     break
-            except:
-                pass
+                else:
+                    last_error = f"Proxy found but empty (0 points, 0 cells)"
+            except Exception as e:
+                last_error = str(e)
+        else:
+            last_error = f"Proxy '{primary_proxy_name}' not found"
         time.sleep(0.1)
+    
+    if not found_data or not new_proxy:
+        log.error("Failed to extract {}: {}", channel_name, last_error or "Unknown error")
+        state.status_text = f"Failed to extract {channel_name}"
+        return
+        
     if found_data and new_proxy:
         ctx.active_proxies[channel_name] = new_proxy
         current_items = list(state.pipeline_items)
@@ -225,17 +239,39 @@ def extract_data(ctx: Any):
                 render_config.setup_scalar_field_view(merged_proxy, view, channel_name)
         elif channel_name.startswith("ippl_vField"):
             log.info("Applying Vector Field Render for {}...", channel_name)
-            glyph_proxy = find_source_by_name(f"{channel_name}.Glyph")
-            if glyph_proxy:
-                log.info("Found extracted Glyph filter: {}.Glyph", channel_name)
-                render_config.setup_vector_field_view(glyph_proxy, view, channel_name, is_extracted=True)
+            # Always create local glyph from MergedBlocks - extracted glyphs can become
+            # corrupted after other field initializations and may only contain rank-1 data
+            merged_proxy = find_source_by_name(f"{channel_name}.MergedBlocks")
+            if merged_proxy:
+                render_config.setup_vector_field_view(merged_proxy, view, channel_name)
             else:
-                log.info("Extracted Glyph filter not found. Creating local Glyph filter.")
-                render_config.setup_vector_field_view(new_proxy, view, channel_name, is_extracted=False)
+                log.warn("No MergedBlocks found for {}. Using base proxy.", channel_name)
+                render_config.setup_vector_field_view(new_proxy, view, channel_name)
         else:
             log.info("Applying Default Render for {}...", channel_name)
             render_config.setup_default_view(new_proxy, view)
         render_config.reset_camera(simple.GetActiveView(), channel_name, new_proxy)
+
+        # Defensive: ensure the newly initialized representation stays visible.
+        # We've seen cases where init order (sField then vField) leaves the vField
+        # rep logically present but not drawn; re-asserting visibility here helps.
+        try:
+            target = None
+            if channel_name.startswith("ippl_particles"):
+                target = find_source_by_name(f"{channel_name}.bunch")
+            elif channel_name.startswith("ippl_sField"):
+                target = find_source_by_name(f"{channel_name}_Resample") or find_source_by_name(f"{channel_name}.MergedBlocks")
+            elif channel_name.startswith("ippl_vField"):
+                target = find_source_by_name(f"{channel_name}_Glyph") or find_source_by_name(f"{channel_name}.Glyph")
+            else:
+                target = new_proxy
+            if target:
+                rep = simple.GetRepresentation(target, simple.GetActiveView())
+                if rep:
+                    rep.Visibility = 1
+        except Exception as e:
+            log.debug("Post-reset camera visibility reassert failed: {}", e)
+
         simple.Render()
         if hasattr(ctx.ctrl, 'view_update') and ctx.view_update_enabled:
             try:

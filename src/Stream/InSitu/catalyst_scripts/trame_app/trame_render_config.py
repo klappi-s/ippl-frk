@@ -13,11 +13,10 @@ def setup_default_view(source_proxy, view):
         rep.SetRepresentationType('Surface')
     else:
         rep.SetRepresentationType('Points')
-    simple.ResetCamera()
     return rep
 
 
-def setup_particle_view(source_proxy, view, channel_name):
+def setup_particle_view(source_proxy, view, channel_name):    
     existing_rep = simple.GetRepresentation(source_proxy, view)
     if existing_rep:
         simple.Delete(existing_rep)
@@ -99,7 +98,6 @@ def setup_particle_view(source_proxy, view, channel_name):
     else:
         log.warn("Warning: {}.box not found.", channel_name)
 
-    simple.ResetCamera()
     return part_rep
 
 def update_particle_view(source_proxy, view):
@@ -132,60 +130,153 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
     if existing_rep:
         simple.Delete(existing_rep)
 
-    base_proxy = simple.FindSource(channel_name)    
-    base_info = base_proxy.GetDataInformation()
+    # Ensure pipelines are updated before querying data info
+    source_proxy.UpdatePipeline()
+    
+    base_proxy = simple.FindSource(channel_name)
+    if base_proxy:
+        base_proxy.UpdatePipeline()
+        base_info = base_proxy.GetDataInformation()
+    else:
+        base_info = None
+        
     info = source_proxy.GetDataInformation()
     cinfo = info.GetCellDataInformation()
     ghost_info = cinfo.GetArrayInformation("vtkGhostType") if cinfo else None
 
-    local_bounds = base_info.GetBounds()
-    local_extent = base_info.GetExtent()
+    # Get bounds - this should always be valid from the MergedBlocks
     global_bounds = info.GetBounds()
+    log.debug("Initial global_bounds from source_proxy: {}", global_bounds)
+    
+    # Validate global bounds
+    if global_bounds[0] > global_bounds[1] or abs(global_bounds[0]) > 1e100:
+        log.warn("Invalid global bounds: {}. Cannot proceed.", global_bounds)
+        return None
+    
+    # Try to get extent information to determine grid resolution
+    # First try base_proxy (the original data before MergeBlocks)
+    local_extent = None
+    
+    if base_info:
+        # ATTENTION THIS IMPLEMENTATION RELIES ON THE FACT THAT SOURCE PROXIES ARE
+        # NOT PROPERLY MANAGED FOR MULTIPLE NODES TO WE CAN RECEIVE LOCAL INFO
+        # ELSE WE COULD SIMPLIFY THIS FUNCTION
+        # SHOULD ADD TESTCASE LOCAL BOUND = GLOBAL BOUND ...
 
-    nx = local_extent[1] - local_extent[0] + 1
-    ny = local_extent[3] - local_extent[2] + 1
-    nz = local_extent[5] - local_extent[4] + 1
+        local_bounds = base_info.GetBounds()
+        local_extent = base_info.GetExtent()
+        log.debug("Extent from base_proxy: {}", local_extent)
+        # Validate - check for uninitialized values
+        if local_extent[0] > local_extent[1] or local_extent[0] == 2147483647:
+            log.debug("Invalid extent from base_proxy, trying source_proxy")
+            local_extent = None
+            local_bounds = None
 
+    
+    
+    if local_extent is None or local_bounds is None:
+        # Fallback: use source_proxy (MergedBlocks) info
+        local_bounds = info.GetBounds()
+        local_extent = info.GetExtent()
+        
+        # If still invalid, try to compute from bounds
+        if local_extent[0] >= local_extent[1] or local_extent[0] == 2147483647:
+            log.warn("Invalid extent from source_proxy too. Computing from global bounds. Using 8,8,8 and globald bounds")
+            # Default to reasonable grid size
+            local_extent = (0, 8, 0, 8, 0, 8)
+            local_bounds = global_bounds
+
+
+    # # If we still don't have valid extent, try to infer from number of cells
+    # if local_extent is None:
+    #     num_cells = info.GetNumberOfCells()
+    #     num_points = info.GetNumberOfPoints()
+    #     log.debug("No valid extent. num_cells={}, num_points={}", num_cells, num_points)
+        
+    #     if num_points > 0:
+    #         # Assume cubic grid and estimate dimension from number of points
+    #         import math
+    #         est_dim = int(round(num_points ** (1.0/3.0)))
+    #         est_dim = max(2, min(est_dim, 1000))  # Clamp to reasonable range
+    #         local_extent = (0, est_dim - 1, 0, est_dim - 1, 0, est_dim - 1)
+    #         log.debug("Estimated extent from num_points: {}", local_extent)
+    #     elif num_cells > 0:
+    #         import math
+    #         est_dim = int(round(num_cells ** (1.0/3.0))) + 1
+    #         est_dim = max(2, min(est_dim, 1000))
+    #         local_extent = (0, est_dim - 1, 0, est_dim - 1, 0, est_dim - 1)
+    #         log.debug("Estimated extent from num_cells: {}", local_extent)
+    #     else:
+    #         # Last resort: use a small default
+    #         local_extent = (0, 9, 0, 9, 0, 9)  # 10x10x10 grid
+    #         log.warn("Could not determine grid size, using default 10x10x10")
+
+
+    # Now compute dimensions from extent (amount of nodes)
+
+    # local cells per dim
+    nx = local_extent[1] - local_extent[0]
+    ny = local_extent[3] - local_extent[2]
+    nz = local_extent[5] - local_extent[4]
+    
+    # local bounds 
     lx = local_bounds[1] - local_bounds[0]
     ly = local_bounds[3] - local_bounds[2]
     lz = local_bounds[5] - local_bounds[4]
 
-    spacing_x = lx / max(nx - 1, 1)
-    spacing_y = ly / max(ny - 1, 1)
-    spacing_z = lz / max(nz - 1, 1)
-
-    dx = max(spacing_x, 1e-12)
-    dy = max(spacing_y, 1e-12)
-    dz = max(spacing_z, 1e-12)
-
+    # Use global bounds for spacing calculation
     gx = global_bounds[1] - global_bounds[0]
     gy = global_bounds[3] - global_bounds[2]
     gz = global_bounds[5] - global_bounds[4]
 
-    dim_x = int(round(gx / dx)) - 2
-    dim_y = int(round(gy / dy)) - 2
-    dim_z = int(round(gz / dz)) - 2
+
+    # spacing, cell width
+    wx = lx / max(nx, 1)
+    wy = ly / max(ny, 1)
+    wz = lz / max(nz, 1)
+    wx = max(wx, 1e-12)
+    wy = max(wy, 1e-12)
+    wz = max(wz, 1e-12)
+
+    # global extent
+    dx = gx/wx
+    dy = gy/wy
+    dz = gz/wz
+
+    # For resampling, use the same resolution as the input (minus ghost layers)
+    dim_x = dx - 2 if ghost_info else dx
+    dim_y = dy - 2 if ghost_info else dy
+    dim_z = dz - 2 if ghost_info else dz
+
+    # Ensure minimum global extent dimensions
+    dim_x = int(max(dim_x, 1))
+    dim_y = int(max(dim_y, 1))
+    dim_z = int(max(dim_z, 1))
 
     global_extent = [dim_x, dim_y, dim_z]
+    
     if ghost_info:
-        log.debug("Ghost Present")
+        log.debug("Ghost Present - trimming 1 layer")
         cut_layers = 1
     else:
         log.debug("No Ghost Present")
         cut_layers = 0
-    global_bounds = (
-        global_bounds[0] + cut_layers * dx,
-        global_bounds[1] - cut_layers * dx,
-        global_bounds[2] + cut_layers * dy,
-        global_bounds[3] - cut_layers * dy,
-        global_bounds[4] + cut_layers * dz,
-        global_bounds[5] - cut_layers * dz,
+    
+    # Compute resampling bounds (trim ghost layers if present)
+    resampling_bounds = (
+        global_bounds[0] + cut_layers * wx,
+        global_bounds[1] - cut_layers * wx,
+        global_bounds[2] + cut_layers * wy,
+        global_bounds[3] - cut_layers * wy,
+        global_bounds[4] + cut_layers * wz,
+        global_bounds[5] - cut_layers * wz,
     )
-    log.debug("ResampleToImage: Derived dims {} from extent {}, local bounds {} and global bounds {}", global_extent, local_extent, local_bounds, global_bounds)
+    log.debug("ResampleToImage: global_extent={}, loca_extent={}, spacing=({:.4f},{:.4f},{:.4f}), resampling_bounds={}", 
+              global_extent, local_extent, wx, wy, wz, resampling_bounds)
 
     resample = simple.ResampleToImage(registrationName=resample_name, Input=source_proxy)
     resample.UseInputBounds = 0
-    resample.SamplingBounds = global_bounds
+    resample.SamplingBounds = resampling_bounds
     resample.SamplingDimensions = global_extent
 
     resample.UpdatePipeline()
@@ -240,7 +331,6 @@ def setup_scalar_field_view(source_proxy, view, channel_name):
         rep.SetScalarBarVisibility(view, True)
     else:
         log.warn("No scalar array found for Volume rendering.")
-    view.AxesGrid.Visibility = 1
     return rep
 
 def update_scalar_field_view(source_proxy, view):
@@ -270,67 +360,168 @@ def update_scalar_field_view(source_proxy, view):
         if pwf:
             pwf.RescaleTransferFunction(nice_min, nice_max)
 
-def setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False):
+def setup_vector_field_view(source_proxy, view, channel_name):
+    """Setup vector field visualization using glyphs.
+    
+    IMPORTANT: We ALWAYS create a local glyph from MergedBlocks, regardless of
+    whether an extracted glyph exists. This is because:
+    1. Extracted glyphs can become corrupted after other field initializations
+    2. Extracted glyphs may only contain data from a single rank
+    3. Local glyphs from MergedBlocks ensure we get complete multi-rank data
+    
+    Args:
+        source_proxy: The MergedBlocks proxy (or base proxy) containing the vector data
+        view: The ParaView view to render in
+        channel_name: The name of the vector field channel (e.g., "ippl_vField_E")
+    """
+    
     glyph_name = f"{channel_name}_Glyph"
+    
+    # Clean up any existing local glyph
     existing_glyph = simple.FindSource(glyph_name)
     if existing_glyph:
+        existing_rep = simple.GetRepresentation(existing_glyph, view)
+        if existing_rep:
+            simple.Delete(existing_rep)
         simple.Delete(existing_glyph)
+    
+    # Also clean up representation of source_proxy if it exists
     existing_rep = simple.GetRepresentation(source_proxy, view)
     if existing_rep:
         simple.Delete(existing_rep)
-    display_proxy = None
-    if not is_extracted:
-        info = source_proxy.GetDataInformation()
-        bounds = info.GetBounds()
-        global_bounds = get_global_spatial_bounds(bounds)
-        dx = global_bounds[1] - global_bounds[0]
-        dy = global_bounds[3] - global_bounds[2]
-        dz = global_bounds[5] - global_bounds[4]
-        import math
-        diag = math.sqrt(dx*dx + dy*dy + dz*dz)
-        scale_factor = diag / 30.0 if diag > 0 else 1.0
-        glyph = simple.Glyph(registrationName=glyph_name, Input=source_proxy, GlyphType='Arrow')
-        c_info = info.GetCellDataInformation()
-        p_info = info.GetPointDataInformation()
-        array_name = None
-        association = 'CELLS'
-        candidates = [channel_name, channel_name.replace("ippl_vField_", "")]
-        for name in candidates:
-            if c_info.GetArrayInformation(name):
-                array_name = name
-                association = 'CELLS'
-                break
-            if p_info.GetArrayInformation(name):
-                array_name = name
-                association = 'POINTS'
-                break
-        if array_name is None:
-            if p_info and p_info.GetNumberOfArrays() > 0:
-                for i in range(p_info.GetNumberOfArrays()):
-                    ai = p_info.GetArrayInformation(i)
-                    if ai and ai.GetNumberOfComponents() in (3, 2):
-                        array_name = ai.GetName()
-                        association = 'POINTS'
-                        break
-            if array_name is None and c_info and c_info.GetNumberOfArrays() > 0:
-                for i in range(c_info.GetNumberOfArrays()):
-                    ai = c_info.GetArrayInformation(i)
-                    if ai and ai.GetNumberOfComponents() in (3, 2):
-                        array_name = ai.GetName()
-                        association = 'CELLS'
-                        break
-        if array_name:
-            glyph.OrientationArray = [association, array_name]
-        glyph.ScaleFactor = scale_factor
-        glyph.UpdatePipeline()
-        display_proxy = glyph
+    
+    # Find the MergedBlocks source - this contains complete data from all ranks
+    merged_name = f"{channel_name}.MergedBlocks"
+    merged_proxy = simple.FindSource(merged_name)
+    
+    if not merged_proxy:
+        # Try the channel name directly as fallback
+        merged_proxy = simple.FindSource(channel_name)
+        if merged_proxy:
+            log.debug("Using parent source {} (no MergedBlocks found)", channel_name)
     else:
-        display_proxy = source_proxy
+        log.debug("Using MergedBlocks source: {}", merged_name)
+    
+    if not merged_proxy:
+        log.error("Cannot setup vector field: no valid source found for {}", channel_name)
+        return None
+    
+    # Ensure pipeline is updated
+    merged_proxy.UpdatePipeline()
+    m_info = merged_proxy.GetDataInformation()
+    
+    # Debug: log source data information
+    num_points = m_info.GetNumberOfPoints()
+    num_cells = m_info.GetNumberOfCells()
+    bounds = m_info.GetBounds()
+    log.debug("Vector field MergedBlocks: points={}, cells={}, bounds={}", num_points, num_cells, bounds)
+    
+    if num_points == 0 and num_cells == 0:
+        log.error("MergedBlocks source has no data for {}", channel_name)
+        return None
+    
+    # Get global bounds for scale factor calculation
+    global_bounds = get_global_spatial_bounds(bounds)
+    dx = global_bounds[1] - global_bounds[0]
+    dy = global_bounds[3] - global_bounds[2]
+    dz = global_bounds[5] - global_bounds[4]
+    import math
+    diag = math.sqrt(dx*dx + dy*dy + dz*dz)
+    scale_factor = diag / 30.0 if diag > 0 else 1.0
+    
+    # Find the vector array for glyph orientation
+    m_p_info = m_info.GetPointDataInformation()
+    m_c_info = m_info.GetCellDataInformation()
+    
+    # Debug: list available arrays
+    point_arrays = [m_p_info.GetArrayInformation(i).GetName() for i in range(m_p_info.GetNumberOfArrays())] if m_p_info else []
+    cell_arrays = [m_c_info.GetArrayInformation(i).GetName() for i in range(m_c_info.GetNumberOfArrays())] if m_c_info else []
+    log.debug("MergedBlocks point arrays: {}, cell arrays: {}", point_arrays, cell_arrays)
+    
+    array_name = None
+    association = 'POINTS'
+    
+    # Try to find vector array by expected names
+    suffix = channel_name.replace("ippl_vField_", "")
+    candidates = [channel_name, suffix]
+    for name in candidates:
+        if m_p_info and m_p_info.GetArrayInformation(name):
+            array_name = name
+            association = 'POINTS'
+            log.debug("Found vector array by name: {} (POINTS)", array_name)
+            break
+        if m_c_info and m_c_info.GetArrayInformation(name):
+            array_name = name
+            association = 'CELLS'
+            log.debug("Found vector array by name: {} (CELLS)", array_name)
+            break
+    
+    # If not found by name, look for any 3-component array (vector)
+    if array_name is None and m_p_info:
+        for i in range(m_p_info.GetNumberOfArrays()):
+            ai = m_p_info.GetArrayInformation(i)
+            if ai and ai.GetNumberOfComponents() in (3, 2):
+                array_name = ai.GetName()
+                association = 'POINTS'
+                log.debug("Found vector array by component count: {} ({} components)", array_name, ai.GetNumberOfComponents())
+                break
+    
+    if array_name is None and m_c_info:
+        for i in range(m_c_info.GetNumberOfArrays()):
+            ai = m_c_info.GetArrayInformation(i)
+            if ai and ai.GetNumberOfComponents() in (3, 2):
+                array_name = ai.GetName()
+                association = 'CELLS'
+                log.debug("Found vector array by component count: {} ({} components)", array_name, ai.GetNumberOfComponents())
+                break
+    
+    if not array_name:
+        log.warn("No suitable vector array found for glyph orientation in {}", channel_name)
+    
+    # Create the local glyph filter
+    log.info("Creating local glyph for {} from MergedBlocks", channel_name)
+    glyph = simple.Glyph(registrationName=glyph_name, Input=merged_proxy, GlyphType='Arrow')
+    
+    if array_name:
+        glyph.OrientationArray = [association, array_name]
+        log.debug("Set glyph OrientationArray to [{}, {}]", association, array_name)
+    
+    glyph.ScaleFactor = scale_factor
+    glyph.UpdatePipeline()
+    
+    # Verify glyph has data
+    glyph_info = glyph.GetDataInformation()
+    glyph_points = glyph_info.GetNumberOfPoints()
+    glyph_cells = glyph_info.GetNumberOfCells()
+    glyph_bounds = glyph_info.GetBounds()
+    log.debug("Created glyph: points={}, cells={}, bounds={}", glyph_points, glyph_cells, glyph_bounds)
+    
+    if glyph_points == 0 and glyph_cells == 0:
+        log.error("Created glyph has no data!")
+    
+    display_proxy = glyph
+            
     rep = simple.Show(display_proxy, view)
     rep.SetRepresentationType('Surface')
+    
+    # Ensure we have fresh data info
+    display_proxy.UpdatePipeline()
     info = display_proxy.GetDataInformation()
+    
+    # Debug: Check bounds and data
+    bounds = info.GetBounds()
+    num_pts = info.GetNumberOfPoints()
+    num_cls = info.GetNumberOfCells()
+    log.debug("Vector field display_proxy: bounds={}, points={}, cells={}", bounds, num_pts, num_cls)
+    
     c_info = info.GetCellDataInformation()
     p_info = info.GetPointDataInformation()
+    
+    # Debug: List available arrays
+    point_arrays = [p_info.GetArrayInformation(i).GetName() for i in range(p_info.GetNumberOfArrays())] if p_info else []
+    cell_arrays = [c_info.GetArrayInformation(i).GetName() for i in range(c_info.GetNumberOfArrays())] if c_info else []
+    log.debug("Vector field point arrays: {}, cell arrays: {}", point_arrays, cell_arrays)
+    
     array_name = None
     association = 'POINTS'
     candidates = [channel_name, channel_name.replace("ippl_vField_", "")]
@@ -365,8 +556,6 @@ def setup_vector_field_view(source_proxy, view, channel_name, is_extracted=False
         sb.ComponentTitle = 'Magnitude'
         sb.Visibility = 1
         rep.SetScalarBarVisibility(view, True)
-    view.AxesGrid.Visibility = 1
-    simple.ResetCamera()
     return rep
 
 def update_vector_field_view(source_proxy, view):
