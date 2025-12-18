@@ -32,10 +32,10 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Finalization](#finalization)
   - [Building and Compiling](#building-and-compiling)
     - [Prerequisites](#prerequisites)
-    - [libcatalyst \& ParaView installation](#libcatalyst--paraview-installation)
+    - [libcatalyst \& ParaView Installation](#libcatalyst--paraview-installation)
     - [CMake Configuration](#cmake-configuration)
-  - [Environment Variables for execution](#environment-variables-for-execution)
-    - [Core Catalyst Configuration (Definitions Mandatory)](#core-catalyst-configuration-definitions-mandatory)
+  - [Environment Variables for Execution](#environment-variables-for-execution)
+    - [Core Catalyst Configuration (Mandatory Definitions)](#core-catalyst-configuration-mandatory-definitions)
     - [Main Switches](#main-switches)
     - [Advanced IPPL Catalyst Configuration Options](#advanced-ippl-catalyst-configuration-options)
     - [Steering Interface Manipulation](#steering-interface-manipulation)
@@ -49,10 +49,10 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Starting the Trame Server](#starting-the-trame-server)
     - [Debug Levels](#debug-levels)
     - [Using Web UI](#using-web-ui)
-  - [Remote Visualisation](#remote-visualisation)
-    - [Remote Prep (for merlin6 and gwendolen)](#remote-prep-for-merlin6-and-gwendolen)
+  - [Remote Visualization](#remote-visualization)
+    - [Remote Prep (for Merlin6 and Gwendolen)](#remote-prep-for-merlin6-and-gwendolen)
     - [Remote with ParaView (not supported for mac currently)](#remote-with-paraview-not-supported-for-mac-currently)
-    - [Remote with trame](#remote-with-trame)
+    - [Remote with Trame](#remote-with-trame)
   - [Profiling](#profiling)
   - [Example](#example)
     - [Running AlpineSight](#running-alpinesight)
@@ -60,7 +60,7 @@ This framework enables real-time visualization and parameter steering for IPPL s
     - [Common Issues](#common-issues)
     - [Debug Tips](#debug-tips)
     - [Known Bugs](#known-bugs)
-- [Concerning devs:](#concerning-devs)
+- [Concerning Developers:](#concerning-developers)
   - [TODOs](#todos)
     - [BaseAdaptor for future ...](#baseadaptor-for-future-)
     - [TODO's taken from files...](#todos-taken-from-files)
@@ -318,9 +318,9 @@ cat_vis.Finalize();
 
 https://docs.paraview.org/en/latest/Catalyst/getting_started.html
 
-### libcatalyst & ParaView installation
+### libcatalyst & ParaView Installation
 
-Paraview Binaries can be directly be downloaded, no "installation" needed.
+ParaView binaries can be directly downloaded, no "installation" needed.
 
 For the additional Catalyst 2.0 install (link also provided above) follow these steps:
 
@@ -329,11 +329,11 @@ git clone https://gitlab.kitware.com/paraview/catalyst.git
 mkdir catalyst-build
 cd catalyst-build
 ccmake ../catalyst
-# here you open intial cmake configuration window, press c [cofigure] once, press e[exit] once after initial configuration has been done, now change the settings:
+# here you open initial CMake configuration window, press c [configure] once, press e [exit] once after initial configuration has been done, now change the settings:
 # 1. CATALYST_USE_MPI turn ON
 # 2. CMAKE_INSTALL_PREFIX, sets a path to install folder   /usr/local  
 #                          you might have to/can overwrite these: /.../catalyst-install
-# then press 1. c [configure] 2. e[exit] 3. g[generate], and then you should have exited the ccmake menu back to console
+# then press 1. c [configure] 2. e [exit] 3. g [generate], and then you should have exited the ccmake menu back to console
 
 cmake --build .
 cmake --install .
@@ -372,12 +372,12 @@ cmake "${CMAKE_ARGS[@]}" /path/to/ippl
 
 
 
-## Environment Variables for execution
+## Environment Variables for Execution
 
 Control framework behavior via environment variables in your run script:
 
 
-### Core Catalyst Configuration (Definitions Mandatory)
+### Core Catalyst Configuration (Mandatory Definitions)
 
 | Variable | Description |
 |----------|-------------|
@@ -390,7 +390,7 @@ Control framework behavior via environment variables in your run script:
 | Variable | Values | Default | Description |
 |----------|--------|---------|-------------|
 | `IPPL_CATALYST_VIS`         | `ON`/`OFF` | `ON` | Enable/disable visualization |
-| `IPPL_CATALYST_STEER`       | `ON`/`OFF` | `OFF` | Enable/disable live viz |
+| `IPPL_CATALYST_LIVE`        | `ON`/`OFF` | `OFF` | Enable/disable live viz |
 | `IPPL_CATALYST_STEER`       | `ON`/`OFF` | `OFF`| Enable/disable steering |
 | `IPPL_CATALYST_PNG`         | `ON`/`OFF` | `OFF`| Enable PNG image extraction |
 | `IPPL_CATALYST_VTK`         | `ON`/`OFF` | `OFF`| Enable VTK file extraction |
@@ -409,7 +409,7 @@ For most use cases there will be no need to change these. The user should only u
 | Variable | Values | Default | Description |
 |----------|--------|---------|-------------|
 | `IPPL_CATALYST_PROXY_OPTION` | `ON`/`OFF`/ `PRODUCE_ONLY` | `ON` | Configures Proxy Writer Class <sup>1</sup> |
-| `IPPL_PROXY_CONFIG_YAML`           | `<path>` | <sup>2</sup> | Path to custom Poxy config YAML file   |
+| `IPPL_PROXY_CONFIG_YAML`           | `<path>` | <sup>2</sup> | Path to custom Proxy config YAML file   |
 | `CATALYST_PROXYS_PATH`             | `<path>` | <sup>2</sup> | Proxy XML for magnetic field steering  |
 | `CATALYST_PIPELINE_PATH`           | `<path>` | <sup>2</sup> | Path to custom Catalyst Python script  |
 | `CATALYST_EXTRACTOR_SCRIPT_<label>`| `<path>` | <sup>2</sup> | Path to custom PNG extractor script for specific registry entry |
@@ -517,7 +517,7 @@ If you want to avoid PNG extraction for certain elements without having to recom
 
 ## Trame Web UI
 
-We provide a basic Trame based (https://kitware.github.io/trame/) **web-based interactive UI**. Its current implementation should provide the most important features to imitate the ParaView client, needed for live visualization. We mainly provide this, since the official ParaView binaries for macOS based systems don't provide Catalyst live support. Meaning even for remote run simulation, one can't live connect to this simulation with the local ParaView client.
+We provide a basic Trame-based (https://kitware.github.io/trame/) **web-based interactive UI**. Its current implementation should provide the most important features to imitate the ParaView client, needed for live visualization. We mainly provide this because the official ParaView binaries for macOS-based systems do not provide Catalyst live support. This means that even for remotely run simulations, one cannot live-connect to the simulation with a local ParaView client.
 
 ### Preparing Trame
 To ensure compatibility one can use the `pvpython` executable to run the Trame script.
@@ -540,8 +540,7 @@ python3.10 -m venv trame_env
 source ./trame_env/bin/activate
 python -m pip install --upgrade pip
 pip install trame
-pip install trame-vuetify trame-vtk 
-pip install vtk                     
+pip install trame-vuetify trame-vtk
 ```
 
 ### Starting the Trame Server
@@ -578,10 +577,10 @@ The interface is designed to be self-explanatory and intuitive.
 | **Versatility** | Access to all filters and PV settings | Only Basic |
 | **Remote Access** | VNC/X11 forwarding | Direct HTTP access | -->
 
-## Remote Visualisation 
-A main interest is running simulation on a cluster, rendering the visualisation on cluster, but acceessing a the visualisation and steering inrerface locall. We shortly described here how you cann live visualize remote run Simulation locally with the paraview client and the trame app.
+## Remote Visualization 
+A main interest is running simulations on a cluster, rendering the visualization on the cluster, but accessing the visualization and steering interface locally. We shortly describe here how you can live-visualize a remotely run simulation locally with the ParaView client and the Trame app.
 
-### Remote Prep (for merlin6 and gwendolen)
+### Remote Prep (for Merlin6 and Gwendolen)
 
 1. Allocate resources
     login into merlin 6 (or merlin 7)
@@ -653,8 +652,8 @@ A main interest is running simulation on a cluster, rendering the visualisation 
 
 
 
-### Remote with trame
-4. (trame:) launch your trame application . Mke it availlabe to your local machine by directly sending it through the port of your ssh tunnel.
+### Remote with Trame
+4. (trame:) Launch your Trame application. Make it available to your local machine by directly sending it through the port of your ssh tunnel.
 
     ```bash
     export TRAME_ENV=/path/to/trame_env
@@ -662,7 +661,7 @@ A main interest is running simulation on a cluster, rendering the visualisation 
     
     mpiexec.hydra -np 1 pvpython --venv ${TRAME_ENV} ${CATALYST_FOLDER}/trame_vis_app.py --debug 1  --server --port 11111 --host 0.0.0.0
     ```
-5.    Connect your web browser to http://localhost:11111 which then should opene the web ui, whose server is hosted by the cluster.
+5.    Connect your web browser to http://localhost:11111 which then should open the Web UI, whose server is hosted by the cluster.
 
 
 
@@ -802,7 +801,6 @@ export CATALYST_IMPLEMENTATION_NAME="paraview"
 #  any/"OFF": (default)
 export IPPL_CATALYST_VIS=ON
 
-
 # "ON":
 #  any/"OFF": (default)
 export IPPL_CATALYST_LIVE=ON
@@ -842,10 +840,10 @@ export IPPL_CATALYST_GHOST_MASKS=OFF
 # overwrites catalyst script (png extraction) for arbitrary vis channels
 # export CATALYST_EXTRACTOR_SCRIPT_<registry_label>
 
-# overwrite steering proxies completeley by referencing different file:
+# overwrite steering proxies completely by referencing different file:
 # export CATALYST_PROXYS_PATH = 
 
-# change default ranges for stering channels:
+# change default ranges for steering channels:
 # export IPPL_PROXY_CONFIG_YAML=
 
 
@@ -909,7 +907,7 @@ Connection failed during handshake.  Unknown error parsing the handshake string
 
 4. **Bad Performance**
 
-If you don't need the *live* or *steering*  feature don't activate it. Even if not used in the client GUI or the web UI actiavtig the features with the environment variables will impact performance (significantly). 
+If you don't need the *live* or *steering* feature, don't activate it. Even if not used in the client GUI or the Web UI, activating the features with the environment variables will impact performance (significantly). 
 
 
 ---
@@ -923,10 +921,10 @@ If you don't need the *live* or *steering*  feature don't activate it. Even if n
 
 ### Known Bugs
 
-- In tram app if live is not toggled changes in data and changes in the settings of visualisation are not guaranteed to be updated immediately in the view, but usually only upon the next interaction with the view.
+- In the Trame app, if live is not toggled, changes in data and changes in the settings of visualization are not guaranteed to be updated immediately in the view, but usually only upon the next interaction with the view.
 <!-- - The steering sliders and text fields for the Opacity function don't "appear" to change/react to interactions, but as soon as you click apply, the changes will take effect!
    Taking multiple slices from the same source, can cause some of the colouring options to be buggy. -->
-- In trame when visualizing multiple sclar field when used on gwnedolen can cause one source to be "corrupted", making it so it can no longer be properly visualized. So one susually needs to delete an reextract the source again.
+- In Trame, when visualizing multiple scalar fields when used on Gwendolen, one source can become "corrupted", making it so it can no longer be properly visualized. So one usually needs to delete and re-extract the source again.
 - With PNG extraction enabled, if the ParaView client is opened and connected after the Catalyst script has created the PNG extractor, the PNG extraction will "break" after a couple of timesteps. This is a "ParaView problem" and should be amended in future ParaView versions.
 - Currently when closing the Trame app and opening again, the Trame steering parameters will be reset to initial values and not the current values, which might lead to some bugs.
 ---
@@ -942,21 +940,16 @@ If you don't need the *live* or *steering*  feature don't activate it. Even if n
 
 
 
-# Concerning devs:
+# Concerning Developers:
 
 ## TODOs
-when apply is pressed... unpush buttons for trame
-
-particle visibility toggle doesn't work ...
-
-
-
-
-add methods to avoid data of certain data attributes ..
-
-currently we rely on the tostring function and the enum registration function... only one is actually needed ... figure 
-to strin g only for logging atm tough....
-```
+- When apply is pressed... unpush buttons for Trame.
+- Particle visibility toggle doesn't work...
+- Add methods to avoid data of certain data attributes...
+- Currently we rely on the to_string function and the enum registration function... only one is actually needed... figure out.
+- to_string only for logging atm though...
+-  we rely on velocity attribute i think still, at different locations....
+```cpp
 // Helper currently not needed for steering
 // string's are directly registered via register enum function
 std::string to_string(experiment_enum c) {
@@ -1013,24 +1006,24 @@ CatalystAdaptor.h
 // Possible TODO:
 // 
 // DONE:
-// - figure out why the field and particles work differetnly adapt vis frame for particles
-// - iterate over all attributes for visualisation
-// - reduce virtual function calls get rid of execute_FIeld set_data and execute particle this
+// - figure out why the field and particles work differently adapt vis frame for particles
+// - iterate over all attributes for visualization
+// - reduce virtual function calls get rid of execute_Field set_data and execute particle this
 // - added attribute names to ParticleAttribBase
 // - improve avoidance of ghost duplicates 
-// - remember functionality to allow visualisation for potetnial and density at the same time ..
+// - remember functionality to allow visualization for potential and density at the same time ..
 // - full versatile steering ...
-// - extend and test for multirank (MPI 2 rank local works)
+// - extend and test for multi-rank (MPI 2 rank local works)
 // - at least avoid regenerating the same ghost data by caching logic
 // - use same channel for all steerable channels backwards and forwards
-// - improved versatile sttering
+// - improved versatile steering
 // 
 // NEXT: 
 // - test 2D
 // - test GPU
 // - use same channel (topology and mesh) for all vis fields?
-// SoA supprt (currently only Array of Structs ...)
-// - figure outs: multi-mesh multirank bugs...(not as easy to use a simple mesh...)
+// SoA support (currently only Array of Structs ...)
+// - figure out: multi-mesh multi-rank bugs...(not as easy to use a simple mesh...)
 // 
 // MAYBE:
 // - move exec_entry purely to the visitor structure???
@@ -1046,7 +1039,7 @@ CatalystAdaptor.h
 
 ## Comments / Notes
 
-Kokkos mirros
+Kokkos mirrors
 ```cpp
 // ==============================================================================================
 // CHANNEL EXECUTIONERS =========================================================================
@@ -1060,7 +1053,7 @@ Kokkos mirros
 
 // If needed, deep copy the view’s updated array back to the
 // hostView’s array to write file, etc.
-// Kokkos :: d e ep c op y ( hostView , view );
+// Kokkos :: deep_copy ( hostView , view );
                
 
             /* options can diverge in the following levels:
@@ -1090,11 +1083,11 @@ ippl inform
 
 
             so if the output level is fixed e.g via global output level and not changed,
-            I can give my message a low level eg 2 so my message will be printed for most verboity levels
+            I can give my message a low level eg 2 so my message will be printed for most verbosity levels
             globalOutputLevel >=  informMessageLevel 2-5 and only not printed for very low verbosity levels 
-            0,1 = globalOutputLevel < informMessageLevel = 2 wont likely be pri
+            0,1 = globalOutputLevel < informMessageLevel = 2 wont likely be printed
             But Message Level is reset to minimum after message has been sent, so this is useless for me atm
-            why ?? why no alternatve
+            why ?? why no alternative
             and why is [2] in print statment -_-
 
             so i need to manually level every message which, then let the user overwrite with setOutpt
@@ -1116,9 +1109,9 @@ catalyst
 view registry
 ```cpp
 
-/* instead of maps storing kokkos view in scope we use the ViewRegistry to keep everything in frame .... and be totally type indepedent
-we can set with name (but since we likely will not have the need to ever retrieve we can just stire nameless
-to redzcede unncessary computin type ...) */
+/* instead of maps storing kokkos view in scope we use the ViewRegistry to keep everything in frame .... and be totally type independent
+we can set with name (but since we likely will not have the need to ever retrieve we can just store nameless
+to reduce unnecessary computing type ...) */
 
 ```
 
@@ -1251,7 +1244,7 @@ For advanced customization, refer to:
 ## Ascent leftovers
 ```bash
 # ==========================================================
-# opneMP
+# OpenMP
 # MPICC=mpicc \
 # MPICXX=mpicxx \
 # -DCATALYST_HINT_PATH="/home/klappi/AddApp/catalyst/install/lib/cmake/catalyst-2.0"
