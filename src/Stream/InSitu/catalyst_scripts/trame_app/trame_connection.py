@@ -298,36 +298,64 @@ def reset_visualization(ctx: Any):
                 rep.SetScalarBarVisibility(view, False)
             except:
                 pass
+    
+    proxies_to_delete = set()
+
+    # 1. Add everything from active_proxies values (Direct reference)
+    # This ensures we catch proxies like Slices/Ghosts that might have default names
+    for p in ctx.active_proxies.values():
+        if p:
+            proxies_to_delete.add(p)
+
+    # 2. Look for related proxies based on naming conventions of active keys
+    # This catches implicit proxies (MergedBlocks, Resample) that might not be in active_proxies
     for name in list(ctx.active_proxies.keys()):
-        # inline remove_proxy behavior: ensure deletion of various child proxies
         sel = name
         if sel.startswith("ippl_sField"):
             p1 = find_source_by_name(f"{sel}_Resample")
-            p2 = find_source_by_name(sel)
             p3 = find_source_by_name(f"{sel}.MergedBlocks")
-            if p1: simple.Delete(p1)
-            if p2: simple.Delete(p2)
-            if p3: simple.Delete(p3)
+            if p1: proxies_to_delete.add(p1)
+            if p3: proxies_to_delete.add(p3)
         elif sel.startswith("ippl_vField"):
             p1 = find_source_by_name(f"{sel}_Glyph")
-            if p1: simple.Delete(p1)
             p2 = find_source_by_name(f"{sel}.Glyph")
-            if p2: simple.Delete(p2)
-            p = find_source_by_name(sel)
-            if p: simple.Delete(p)
+            if p1: proxies_to_delete.add(p1)
+            if p2: proxies_to_delete.add(p2)
         elif sel.startswith("ippl_particles"):
             p_box = find_source_by_name(f"{sel}.box")
-            if p_box: simple.Delete(p_box)
             p_bunch = find_source_by_name(f"{sel}.bunch")
-            if p_bunch: simple.Delete(p_bunch)
-            p_container = find_source_by_name(sel)
-            if p_container: simple.Delete(p_container)
-        else:
-            p = find_source_by_name(sel)
-            if p: simple.Delete(p)
-        del ctx.active_proxies[name]
+            if p_box: proxies_to_delete.add(p_box)
+            if p_bunch: proxies_to_delete.add(p_bunch)
+
+    # 3. Scan all registered sources for our naming patterns (Catch-all)
+    # This catches anything else that matches our patterns
+    sources = simple.GetSources()
+    for (group, name), proxy in sources.items():
+        if (name.startswith("ippl_") or 
+            ".Slice" in name or 
+            ".Ghosts" in name or 
+            ".MergedBlocks" in name or 
+            "_Resample" in name or 
+            ".Glyph" in name or 
+            ".bunch" in name or 
+            ".box" in name):
+            proxies_to_delete.add(proxy)
+            
+    # 4. Delete them
+    for p in proxies_to_delete:
+        try:
+            simple.Delete(p)
+        except Exception as e:
+            log.warn("Failed to delete proxy during reset: {}", e)
+            
     ctx.active_proxies = {}
     state.pipeline_items = []
+    
+    # Reset per-source settings
+    state.scalar_bar_per_source = {}
+    state.color_map_per_source = {}
+    state.rescale_settings_per_source = {}
+    
     simple.Render()
     if hasattr(ctx.ctrl, 'view_update') and ctx.view_update_enabled:
         try:

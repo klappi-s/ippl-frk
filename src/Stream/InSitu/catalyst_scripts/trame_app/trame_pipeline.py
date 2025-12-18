@@ -291,8 +291,30 @@ def extract_slice(ctx: Any, name: str):
         except Exception as e:
             log.warn("Failed to copy LUT settings to slice: {}", e)
         
+        # Check if the array exists in the expected association
+        # This handles cases where ResampleToImage (parent) has Points but MergedBlocks (slice input) has Cells
+        slice_info = slice_filter.GetDataInformation()
+        target_association = parent_association
+        
+        # Helper to check existence
+        def has_array(info, assoc, name):
+            if assoc == 'POINTS':
+                return info.GetPointDataInformation().GetArrayInformation(name) is not None
+            elif assoc == 'CELLS':
+                return info.GetCellDataInformation().GetArrayInformation(name) is not None
+            return False
+
+        if not has_array(slice_info, target_association, parent_array_name):
+            # Try swapping association
+            alt_association = 'CELLS' if target_association == 'POINTS' else 'POINTS'
+            if has_array(slice_info, alt_association, parent_array_name):
+                log.info("Swapping association for slice color from {} to {}", target_association, alt_association)
+                target_association = alt_association
+            else:
+                log.warn("Array {} not found in slice output", parent_array_name)
+        
         # Set the color array and assign the slice's own LUT
-        rep.ColorArrayName = [parent_association, parent_array_name]
+        rep.ColorArrayName = [target_association, parent_array_name]
         rep.LookupTable = slice_lut
         
         # Copy the opacity transfer function normalized points

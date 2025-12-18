@@ -923,7 +923,10 @@ If you don't need the *live* or *steering*  feature don't activate it. Even if n
 
 ### Known Bugs
 
-- The steering sliders and text fields for the Opacity function don't "appear" to change/react to interactions, but as soon as you click apply, the changes will take effect!
+- In tram app if live is not toggled changes in data and changes in the settings of visualisation are not guaranteed to be updated immediately in the view, but usually only upon the next interaction with the view.
+<!-- - The steering sliders and text fields for the Opacity function don't "appear" to change/react to interactions, but as soon as you click apply, the changes will take effect!
+   Taking multiple slices from the same source, can cause some of the colouring options to be buggy. -->
+- In trame when visualizing multiple sclar field when used on gwnedolen can cause one source to be "corrupted", making it so it can no longer be properly visualized. So one susually needs to delete an reextract the source again.
 - With PNG extraction enabled, if the ParaView client is opened and connected after the Catalyst script has created the PNG extractor, the PNG extraction will "break" after a couple of timesteps. This is a "ParaView problem" and should be amended in future ParaView versions.
 - Currently when closing the Trame app and opening again, the Trame steering parameters will be reset to initial values and not the current values, which might lead to some bugs.
 ---

@@ -146,19 +146,36 @@ def extract_slice():
     log.ui("Extract Slice clicked for: {}", state.editing_source)
     from trame_app import trame_pipeline as pipe
     pipe.extract_slice(_ctx, state.editing_source)
-    state.show_edit_dialog = False
+    # state.show_edit_dialog = False
 
 def extract_ghosts():
     log.ui("Extract Ghosts clicked for: {}", state.editing_source)
     from trame_app import trame_pipeline as pipe
     pipe.extract_ghosts(_ctx, state.editing_source)
-    state.show_edit_dialog = False
+    # state.show_edit_dialog = False
 
 def extract_scalar_field():
     log.ui("Extract Scalar Field clicked for: {}", state.editing_source)
     from trame_app import trame_pipeline as pipe
     pipe.extract_scalar_field(_ctx, state.editing_source)
-    state.show_edit_dialog = False
+    # state.show_edit_dialog = False
+
+def update_resample_dims():
+    try:
+        # Clamp dimensions to [1, 1024]
+        dx = max(1, min(int(state.resample_dim_x), 1024))
+        dy = max(1, min(int(state.resample_dim_y), 1024))
+        dz = max(1, min(int(state.resample_dim_z), 1024))
+        
+        # Update state to reflect clamped values
+        state.resample_dim_x = dx
+        state.resample_dim_y = dy
+        state.resample_dim_z = dz
+        
+        dims = [dx, dy, dz]
+        ColorAPI(_ctx).update_resample_dimensions(dims)
+    except Exception as e:
+        log.warn("Failed to update resample dims: {}", e)
 
 def update_slice_normal(normal):
     log.ui("Update Slice Normal: {}", normal)
@@ -181,8 +198,13 @@ def reset_opacity():
     state.opacity_next_id = 2
     update_opacity()
 
-def apply_and_close():
-    log.ui("Apply and Close clicked for: {}", state.editing_source)
+def reorder_opacity_points():
+    # Sort points by x position
+    sorted_points = sorted(state.opacity_points, key=lambda p: float(p['x']))
+    state.opacity_points = sorted_points
+
+def close():
+    log.ui("Close clicked for: {}", state.editing_source)
     # Only close the dialog; color changes are applied immediately via state triggers
     state.show_edit_dialog = False
 
@@ -1238,15 +1260,38 @@ with SinglePageLayout(server) as layout:
         vuetify3.VChip("{{ status_text }}", color=("status_color", "grey"), text_color="white", classes="mr-4")
 
     with layout.content:
-        with vuetify3.VContainer(fluid=True, classes="fill-height pa-0"):
+        with vuetify3.VContainer(fluid=True, classes="fill-height pa-0", style="position: relative;"):
             view = vtk.VtkRemoteView(simple.GetRenderView())
             ctrl.view_update = view.update
             
-        # Edit Dialog
-        with vuetify3.VDialog(v_model=("show_edit_dialog", False), max_width=500):
-            with vuetify3.VCard():
-                vuetify3.VCardTitle("Edit Visualization: {{ editing_source }}")
-                with vuetify3.VCardText():
+            # Edit Dialog (Floating Card)
+            with vuetify3.VCard(
+                v_if=("show_edit_dialog", False),
+                width=450,
+                elevation=10,
+                style="position: absolute; top: 20px; left: 20px; z-index: 1000; max-height: calc(100% - 40px); display: flex; flex-direction: column;",
+            ):
+                with vuetify3.VCardTitle(classes="py-2 d-flex align-center"):
+                    vuetify3.VLabel(text=("editing_source",), classes="text-h6")
+                    vuetify3.VSpacer()
+                    vuetify3.VBtn(icon="mdi-close", variant="text", density="compact", click=close)
+                
+                # Pipeline History / Breadcrumbs
+                with vuetify3.VSheet(classes="px-4 py-2 bg-grey-lighten-4 d-flex flex-column align-start", style="border-bottom: 1px solid #e0e0e0; min-height: 40px;"):
+                    vuetify3.VLabel(text="Pipeline:", classes="text-caption font-weight-bold mb-1 text-grey-darken-1")
+                    with vuetify3.Template(v_for="(step, i) in pipeline_history", key="i"):
+                        # Step Chip
+                        with vuetify3.VChip(
+                            size="small", 
+                            color=("step.color", "grey"), 
+                            variant="flat", 
+                            classes="font-weight-medium mb-1"
+                        ):
+                            vuetify3.VIcon("{{ step.icon }}", start=True, size="small")
+                            vuetify3.VLabel(text=("step.name",))
+
+                vuetify3.VDivider()
+                with vuetify3.VCardText(style="overflow-y: auto;"):
                     # Extract Slice Button for sField or Resampled vField
                     with vuetify3.VContainer(v_if="(editing_source.startsWith('ippl_sField') || editing_source.includes('.Resample')) && !editing_source.includes('.Slice')", classes="pa-0 mb-2"):
                         with vuetify3.VRow(dense=True):
@@ -1289,6 +1334,19 @@ with SinglePageLayout(server) as layout:
                                     vuetify3.VBtn("Y", click="slice_normal_x=0; slice_normal_y=1; slice_normal_z=0")
                                     vuetify3.VBtn("Z", click="slice_normal_x=0; slice_normal_y=0; slice_normal_z=1")
 
+                        vuetify3.VDivider(classes="my-2")
+
+                    # Resample Dimensions (for sField or Resample filters)
+                    with vuetify3.VContainer(v_if="has_resample_dims", classes="pa-0 mb-2"):
+                        vuetify3.VLabel(text="Resample Dimensions (Max 1024)", classes="text-caption font-weight-bold")
+                        with vuetify3.VRow(dense=True):
+                            with vuetify3.VCol(cols=4):
+                                vuetify3.VTextField(v_model=("resample_dim_x",), label="X", type="number", min="1", max="1024", density="compact", variant="outlined", hide_details=True)
+                            with vuetify3.VCol(cols=4):
+                                vuetify3.VTextField(v_model=("resample_dim_y",), label="Y", type="number", min="1", max="1024", density="compact", variant="outlined", hide_details=True)
+                            with vuetify3.VCol(cols=4):
+                                vuetify3.VTextField(v_model=("resample_dim_z",), label="Z", type="number", min="1", max="1024", density="compact", variant="outlined", hide_details=True)
+                        vuetify3.VBtn("Update Grid", click=update_resample_dims, block=True, size="small", variant="tonal", classes="mt-2", color="primary")
                         vuetify3.VDivider(classes="my-2")
 
                     vuetify3.VSelect(
@@ -1400,34 +1458,28 @@ with SinglePageLayout(server) as layout:
                                 with vuetify3.VCol(cols=5):
                                     vuetify3.VTextField(
                                         v_model=("opacity_points[i].x",),
-                                        type="number", min=0, max=100, step="any", density="compact", hide_details=True, variant="outlined"
+                                        type="number", min=0, max=100, step="any", density="compact", hide_details=True, variant="outlined",
+                                        change="opacity_points = [...opacity_points]; flushState('opacity_points')"
                                     )
                                 with vuetify3.VCol(cols=5):
                                     vuetify3.VSlider(
                                         v_model=("opacity_points[i].y",),
                                         min=0, max=1, step=0.01, density="compact", hide_details=True,
-                                        thumb_label="always"
+                                        thumb_label="always",
+                                        end="opacity_points = [...opacity_points]; flushState('opacity_points')"
                                     )
                                 with vuetify3.VCol(cols=2):
                                     vuetify3.VBtn(icon="mdi-delete", size="x-small", variant="text", color="error", click=(ctrl.remove_opacity_point, "[item.id]"))
 
-                        vuetify3.VBtn("Add Point", click=ctrl.add_opacity_point, block=True, size="small", variant="tonal", classes="mt-2 mb-2")
+                        with vuetify3.VRow(dense=True, classes="mt-2 mb-2"):
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VBtn("Add Point", click=ctrl.add_opacity_point, block=True, size="small", variant="tonal")
+                            with vuetify3.VCol(cols=6):
+                                vuetify3.VBtn("Reorder", click=reorder_opacity_points, block=True, size="small", variant="tonal", color="secondary")
 
                         with vuetify3.VRow(dense=True):
-                            with vuetify3.VCol(cols=6):
-                                # Force state sync by reassigning the array, then call update
-                                vuetify3.VBtn(
-                                    "Apply Opacity",
-                                    click="opacity_points = [...opacity_points]; flushState('opacity_points')",
-                                    block=True, size="small", variant="tonal", color="primary"
-                                )
-                            with vuetify3.VCol(cols=6):
+                            with vuetify3.VCol(cols=12):
                                 vuetify3.VBtn("Reset", click=reset_opacity, block=True, size="small", variant="text")
-
-                with vuetify3.VCardActions():
-                    vuetify3.VSpacer()
-                    vuetify3.VBtn("Cancel", click="show_edit_dialog = False")
-                    vuetify3.VBtn("OK", click=apply_and_close, color="primary", variant="elevated")
 
 state.connected = False
 state.has_data = False
@@ -1441,6 +1493,7 @@ state.axes_grid_visible = True
 state.split_pos = 50
 state.show_edit_dialog = False
 state.editing_source = ""
+state.pipeline_history = []
 state.color_arrays = []
 state.current_color_array = None
 state.color_array_is_vector = False

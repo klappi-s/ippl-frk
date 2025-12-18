@@ -103,11 +103,100 @@ class ColorAPI:
         
         self.state.color_arrays = arrays
 
+    def _compute_pipeline_history(self, name):
+        history = []
+        proxy = self.get_display_proxy(name)
+        if not proxy:
+            return history
+            
+        # Traverse pipeline backwards
+        chain = []
+        current = proxy
+        while current:
+            chain.append(current)
+            if hasattr(current, 'Input'):
+                inp = current.Input
+                # Handle case where Input is a list (e.g. AppendAttributes)
+                if isinstance(inp, list) and len(inp) > 0:
+                    current = inp[0] # Just take the first one for linear history
+                else:
+                    current = inp
+            else:
+                current = None
+        
+        # Now chain is [LastFilter, ..., Source]
+        # We want to display [Source, ..., LastFilter]
+        
+        for p in reversed(chain):
+            try:
+                xml_name = p.GetXMLName()
+            except AttributeError:
+                xml_name = "Unknown"
+            
+            item = {'name': xml_name, 'icon': 'mdi-filter', 'color': 'grey'}
+            
+            # Check if it's a source (MergedBlocks, TrivialProducer, etc.)
+            # Or check if it has no input (which we know because it's at the end of reversed chain)
+            # But we are iterating reversed chain, so the first element is the source.
+            
+            is_source = (p == chain[-1])
+            
+            if is_source:
+                # Try to find the registration name
+                found_name = None
+                try:
+                    sources = simple.GetSources()
+                    for key, s in sources.items():
+                        if s == p:
+                            found_name = key[0]
+                            break
+                except Exception:
+                    pass
+                
+                if found_name:
+                    item['name'] = f"CatalystExtract: {found_name}"
+                else:
+                    item['name'] = f"CatalystExtract: {xml_name}"
+                item['icon'] = 'mdi-database-arrow-down'
+                item['color'] = 'blue-grey'
+                
+            elif xml_name == "ResampleToImage":
+                item['name'] = "Resample To Image"
+                item['icon'] = 'mdi-grid'
+                item['color'] = 'teal'
+                
+            elif xml_name == "Glyph":
+                item['name'] = "Glyph"
+                item['icon'] = 'mdi-arrow-all'
+                item['color'] = 'purple'
+                
+            elif xml_name == "Slice":
+                item['name'] = "Slice"
+                item['icon'] = 'mdi-knife'
+                item['color'] = 'indigo'
+                
+            elif xml_name == "GhostCellsGenerator" or xml_name == "PIGhostCellsGenerator":
+                item['name'] = "Extract Ghost Cells"
+                item['icon'] = 'mdi-ghost'
+                item['color'] = 'deep-orange'
+                
+            elif xml_name == "ImageResampling": 
+                item['name'] = "Resample To Image"
+                item['icon'] = 'mdi-grid'
+                item['color'] = 'teal'
+
+            history.append(item)
+            
+        return history
+
     def open_edit_dialog(self, name):
         log.ui("Open Edit Dialog clicked: {}", name)
         s = self.state
         s.editing_source = name
         s.show_edit_dialog = True
+        
+        # Compute and set pipeline history
+        s.pipeline_history = self._compute_pipeline_history(name)
 
         proxy = self.get_display_proxy(name)
         if not proxy:
@@ -194,8 +283,24 @@ class ColorAPI:
             s.rescale_settings_per_source = {}
 
         s.auto_rescale_color = settings.get('auto', True)
-        s.custom_rescale_min = settings.get('min', 0.0)
-        s.custom_rescale_max = settings.get('max', 1.0)
+        
+        # If auto-rescale is on, or if we have a valid LUT, prefer the actual LUT range
+        # This ensures the UI (and opacity normalization) is in sync with the actual visualization
+        lut_range_found = False
+        if ca and len(ca) > 1 and ca[1]:
+            try:
+                lut = getattr(rep, 'LookupTable', None) or simple.GetColorTransferFunction(ca[1])
+                rgb_points = lut.RGBPoints
+                if rgb_points and len(rgb_points) >= 4:
+                    s.custom_rescale_min = rgb_points[0]
+                    s.custom_rescale_max = rgb_points[-4]
+                    lut_range_found = True
+            except Exception:
+                pass
+        
+        if not lut_range_found:
+            s.custom_rescale_min = settings.get('min', 0.0)
+            s.custom_rescale_max = settings.get('max', 1.0)
 
         if name.startswith("ippl_sField") or ".Resample" in name:
             s.symmetric_rescale  = settings.get('symmetric', True)
@@ -237,6 +342,35 @@ class ColorAPI:
 
             except Exception as e:
                 log.warn("Failed to init slice state: {}", e)
+
+        # Initialize Resample Dimensions State
+        # Check if this source is or uses a ResampleToImage filter
+        resample_proxy = None
+        if name.startswith("ippl_sField"):
+            # For sField, the resample filter is usually named with _Resample suffix
+            resample_proxy = find_source_by_name(f"{name}_Resample")
+        elif ".Resample" in name:
+            # Direct check for Resample in name
+            resample_proxy = proxy
+        
+        # If we found a resample proxy, get its dimensions
+        if resample_proxy and hasattr(resample_proxy, 'SamplingDimensions'):
+            try:
+                dims = list(resample_proxy.SamplingDimensions)
+                s.resample_dim_x = dims[0]
+                s.resample_dim_y = dims[1]
+                s.resample_dim_z = dims[2]
+                s.has_resample_dims = True
+            except Exception:
+                s.resample_dim_x = 10
+                s.resample_dim_y = 10
+                s.resample_dim_z = 10
+                s.has_resample_dims = False
+        else:
+            s.resample_dim_x = 10
+            s.resample_dim_y = 10
+            s.resample_dim_z = 10
+            s.has_resample_dims = False
 
         # Initialize solid color state
         try:
@@ -589,6 +723,26 @@ class ColorAPI:
         s.supports_opacity_tf = (mode == 'Volume')
         
         self._safe_view_update()
+
+    def update_resample_dimensions(self, dims):
+        log.ui("Update Resample Dimensions: {}", dims)
+        name = self.state.editing_source
+        
+        resample_proxy = None
+        if name.startswith("ippl_sField"):
+            resample_proxy = find_source_by_name(f"{name}_Resample")
+        elif ".Resample" in name:
+            resample_proxy = self.get_display_proxy(name)
+            
+        if resample_proxy and hasattr(resample_proxy, 'SamplingDimensions'):
+            try:
+                new_dims = [int(d) for d in dims]
+                resample_proxy.SamplingDimensions = new_dims
+                resample_proxy.UpdatePipeline()
+                simple.Render()
+                self._safe_view_update()
+            except Exception as e:
+                log.warn("Failed to update resample dimensions: {}", e)
 
     def update_color_by(self, value):
         log.ui("Color By changed: {}", value)
@@ -1138,23 +1292,20 @@ class ColorAPI:
         log.debug("Final LUT: {}, SOF: {}", lut, sof)
         
         # Get current range
-        # Prefer state values if available as they are the source of truth for the UI
-        # and avoid issues with stale proxy properties
+        # Prefer LUT range to ensure consistency with open_edit_dialog and actual visualization state
+        # This fixes issues where stale state.custom_rescale_min/max caused incorrect denormalization
         try:
-            min_val = float(self.state.custom_rescale_min)
-            max_val = float(self.state.custom_rescale_max)
-            # Validate range
-            if min_val >= max_val:
-                raise ValueError("Invalid state range")
-        except Exception:
-            # Fallback to inferring from LUT
             rgb_points = lut.RGBPoints
             if rgb_points and len(rgb_points) >= 4:
                 min_val = rgb_points[0]
                 max_val = rgb_points[-4]
             else:
-                min_val = 0.0
-                max_val = 1.0
+                # Fallback to state if LUT is invalid (unlikely)
+                min_val = float(self.state.custom_rescale_min)
+                max_val = float(self.state.custom_rescale_max)
+        except Exception:
+            min_val = 0.0
+            max_val = 1.0
             
         width = max_val - min_val
         
