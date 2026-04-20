@@ -26,11 +26,11 @@ private:
     /**
      * @brief Internal storage mapping names to objects (type-erased).
      */
-    std::unordered_map<std::string, std::any> m_storage;
+    std::unordered_map<std::string, std::any> storage_m;
     /**
      * @brief Counter for generating unique names for unnamed objects.
      */
-    size_t m_unnamed_counter = 0;
+    size_t unnamedCounter_m = 0;
 
 public:
     /**
@@ -76,7 +76,7 @@ public:
     void clear();
 
     size_t size() const {
-        return m_storage.size();
+        return storage_m.size();
     }
 
     /**
@@ -85,7 +85,7 @@ public:
      * @return true if present, false otherwise.
      */
     bool contains(const std::string& key) const {
-        return m_storage.contains( key );
+        return storage_m.contains( key );
     }
 };
 

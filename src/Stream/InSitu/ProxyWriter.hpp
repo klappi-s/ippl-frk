@@ -30,8 +30,8 @@ inline void ProxyWriter::include(const T& defaultValue, const std::string& label
   }
   // Heuristic: treat button-like labels as buttons (Int checkbox) even if numeric
   {
-    auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
-    if (ends_with(ch.propertyName, ".reset_btn") || ends_with(ch.propertyName, "_btn") || ch.propertyName.find("btn") != std::string::npos) {
+    auto endsWith = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+    if (endsWith(ch.propertyName, ".reset_btn") || endsWith(ch.propertyName, "_btn") || ch.propertyName.find("btn") != std::string::npos) {
       ch.isButton = true;
       ch.isVector = false;
     }
@@ -40,21 +40,21 @@ inline void ProxyWriter::include(const T& defaultValue, const std::string& label
     if (!ch.isButton) {
       bool looksBool = false;
       if (ch.propertyName.rfind("bool_", 0) == 0) looksBool = true; // starts with bool_
-      if (ends_with(ch.propertyName, ".switch")) looksBool = true;   // struct member switch
+      if (endsWith(ch.propertyName, ".switch")) looksBool = true;   // struct member switch
       if (looksBool) {
         ch.isBool = true;
         ch.isInteger = false; // treat as boolean domain rather than integer slider
       }
     }
   }
-  if (hasConfig_) {
+  if (hasConfig_m) {
     applyScalarConfig(ch);
   }
-  channels_.emplace_back(std::move(ch));
+  channels_m.emplace_back(std::move(ch));
 }
 
 // Vector include (up to 3 components exposed)
-template <typename T, unsigned Dim_v>
+template <typename T, unsigned Dim_V>
 inline void ProxyWriter::includeVector(const std::string& label) {
   Channel ch; 
   ch.label = label; 
@@ -68,19 +68,19 @@ inline void ProxyWriter::includeVector(const std::string& label) {
     if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
   }
   // Standard vector default changed from 1.0 to 0.0 per updated steering requirements
-  ch.defaultValue = 0.0; ch.isVector = true; ch.vecDim = (Dim_v > 3 ? 3u : Dim_v);
+  ch.defaultValue = 0.0; ch.isVector = true; ch.vecDim = (Dim_V > 3 ? 3u : Dim_V);
   // Mark integer vectors when element type is integral (exclude bool)
   if constexpr (std::is_integral_v<T> && !std::is_same_v<std::decay_t<T>, bool>) {
     ch.isInteger = true;
   }
-  if (hasConfig_) {
-    applyVectorConfig<Dim_v>(ch);
+  if (hasConfig_m) {
+    applyVectorConfig<Dim_V>(ch);
   }
-  channels_.emplace_back(std::move(ch));
+  channels_m.emplace_back(std::move(ch));
 }
 
 // Apply vector config (ranges/defaults)
-template <unsigned Dim_v>
+template <unsigned Dim_V>
 inline void ProxyWriter::applyVectorConfig(Channel& ch) const {
   // Start with current defaults per component
   double d0 = ch.vecDefaults[0];
@@ -88,8 +88,8 @@ inline void ProxyWriter::applyVectorConfig(Channel& ch) const {
   double d2 = ch.vecDefaults[2];
 
   // Only apply per-label overrides; do not emit global ranges by default
-  auto it = labelVectorCfg_.find(ch.label);
-  if (it != labelVectorCfg_.end()) {
+  auto it = labelVectorCfg_m.find(ch.label);
+  if (it != labelVectorCfg_m.end()) {
     const VectorCfg& vc = it->second;
     if (vc.uniform) {
       d0 = vc.udef; d1 = vc.udef; d2 = vc.udef;

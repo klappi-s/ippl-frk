@@ -1,29 +1,27 @@
 #pragma once
-// #include "ViewRegistry.h"
 #include <any>
 #include <string>
 #include <unordered_map>
 #include <memory>
 
-// Implementation of ViewRegistry methods
 namespace ippl{
 
 template<typename T>
 void ViewRegistry::set(const std::string& name, T object) {
-    m_storage[name] = object;
+    storage_m[name] = object;
 }
 
 template<typename T>
 std::string ViewRegistry::set(T object) {
-    std::string generated_name = "__unnamed_" + std::to_string(m_unnamed_counter++);
-    m_storage[generated_name] = object;
-    return generated_name;
+    std::string generatedName = "__unnamed_" + std::to_string(unnamedCounter_m++);
+    storage_m[generatedName] = object;
+    return generatedName;
 }
 
 template<typename T>
 std::shared_ptr<T> ViewRegistry::get(const std::string& name) const {
-    auto it = m_storage.find(name);
-    if (it == m_storage.end()) {
+    auto it = storage_m.find(name);
+    if (it == storage_m.end()) {
         return nullptr;
     }
     try {
@@ -34,10 +32,10 @@ std::shared_ptr<T> ViewRegistry::get(const std::string& name) const {
 }
 
 inline void ViewRegistry::unset(const std::string& name) {
-    m_storage.erase(name);
+    storage_m.erase(name);
 }
 
 inline void ViewRegistry::clear() {
-    m_storage.clear();
+    storage_m.clear();
 }
 }

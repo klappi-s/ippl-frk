@@ -16,9 +16,9 @@ inline std::string rtrim(std::string s) {
   size_t i = s.size(); while (i > 0 && std::isspace(static_cast<unsigned char>(s[i-1]))) --i; s.resize(i); return s;
 }
 inline std::string trim(std::string s) { return rtrim(ltrim(std::move(s))); }
-inline bool starts_with(const std::string& s, const std::string& p) { return s.rfind(p, 0) == 0; }
+inline bool startsWith(const std::string& s, const std::string& p) { return s.rfind(p, 0) == 0; }
 
-inline std::string strip_comment(const std::string& s) {
+inline std::string stripComment(const std::string& s) {
   // Very naive: drop everything after an unbraced '#'
   // We'll ignore '#' if it appears inside { } to keep inline maps intact
   int brace = 0;
@@ -29,7 +29,7 @@ inline std::string strip_comment(const std::string& s) {
   return s;
 }
 
-inline int leading_spaces(const std::string& s) {
+inline int leadingSpaces(const std::string& s) {
   int n = 0; while (n < (int)s.size() && s[n] == ' ') ++n; return n;
 }
 
@@ -40,7 +40,7 @@ inline std::string unquote(std::string s) {
   return s;
 }
 
-inline bool extract_number(const std::string& src, const std::string& key, double& out) {
+inline bool extractNumber(const std::string& src, const std::string& key, double& out) {
   // find "key:" and parse following number until a delimiter (',' or '}' or end)
   const std::string pat = key + ":";
   auto pos = src.find(pat);
@@ -74,11 +74,11 @@ namespace ippl {
 
 void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
                              std::string prototypeLabel) {
-  outPath_ = std::move(xmlOutputPath);
-  prototypeLabel_ = std::move(prototypeLabel);
+  outPath_m = std::move(xmlOutputPath);
+  prototypeLabel_m = std::move(prototypeLabel);
   resetStreams();
   // Attempt to load default config from the output folder.
-  std::filesystem::path baseDir = outPath_.parent_path();
+  std::filesystem::path baseDir = outPath_m.parent_path();
   std::filesystem::path cfg1 = baseDir / "proxys_default_config.yaml";
   std::filesystem::path cfg2 = baseDir / "proxy_default_config.yaml";
   if (std::filesystem::exists(cfg1)) {
@@ -91,8 +91,8 @@ void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
 void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
                              const std::string& configYamlPath,
                              std::string prototypeLabel) {
-  outPath_ = std::move(xmlOutputPath);
-  prototypeLabel_ = std::move(prototypeLabel);
+  outPath_m = std::move(xmlOutputPath);
+  prototypeLabel_m = std::move(prototypeLabel);
   resetStreams();
   if (!configYamlPath.empty()) {
     loadConfigFromYamlFile(configYamlPath);
@@ -100,7 +100,7 @@ void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
 }
 
 // Convenience overload: only output path and YAML config path.
-// Uses existing defaults for rangeMin_/rangeMax_ and prototypeLabel_.
+// Uses existing defaults for rangeMin_m/rangeMax_m and prototypeLabel_m.
 // removed legacy overload
 
 // removed legacy overload taking conduit node
@@ -119,7 +119,7 @@ void ProxyWriter::includeBool(const std::string& label, bool defaultValue) {
     if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
   }
   ch.defaultValue = defaultValue ? 1 : 0; ch.isVector = false; ch.isBool = true; ch.vecDim = 1;
-  channels_.emplace_back(std::move(ch));
+  channels_m.emplace_back(std::move(ch));
 }
 
 void ProxyWriter::includeButton(const std::string& label) {
@@ -134,7 +134,7 @@ void ProxyWriter::includeButton(const std::string& label) {
     if (dp != std::string::npos) ch.ns = work.substr(0, dp); else ch.ns = work;
   }
   ch.defaultValue = 0.0; ch.isVector = false; ch.isBool = false; ch.isButton = true; ch.vecDim = 1;
-  channels_.emplace_back(std::move(ch));
+  channels_m.emplace_back(std::move(ch));
 }
 
 void ProxyWriter::includeEnum(const std::string& label,
@@ -152,7 +152,7 @@ void ProxyWriter::includeEnum(const std::string& label,
   }
   ch.isEnum = true; ch.defaultInt = defaultValue; ch.vecDim = 1;
   ch.enumEntries = entries;
-  channels_.emplace_back(std::move(ch));
+  channels_m.emplace_back(std::move(ch));
 }
 
 // ------------------------------- Produce (XML) -----------------------------------
@@ -161,30 +161,30 @@ bool ProxyWriter::produce() {
   resetStreams();
 
   // Header
-  header_ << "<ServerManagerConfiguration>\n\n";
+  header_m << "<ServerManagerConfiguration>\n\n";
 
   // Sources group with one SourceProxy per channel
-  sources_ << "    <ProxyGroup name='sources'>\n";
-  for (const auto& ch : channels_) {
+  sources_m << "    <ProxyGroup name='sources'>\n";
+  for (const auto& ch : channels_m) {
     appendSourceProxy(ch);
   }
-  sources_ << "    </ProxyGroup>\n\n";
+  sources_m << "    </ProxyGroup>\n\n";
 
   // Misc group with a single prototype used by PropertyCollection
-  misc_ << "    <ProxyGroup name='misc'>\n";
+  misc_m << "    <ProxyGroup name='misc'>\n";
   appendPrototype();
-  misc_ << "    </ProxyGroup>\n";
+  misc_m << "    </ProxyGroup>\n";
 
-  footer_ << "</ServerManagerConfiguration>\n";
+  footer_m << "</ServerManagerConfiguration>\n";
 
   // Stitch everything into a single buffer
   std::ostringstream full;
-  full << header_.str() << sources_.str() << misc_.str() << footer_.str();
+  full << header_m.str() << sources_m.str() << misc_m.str() << footer_m.str();
 
   // Ensure directory exists and write file
   std::error_code ec;
-  std::filesystem::create_directories(outPath_.parent_path(), ec);
-  std::ofstream ofs(outPath_);
+  std::filesystem::create_directories(outPath_m.parent_path(), ec);
+  std::ofstream ofs(outPath_m);
   if (!ofs) return false;
   ofs << full.str();
   ofs.close();
@@ -196,12 +196,12 @@ bool ProxyWriter::produceUnified(const std::string& unifiedProxyName,
   resetStreams();
 
   // Header
-  header_ << "<ServerManagerConfiguration>\n\n";
+  header_m << "<ServerManagerConfiguration>\n\n";
 
-  sources_ << "    <ProxyGroup name='sources'>\n";
+  sources_m << "    <ProxyGroup name='sources'>\n";
   // Split channels into singles and arrays grouped by namespace
   std::map<std::string, std::vector<const Channel*>> arraysByNs;
-  for (const auto& ch : channels_) {
+  for (const auto& ch : channels_m) {
     if (!ch.isArray) continue;
     arraysByNs[ch.ns].push_back(&ch);
   }
@@ -213,21 +213,21 @@ bool ProxyWriter::produceUnified(const std::string& unifiedProxyName,
   for (const auto& kv : arraysByNs) {
     appendArraySourceProxy(kv.first, kv.second);
   }
-  sources_ << "    </ProxyGroup>\n\n";
+  sources_m << "    </ProxyGroup>\n\n";
 
-  misc_ << "    <ProxyGroup name='misc'>\n";
+  misc_m << "    <ProxyGroup name='misc'>\n";
   appendPrototype();
-  misc_ << "    </ProxyGroup>\n";
+  misc_m << "    </ProxyGroup>\n";
 
-  footer_ << "</ServerManagerConfiguration>\n";
+  footer_m << "</ServerManagerConfiguration>\n";
 
   // Compose full XML
   std::ostringstream full;
-  full << header_.str() << sources_.str() << misc_.str() << footer_.str();
+  full << header_m.str() << sources_m.str() << misc_m.str() << footer_m.str();
 
   std::error_code ec;
-  std::filesystem::create_directories(outPath_.parent_path(), ec);
-  std::ofstream ofs(outPath_);
+  std::filesystem::create_directories(outPath_m.parent_path(), ec);
+  std::ofstream ofs(outPath_m);
   if (!ofs) return false;
   ofs << full.str();
   ofs.close();
@@ -237,15 +237,15 @@ bool ProxyWriter::produceUnified(const std::string& unifiedProxyName,
 // ---------------------------- Internal XML builders ------------------------------
 
 void ProxyWriter::resetStreams() {
-  header_.str(""); header_.clear();
-  sources_.str(""); sources_.clear();
-  misc_.str(""); misc_.clear();
-  footer_.str(""); footer_.clear();
+  header_m.str(""); header_m.clear();
+  sources_m.str(""); sources_m.clear();
+  misc_m.str(""); misc_m.clear();
+  footer_m.str(""); footer_m.clear();
 }
 
 void ProxyWriter::appendSourceProxy(const Channel& ch) {
   const std::string& L = ch.label;
-  sources_ << "        <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_" << L << "'>\n"
+  sources_m << "        <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_" << L << "'>\n"
            << "            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>\n"
            << "            </IntVectorProperty>\n\n"
            << "            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>\n"
@@ -259,11 +259,11 @@ void ProxyWriter::appendSourceProxy(const Channel& ch) {
            << "                                  repeat_command='1'\n"
            << "                                  panel_widget='DoubleRange'>\n";
   // Per requirements: no DoubleRangeDomain in the SOURCE section
-  sources_ << "            </DoubleVectorProperty>\n\n";
+  sources_m << "            </DoubleVectorProperty>\n\n";
   if(!ch.isBool){
-    sources_ << "            <PropertyGroup label='SteerableParameters' panel_widget='PropertyCollection'>\n";
+    sources_m << "            <PropertyGroup label='SteerableParameters' panel_widget='PropertyCollection'>\n";
   }
-  sources_ << "                <Hints>\n"
+  sources_m << "                <Hints>\n"
            << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableParametersPrototype' />\n"
            << "                </Hints>\n"
            << "            </PropertyGroup>\n\n"
@@ -277,8 +277,8 @@ void ProxyWriter::appendSourceProxy(const Channel& ch) {
 
 void ProxyWriter::appendPrototype() {
   // Prototype for numeric steerables (scalars and vectors)
-  misc_ << "      <Proxy name='SteerableNumericsPrototype' label=' Numerics-Collective-Prototype (do not cancel [x] or add new [+]!!)'> \n";
-  for (const auto& ch : channels_) {
+  misc_m << "      <Proxy name='SteerableNumericsPrototype' label=' Numerics-Collective-Prototype (do not cancel [x] or add new [+]!!)'> \n";
+  for (const auto& ch : channels_m) {
     if (ch.isBool || ch.isButton || ch.isEnum) continue;
     if (ch.isArray) continue;
     if (ch.propertyName.find('.') != std::string::npos) continue;
@@ -295,83 +295,83 @@ void ProxyWriter::appendPrototype() {
         if (dim == 1) def = std::to_string(i0);
         else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
         else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
-        misc_ << "        <IntVectorProperty name='vec" << dim << "_" << ch.label << "' label='" << ch.label << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        misc_m << "        <IntVectorProperty name='vec" << dim << "_" << ch.label << "' label='" << ch.label << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
         // Include IntRangeDomain only if config defines ranges for this label
-        auto itIV = labelVectorCfg_.find(ch.label);
-        if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+        auto itIV = labelVectorCfg_m.find(ch.label);
+        if (itIV != labelVectorCfg_m.end() && itIV->second.has) {
           const VectorCfg& vc = itIV->second;
           int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
           int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
-          misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+          misc_m << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
         }
-        misc_ << "        </IntVectorProperty>\n";
+        misc_m << "        </IntVectorProperty>\n";
       } else {
         if (dim == 1) def = std::to_string(d0);
         else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
         else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
-        misc_ << "        <DoubleVectorProperty name='vec" << dim << "_" << ch.label << "' label='" << ch.label << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        misc_m << "        <DoubleVectorProperty name='vec" << dim << "_" << ch.label << "' label='" << ch.label << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
         // Prefer vector ranges; fallback to scalar ranges if present for this label
         double vminOut; double vmaxOut; bool haveRange = false;
-        auto itV = labelVectorCfg_.find(ch.label);
-        if (itV != labelVectorCfg_.end() && itV->second.has) {
+        auto itV = labelVectorCfg_m.find(ch.label);
+        if (itV != labelVectorCfg_m.end() && itV->second.has) {
           const VectorCfg& vc = itV->second;
           if (vc.uniform) { vminOut = vc.umin; vmaxOut = vc.umax; haveRange = true; }
           else { for (int i=0;i<3;i++) if (vc.comp[i].has) { vminOut = vc.comp[i].min; vmaxOut = vc.comp[i].max; haveRange = true; break; } }
         } else {
-          auto itS = labelScalarCfg_.find(ch.label);
-          if (itS != labelScalarCfg_.end() && itS->second.has) { vminOut = itS->second.min; vmaxOut = itS->second.max; haveRange = true; }
+          auto itS = labelScalarCfg_m.find(ch.label);
+          if (itS != labelScalarCfg_m.end() && itS->second.has) { vminOut = itS->second.min; vmaxOut = itS->second.max; haveRange = true; }
         }
         if (haveRange) {
-          misc_ << "          <DoubleRangeDomain name='range' min='" << vminOut << "' max='" << vmaxOut << "'/>\n";
+          misc_m << "          <DoubleRangeDomain name='range' min='" << vminOut << "' max='" << vmaxOut << "'/>\n";
         }
-        misc_ << "        </DoubleVectorProperty>\n";
+        misc_m << "        </DoubleVectorProperty>\n";
       }
       if (!ch.isInteger && dim == 3) {
-        misc_ << "          <Hints>\n";
-        misc_ << "            <ShowComponentLabels>\n";
-        misc_ << "              <ComponentLabel component='0' label='X'/>\n";
-        misc_ << "              <ComponentLabel component='1' label='Y'/>\n";
-        misc_ << "              <ComponentLabel component='2' label='Z'/>\n";
-        misc_ << "            </ShowComponentLabels>\n";
-        misc_ << "          </Hints>\n";
+        misc_m << "          <Hints>\n";
+        misc_m << "            <ShowComponentLabels>\n";
+        misc_m << "              <ComponentLabel component='0' label='X'/>\n";
+        misc_m << "              <ComponentLabel component='1' label='Y'/>\n";
+        misc_m << "              <ComponentLabel component='2' label='Z'/>\n";
+        misc_m << "            </ShowComponentLabels>\n";
+        misc_m << "          </Hints>\n";
       }
     } else {
       const double sdef = ch.defaultValue;
       if (ch.isInteger) {
-        misc_ << "        <IntVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+        misc_m << "        <IntVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
         // Include IntRangeDomain only if config defines ranges for this label
-        auto itIS = labelScalarCfg_.find(ch.label);
-        if (itIS != labelScalarCfg_.end() && itIS->second.has) {
-          misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+        auto itIS = labelScalarCfg_m.find(ch.label);
+        if (itIS != labelScalarCfg_m.end() && itIS->second.has) {
+          misc_m << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
         }
-        misc_ << "        </IntVectorProperty>\n";
+        misc_m << "        </IntVectorProperty>\n";
       } else {
-        misc_ << "        <DoubleVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << sdef << "'>\n";
+        misc_m << "        <DoubleVectorProperty name='scaleFactor_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << sdef << "'>\n";
         // Include DoubleRangeDomain only if config defines ranges for this specific label
-        auto itS = labelScalarCfg_.find(ch.label);
-        if (itS != labelScalarCfg_.end() && itS->second.has) {
-          misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+        auto itS = labelScalarCfg_m.find(ch.label);
+        if (itS != labelScalarCfg_m.end() && itS->second.has) {
+          misc_m << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
         }
-        misc_ << "        </DoubleVectorProperty>\n";
+        misc_m << "        </DoubleVectorProperty>\n";
       }
     }
   }
-  misc_ << "      </Proxy>\n\n";
+  misc_m << "      </Proxy>\n\n";
 
   // Prototype for enum steerables
-  misc_ << "      <Proxy name='SteerableEnumsPrototype' label='Enums-Collective-Prototype (do not cancel [x] or add new [+]!!)'>\n";
-  for (const auto& ch : channels_) {
+  misc_m << "      <Proxy name='SteerableEnumsPrototype' label='Enums-Collective-Prototype (do not cancel [x] or add new [+]!!)'>\n";
+  for (const auto& ch : channels_m) {
     if (!ch.isEnum || ch.enumEntries.empty()) continue;
     if (ch.propertyName.find('.') != std::string::npos) continue;
-  misc_ << "        <IntVectorProperty name='PrototypeEnum_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << ch.defaultInt << "' immediate_apply='1'>\n";
-  misc_ << "          <EnumerationDomain name='enum'>\n";
+  misc_m << "        <IntVectorProperty name='PrototypeEnum_" << ch.label << "' label='" << ch.label << "' number_of_elements='1' default_values='" << ch.defaultInt << "' immediate_apply='1'>\n";
+  misc_m << "          <EnumerationDomain name='enum'>\n";
     for (const auto& [text, val] : ch.enumEntries) {
-  misc_ << "            <Entry text='" << text << "' value='" << val << "'/>\n";
+  misc_m << "            <Entry text='" << text << "' value='" << val << "'/>\n";
     }
-    misc_ << "          </EnumerationDomain>\n";
-    misc_ << "        </IntVectorProperty>\n";
+    misc_m << "          </EnumerationDomain>\n";
+    misc_m << "        </IntVectorProperty>\n";
   }
-  misc_ << "      </Proxy>\n";
+  misc_m << "      </Proxy>\n";
 
   // (Removed legacy LinMap prototype; LinMap-like labels are now handled by generic prototypes.)
 
@@ -379,7 +379,7 @@ void ProxyWriter::appendPrototype() {
   // For each ns where channels contain 'ns.member' and not isArray, create a prototype named '<ns>Prototype'
   {
     std::map<std::string, std::vector<const Channel*>> structMembers;
-    for (const auto& ch : channels_) {
+    for (const auto& ch : channels_m) {
       if (ch.isArray) continue; // singles only
       // include numerics, bools, enums, and buttons
       // detect 'ns.member'
@@ -390,23 +390,23 @@ void ProxyWriter::appendPrototype() {
     for (const auto& kv : structMembers) {
       const std::string& ns = kv.first;
       const auto& mems = kv.second;
-      misc_ << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
+      misc_m << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
       for (const Channel* c : mems) {
         // member name after dot
         std::string member = c->propertyName.substr(c->propertyName.find('.')+1);
         if (c->isButton || c->isBool) {
           // Buttons and bools as checkbox
-          misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
-          misc_ << "          <BooleanDomain name='bool'/>\n";
-          misc_ << "        </IntVectorProperty>\n";
+          misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
+          misc_m << "          <BooleanDomain name='bool'/>\n";
+          misc_m << "        </IntVectorProperty>\n";
         } else if (c->isEnum) {
-          misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
-          misc_ << "          <EnumerationDomain name='enum'>\n";
+          misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
+          misc_m << "          <EnumerationDomain name='enum'>\n";
           for (const auto& ev : c->enumEntries) {
-            misc_ << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
+            misc_m << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
           }
-          misc_ << "          </EnumerationDomain>\n";
-          misc_ << "        </IntVectorProperty>\n";
+          misc_m << "          </EnumerationDomain>\n";
+          misc_m << "        </IntVectorProperty>\n";
         } else if (c->isVector) {
           const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
           const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
@@ -414,52 +414,52 @@ void ProxyWriter::appendPrototype() {
           unsigned dim = c->vecDim;
           std::string def = (dim == 1 ? std::to_string(d0) : dim == 2 ? (std::to_string(d0) + " " + std::to_string(d1)) : (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2)));
           if (c->isInteger) {
-            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" 
+            misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" 
                   << def << "'>\n";
             // Add IntRangeDomain only if config provides a range for this label
-            auto itIV = labelVectorCfg_.find(c->label);
-            if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+            auto itIV = labelVectorCfg_m.find(c->label);
+            if (itIV != labelVectorCfg_m.end() && itIV->second.has) {
               const VectorCfg& vc = itIV->second;
               int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
               int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
-              misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+              misc_m << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
             }
-            misc_ << "        </IntVectorProperty>\n";
+            misc_m << "        </IntVectorProperty>\n";
           } else {
-            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" 
+            misc_m << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" 
                   << def << "'>\n";
             // Only include range if provided in config
-            auto itV = labelVectorCfg_.find(c->label);
-            if (itV != labelVectorCfg_.end() && itV->second.has) {
+            auto itV = labelVectorCfg_m.find(c->label);
+            if (itV != labelVectorCfg_m.end() && itV->second.has) {
               double vmin = itV->second.uniform ? itV->second.umin : itV->second.comp[0].min;
               double vmax = itV->second.uniform ? itV->second.umax : itV->second.comp[0].max;
-              misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+              misc_m << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
             }
-            misc_ << "        </DoubleVectorProperty>\n";
+            misc_m << "        </DoubleVectorProperty>\n";
           }
         } else {
           const double sdef = c->defaultValue;
           if (c->isInteger) {
-            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
+            misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
                   << static_cast<int>(sdef) << "'>\n";
             // Only include range if provided in config
-            auto itIS = labelScalarCfg_.find(c->label);
-            if (itIS != labelScalarCfg_.end() && itIS->second.has) {
-              misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+            auto itIS = labelScalarCfg_m.find(c->label);
+            if (itIS != labelScalarCfg_m.end() && itIS->second.has) {
+              misc_m << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
             }
-            misc_ << "        </IntVectorProperty>\n";
+            misc_m << "        </IntVectorProperty>\n";
           } else {
-        misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
+        misc_m << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" 
           << sdef << "'>\n";
-        auto itS = labelScalarCfg_.find(c->label);
-        if (itS != labelScalarCfg_.end() && itS->second.has) {
-      misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+        auto itS = labelScalarCfg_m.find(c->label);
+        if (itS != labelScalarCfg_m.end() && itS->second.has) {
+      misc_m << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
         }
-            misc_ << "        </DoubleVectorProperty>\n";
+            misc_m << "        </DoubleVectorProperty>\n";
           }
         }
       }
-      misc_ << "      </Proxy>\n";
+      misc_m << "      </Proxy>\n";
     }
   }
 
@@ -467,7 +467,7 @@ void ProxyWriter::appendPrototype() {
   // Create a prototype named '<ns>Prototype' that exposes members as 'ns:member'.
   {
     std::map<std::string, std::vector<const Channel*>> arrayMembers;
-    for (const auto& ch : channels_) {
+    for (const auto& ch : channels_m) {
       if (!ch.isArray) continue;
       // Include numerics, bools, enums, and buttons in array prototypes
       auto pos = ch.propertyName.find('.');
@@ -477,21 +477,21 @@ void ProxyWriter::appendPrototype() {
     for (const auto& kv : arrayMembers) {
       const std::string& ns = kv.first;
       const auto& mems = kv.second;
-      misc_ << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
+      misc_m << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
       for (const Channel* c : mems) {
         std::string member = c->propertyName.substr(c->propertyName.find('.')+1);
         if (c->isButton || c->isBool) {
-          misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
-          misc_ << "          <BooleanDomain name='bool'/>\n";
-          misc_ << "        </IntVectorProperty>\n";
+          misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
+          misc_m << "          <BooleanDomain name='bool'/>\n";
+          misc_m << "        </IntVectorProperty>\n";
         } else if (c->isEnum) {
-          misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
-          misc_ << "          <EnumerationDomain name='enum'>\n";
+          misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
+          misc_m << "          <EnumerationDomain name='enum'>\n";
           for (const auto& ev : c->enumEntries) {
-            misc_ << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
+            misc_m << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
           }
-          misc_ << "          </EnumerationDomain>\n";
-          misc_ << "        </IntVectorProperty>\n";
+          misc_m << "          </EnumerationDomain>\n";
+          misc_m << "        </IntVectorProperty>\n";
         } else if (c->isVector) {
           const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
           const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
@@ -505,50 +505,50 @@ void ProxyWriter::appendPrototype() {
             if (dim == 1) def = std::to_string(i0);
             else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
             else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
-            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+            misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
             // Add IntRangeDomain only if config provides a range for this label
-            auto itIV = labelVectorCfg_.find(c->label);
-            if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+            auto itIV = labelVectorCfg_m.find(c->label);
+            if (itIV != labelVectorCfg_m.end() && itIV->second.has) {
               const VectorCfg& vc = itIV->second;
               int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
               int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
-              misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+              misc_m << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
             }
-            misc_ << "        </IntVectorProperty>\n";
+            misc_m << "        </IntVectorProperty>\n";
           } else {
             if (dim == 1) def = std::to_string(d0);
             else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
             else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
-            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+            misc_m << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
             // Only include range if provided in config
-            auto itV = labelVectorCfg_.find(c->label);
-            if (itV != labelVectorCfg_.end() && itV->second.has) {
+            auto itV = labelVectorCfg_m.find(c->label);
+            if (itV != labelVectorCfg_m.end() && itV->second.has) {
               double vmin = itV->second.uniform ? itV->second.umin : itV->second.comp[0].min;
               double vmax = itV->second.uniform ? itV->second.umax : itV->second.comp[0].max;
-              misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+              misc_m << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
             }
-            misc_ << "        </DoubleVectorProperty>\n";
+            misc_m << "        </DoubleVectorProperty>\n";
           }
         } else {
           const double sdef = c->defaultValue;
           if (c->isInteger) {
-            misc_ << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
-            auto itIS = labelScalarCfg_.find(c->label);
-            if (itIS != labelScalarCfg_.end() && itIS->second.has) {
-              misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+            misc_m << "        <IntVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+            auto itIS = labelScalarCfg_m.find(c->label);
+            if (itIS != labelScalarCfg_m.end() && itIS->second.has) {
+              misc_m << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
             }
-            misc_ << "        </IntVectorProperty>\n";
+            misc_m << "        </IntVectorProperty>\n";
           } else {
-            misc_ << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << sdef << "'>\n";
-            auto itS = labelScalarCfg_.find(c->label);
-            if (itS != labelScalarCfg_.end() && itS->second.has) {
-              misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+            misc_m << "        <DoubleVectorProperty name='" << ns << ":" << member << "' label='" << member << "' number_of_elements='1' default_values='" << sdef << "'>\n";
+            auto itS = labelScalarCfg_m.find(c->label);
+            if (itS != labelScalarCfg_m.end() && itS->second.has) {
+              misc_m << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
             }
-            misc_ << "        </DoubleVectorProperty>\n";
+            misc_m << "        </DoubleVectorProperty>\n";
           }
         }
       }
-      misc_ << "      </Proxy>\n";
+      misc_m << "      </Proxy>\n";
     }
   }
 
@@ -557,7 +557,7 @@ void ProxyWriter::appendPrototype() {
   // e.g., a prototype 'double_arrayPrototype' containing a single property 'double_array'.
   {
     std::map<std::string, const Channel*> basicByNs;
-    for (const auto& ch : channels_) {
+    for (const auto& ch : channels_m) {
       if (!ch.isArray) continue;
       if (ch.propertyName.find('.') != std::string::npos) continue; // struct members handled above
       // For basic arrays, ns equals propertyName
@@ -566,20 +566,20 @@ void ProxyWriter::appendPrototype() {
     for (const auto& kv : basicByNs) {
       const std::string& ns = kv.first;
       const Channel* c = kv.second;
-      misc_ << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
+      misc_m << "      <Proxy name='" << ns << "Prototype' label='" << ns << "'>\n";
       const std::string& name = ns; // property name inside prototype
       if (c->isButton || c->isBool) {
-        misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
-        misc_ << "          <BooleanDomain name='bool'/>\n";
-        misc_ << "        </IntVectorProperty>\n";
+        misc_m << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << (c->defaultValue != 0.0 ? 1 : 0) << "'>\n";
+        misc_m << "          <BooleanDomain name='bool'/>\n";
+        misc_m << "        </IntVectorProperty>\n";
       } else if (c->isEnum) {
-        misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
-        misc_ << "          <EnumerationDomain name='enum'>\n";
+        misc_m << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << c->defaultInt << "'>\n";
+        misc_m << "          <EnumerationDomain name='enum'>\n";
         for (const auto& ev : c->enumEntries) {
-          misc_ << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
+          misc_m << "            <Entry text='" << ev.first << "' value='" << ev.second << "'/>\n";
         }
-        misc_ << "          </EnumerationDomain>\n";
-        misc_ << "        </IntVectorProperty>\n";
+        misc_m << "          </EnumerationDomain>\n";
+        misc_m << "        </IntVectorProperty>\n";
     } else if (c->isVector) {
       const double d0 = c->hasVectorRanges ? c->vecDefaults[0] : c->defaultValue;
       const double d1 = c->hasVectorRanges ? c->vecDefaults[1] : c->defaultValue;
@@ -593,51 +593,51 @@ void ProxyWriter::appendPrototype() {
         if (dim == 1) def = std::to_string(i0);
         else if (dim == 2) def = (std::to_string(i0) + " " + std::to_string(i1));
         else def = (std::to_string(i0) + " " + std::to_string(i1) + " " + std::to_string(i2));
-        misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        misc_m << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
         // Include IntRangeDomain only if config provides one for this array label
-        auto itIV = labelVectorCfg_.find(name);
-        if (itIV != labelVectorCfg_.end() && itIV->second.has) {
+        auto itIV = labelVectorCfg_m.find(name);
+        if (itIV != labelVectorCfg_m.end() && itIV->second.has) {
           const VectorCfg& vc = itIV->second;
           int mn = static_cast<int>(vc.uniform ? vc.umin : vc.comp[0].min);
           int mx = static_cast<int>(vc.uniform ? vc.umax : vc.comp[0].max);
-          misc_ << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
+          misc_m << "          <IntRangeDomain name='range' min='" << mn << "' max='" << mx << "'/>\n";
         }
-        misc_ << "        </IntVectorProperty>\n";
+        misc_m << "        </IntVectorProperty>\n";
       } else {
         if (dim == 1) def = std::to_string(d0);
         else if (dim == 2) def = (std::to_string(d0) + " " + std::to_string(d1));
         else def = (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2));
-        misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
+        misc_m << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='" << dim << "' default_values='" << def << "'>\n";
         // Include a range ONLY if the config provides one for this label
-        auto itV = labelVectorCfg_.find(name);
-        if (itV != labelVectorCfg_.end() && itV->second.has) {
+        auto itV = labelVectorCfg_m.find(name);
+        if (itV != labelVectorCfg_m.end() && itV->second.has) {
           double vmin = itV->second.uniform ? itV->second.umin : itV->second.comp[0].min;
           double vmax = itV->second.uniform ? itV->second.umax : itV->second.comp[0].max;
-          misc_ << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
+          misc_m << "          <DoubleRangeDomain name='range' min='" << vmin << "' max='" << vmax << "'/>\n";
         }
-        misc_ << "        </DoubleVectorProperty>\n";
+        misc_m << "        </DoubleVectorProperty>\n";
       }
         } else {
           const double sdef = c->defaultValue;
           if (c->isInteger) {
-            misc_ << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
+            misc_m << "        <IntVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << static_cast<int>(sdef) << "'>\n";
             // Include IntRangeDomain only if the config provides one for this array label
-            auto itIS = labelScalarCfg_.find(name);
-            if (itIS != labelScalarCfg_.end() && itIS->second.has) {
-              misc_ << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
+            auto itIS = labelScalarCfg_m.find(name);
+            if (itIS != labelScalarCfg_m.end() && itIS->second.has) {
+              misc_m << "          <IntRangeDomain name='range' min='" << static_cast<int>(itIS->second.min) << "' max='" << static_cast<int>(itIS->second.max) << "'/>\n";
             }
-            misc_ << "        </IntVectorProperty>\n";
+            misc_m << "        </IntVectorProperty>\n";
           } else {
-            misc_ << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "'>\n";
+            misc_m << "        <DoubleVectorProperty name='" << name << "' label='" << name << "' number_of_elements='1' default_values='" << sdef << "'>\n";
             // Include a range ONLY if the config provides one for this label
-            auto itS = labelScalarCfg_.find(name);
-            if (itS != labelScalarCfg_.end() && itS->second.has) {
-              misc_ << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
+            auto itS = labelScalarCfg_m.find(name);
+            if (itS != labelScalarCfg_m.end() && itS->second.has) {
+              misc_m << "          <DoubleRangeDomain name='range' min='" << itS->second.min << "' max='" << itS->second.max << "'/>\n";
             }
-            misc_ << "        </DoubleVectorProperty>\n";
+            misc_m << "        </DoubleVectorProperty>\n";
           }
         }
-      misc_ << "      </Proxy>\n";
+      misc_m << "      </Proxy>\n";
     }
   }
 }
@@ -645,19 +645,19 @@ void ProxyWriter::appendPrototype() {
 void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                                            const std::string& groupLabel) {
   (void)groupLabel; // currently unused in XML
-  sources_ << "        <SourceProxy class='vtkSteeringDataGenerator' name='" << proxyName << "'>\n"
+  sources_m << "        <SourceProxy class='vtkSteeringDataGenerator' name='" << proxyName << "'>\n"
            << "            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>\n"
            << "            </IntVectorProperty>\n\n"
            << "            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>\n"
            << "            </IntVectorProperty>\n\n";
 
   // Add properties per non-array channel
-  for (const auto& ch : channels_) {
+  for (const auto& ch : channels_m) {
     if (ch.isArray) continue;
     const std::string& L = ch.label;
     const std::string& P = ch.propertyName.empty() ? ch.label : ch.propertyName;
     if (ch.isBool) {
-  sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+  sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -670,7 +670,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                << "              <BooleanDomain name='bool'/>\n"
                << "            </IntVectorProperty>\n\n";
     } else if (ch.isButton) {
-  sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << " '\n"
+  sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << " '\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -686,7 +686,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                << "              </Documentation>\n"
                << "            </IntVectorProperty>\n\n";
     } else if (ch.isEnum) {
-      sources_ << "            <IntVectorProperty name='" << P << "'\n"
+      sources_m << "            <IntVectorProperty name='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -703,7 +703,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
     } else if (!ch.isVector) {
       const double sdef = ch.defaultValue;
       if (ch.isInteger) {
-        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -715,7 +715,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                << "                                  >\n"
                << "            </IntVectorProperty>\n\n";
       } else {
-        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Double'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -751,7 +751,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                                    : (std::to_string(d0) + " " + std::to_string(d1) + " " + std::to_string(d2)));
       }
       if (ch.isInteger) {
-        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='" << cmd << "'\n"
                << "                                  use_index='1'\n"
                << "                                  clean_command='Clear'\n"
@@ -762,7 +762,7 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
                << "                                  repeat_command='1'>\n"
                << "            </IntVectorProperty>\n\n";
       } else {
-        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='" << cmd << "'\n"
                << "                                  use_index='1'\n"
                << "                                  clean_command='Clear'\n"
@@ -781,8 +781,8 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
   // Collect struct members (non-array) including numerics, bools, enums, and buttons
   std::map<std::string, std::vector<const Channel*>> structMembers;
   bool hasLooseNumerics = false;
-  auto ends_with = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
-  for (const auto& ch : channels_) {
+  auto endsWith = [](const std::string& s, const std::string& suf){ return s.size()>=suf.size() && s.compare(s.size()-suf.size(), suf.size(), suf)==0; };
+  for (const auto& ch : channels_m) {
     if (ch.isArray) continue;
     // include bool, enum, button and numerics in struct groups
     if (ch.propertyName.find('.') != std::string::npos) {
@@ -793,89 +793,89 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
   }
   for (const auto& kv : structMembers) {
     const std::string& ns = kv.first;
-    sources_ << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
-    sources_ << "                <Hints>\n";
-    sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
-    sources_ << "                </Hints>\n";
+    sources_m << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
+    sources_m << "                <Hints>\n";
+    sources_m << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
+    sources_m << "                </Hints>\n";
     for (const Channel* c : kv.second) {
       const std::string member = c->propertyName.substr(c->propertyName.find('.')+1);
       const std::string P = c->propertyName;
-      sources_ << "                <Property name='" << P << "' function='" << ns << ":" << member << "' label='" << P << "'/>\n";
+      sources_m << "                <Property name='" << P << "' function='" << ns << ":" << member << "' label='" << P << "'/>\n";
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
   if (hasLooseNumerics) {
-    sources_ << "            <PropertyGroup label='Numerics' panel_widget='PropertyCollection'>\n";
-    sources_ << "                <Hints>\n";
-    sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableNumericsPrototype' />\n";
-    sources_ << "                </Hints>\n";
-    for (const auto& ch : channels_) {
+    sources_m << "            <PropertyGroup label='Numerics' panel_widget='PropertyCollection'>\n";
+    sources_m << "                <Hints>\n";
+    sources_m << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableNumericsPrototype' />\n";
+    sources_m << "                </Hints>\n";
+    for (const auto& ch : channels_m) {
       if (ch.isArray || ch.isBool || ch.isButton || ch.isEnum) continue;
       if (ch.propertyName.find('.') != std::string::npos) continue; // already grouped by struct
       if (ch.isVector) {
-        sources_ << "                <Property name='" << ch.propertyName << "' function='vec" << ch.vecDim << "_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
+        sources_m << "                <Property name='" << ch.propertyName << "' function='vec" << ch.vecDim << "_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
       } else {
-        sources_ << "                <Property name='" << ch.propertyName << "' function='scaleFactor_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
+        sources_m << "                <Property name='" << ch.propertyName << "' function='scaleFactor_" << ch.label << "' label='" << ch.propertyName << "'/>\n";
       }
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
 
   // Removed legacy LinMap Property Group; generic grouping applies now.
 
   bool hasEnums = false;
-  for (const auto& ch : channels_) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isEnum && !ch.enumEntries.empty()) { hasEnums = true; break; } }
+  for (const auto& ch : channels_m) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isEnum && !ch.enumEntries.empty()) { hasEnums = true; break; } }
   if (hasEnums) {
-    sources_ << "            <PropertyGroup label='Enums' panel_widget='PropertyCollection'>\n";
-    sources_ << "                <Hints>\n";
-    sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableEnumsPrototype' />\n";
-    sources_ << "                </Hints>\n";
-    for (const auto& ch : channels_) {
+    sources_m << "            <PropertyGroup label='Enums' panel_widget='PropertyCollection'>\n";
+    sources_m << "                <Hints>\n";
+    sources_m << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableEnumsPrototype' />\n";
+    sources_m << "                </Hints>\n";
+    for (const auto& ch : channels_m) {
       if (ch.isArray || ch.propertyName.find('.') != std::string::npos || !ch.isEnum || ch.enumEntries.empty()) continue;
-      sources_ << "                <Property name='" << ch.label << "' function='PrototypeEnum_" << ch.label << "' label='" << ch.label << "'/>\n";
+      sources_m << "                <Property name='" << ch.label << "' function='PrototypeEnum_" << ch.label << "' label='" << ch.label << "'/>\n";
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
 
   bool hasSwitches = false;
-  for (const auto& ch : channels_) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isBool) { hasSwitches = true; break; } }
+  for (const auto& ch : channels_m) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isBool) { hasSwitches = true; break; } }
   if (hasSwitches) {
-    sources_ << "            <PropertyGroup label='Switches'>\n";
-    for (const auto& ch : channels_) {
+    sources_m << "            <PropertyGroup label='Switches'>\n";
+    for (const auto& ch : channels_m) {
       if (ch.isArray || ch.propertyName.find('.') != std::string::npos || !ch.isBool) continue;
-      sources_ << "                <Property name='" << ch.label << "' function='bool' label='" << ch.label << "' />\n";
+      sources_m << "                <Property name='" << ch.label << "' function='bool' label='" << ch.label << "' />\n";
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
 
   bool hasButtons = false;
-  for (const auto& ch : channels_) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isButton) { hasButtons = true; break; } }
+  for (const auto& ch : channels_m) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isButton) { hasButtons = true; break; } }
   if (hasButtons) {
-    sources_ << "            <PropertyGroup label='Buttons / Triggers'>\n";
-    for (const auto& ch : channels_) {
+    sources_m << "            <PropertyGroup label='Buttons / Triggers'>\n";
+    for (const auto& ch : channels_m) {
       if (ch.isArray || ch.propertyName.find('.') != std::string::npos || !ch.isButton) continue;
-      sources_ << "                <Property name='" << ch.label <<  "' />\n";
+      sources_m << "                <Property name='" << ch.label <<  "' />\n";
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
 
-  sources_ << "            <Hints>\n";
-  sources_ << "              <CatalystInitializePropertiesWithMesh mesh='steerable_channel_0D_mesh'>\n";
-  for (const auto& ch : channels_) {
+  sources_m << "            <Hints>\n";
+  sources_m << "              <CatalystInitializePropertiesWithMesh mesh='steerable_channel_0D_mesh'>\n";
+  for (const auto& ch : channels_m) {
     if (ch.isArray) continue;
     if (ch.isButton) continue;
-    sources_ << "                <Property name='" << ch.propertyName << "' association='point' array='steerable_field_f_" << ch.label << "' />\n";
+    sources_m << "                <Property name='" << ch.propertyName << "' association='point' array='steerable_field_f_" << ch.label << "' />\n";
   }
-  sources_ << "              </CatalystInitializePropertiesWithMesh>\n";
-  sources_ << "            </Hints>\n";
+  sources_m << "              </CatalystInitializePropertiesWithMesh>\n";
+  sources_m << "            </Hints>\n";
 
-  sources_ << "        </SourceProxy>\n\n";
+  sources_m << "        </SourceProxy>\n\n";
 }
 
 void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                                          const std::vector<const Channel*>& chans) {
   // Per-array source proxy
-  sources_ << "        <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_" << ns << "'>\n"
+  sources_m << "        <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_" << ns << "'>\n"
            << "            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>\n"
            << "            </IntVectorProperty>\n\n"
            << "            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>\n"
@@ -883,33 +883,33 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
 
   // Determine initial list length for this namespace (0 means no list prepopulation)
   unsigned initLen = 0;
-  auto itLen = arrayInitialSize_.find(ns);
-  if (itLen != arrayInitialSize_.end()) initLen = itLen->second;
+  auto itLen = arrayInitialSize_m.find(ns);
+  if (itLen != arrayInitialSize_m.end()) initLen = itLen->second;
 
   for (const Channel* c : chans) {
     const std::string& P = c->propertyName; // name without 'array:'
     const std::string& L = c->label;        // full label with 'array:' prefix
     if (c->isButton) {
       // Array buttons should be DoubleVectorProperty with checkbox UI; also pre-size default_values
-      sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+      sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
       if (initLen > 0) {
-        for (unsigned i=0;i<initLen;++i) { sources_ << 0; if (i+1<initLen) sources_ << " "; }
+        for (unsigned i=0;i<initLen;++i) { sources_m << 0; if (i+1<initLen) sources_m << " "; }
       } else {
-        sources_ << 0;
+        sources_m << 0;
       }
-      sources_ << "'\n"
+      sources_m << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
                << "                                  panel_widget='CheckBox'\n"
                << "                                  >\n"
                << "            </IntVectorProperty>\n\n";
     } else if (c->isBool) {
-      sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+      sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -918,17 +918,17 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                << "                                  default_values='";
       if (initLen > 0) {
         int v = (c->defaultValue != 0.0 ? 1 : 0);
-        for (unsigned i=0;i<initLen;++i) { sources_ << v; if (i+1<initLen) sources_ << " "; }
+        for (unsigned i=0;i<initLen;++i) { sources_m << v; if (i+1<initLen) sources_m << " "; }
       } else {
-        sources_ << (c->defaultValue != 0.0 ? 1 : 0);
+        sources_m << (c->defaultValue != 0.0 ? 1 : 0);
       }
-      sources_ << "'\n"
+      sources_m << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
                << "                                  >\n"
                << "            </IntVectorProperty>\n\n";
     } else if (c->isEnum) {
-      sources_ << "            <IntVectorProperty name='" << P << "'\n"
+      sources_m << "            <IntVectorProperty name='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
@@ -938,11 +938,11 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
               //  << "                                  number_of_elements='1'\n"
                << "                                  default_values='";
       if (initLen > 0) {
-        for (unsigned i=0;i<initLen;++i) { sources_ << c->defaultInt; if (i+1<initLen) sources_ << " "; }
+        for (unsigned i=0;i<initLen;++i) { sources_m << c->defaultInt; if (i+1<initLen) sources_m << " "; }
       } else {
-        sources_ << c->defaultInt;
+        sources_m << c->defaultInt;
       }
-      sources_ << "'\n"
+      sources_m << "'\n"
                << "                                  immediate_apply='1'>\n"
                << "            </IntVectorProperty>\n\n";
     } else if (c->isVector) {
@@ -955,21 +955,21 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
       else cmd = (dim == 1 ? "SetTuple1Double" : dim == 2 ? "SetTuple2Double" : "SetTuple3Double");
       auto writeDef = [&](unsigned count){
         for (unsigned i=0;i<count;++i) {
-          if (dim == 1) sources_ << d0;
-          else if (dim == 2) sources_ << d0 << " " << d1;
-          else sources_ << d0 << " " << d1 << " " << d2;
-          if (i+1<count) sources_ << " ";
+          if (dim == 1) sources_m << d0;
+          else if (dim == 2) sources_m << d0 << " " << d1;
+          else sources_m << d0 << " " << d1 << " " << d2;
+          if (i+1<count) sources_m << " ";
         }
       };
       if (c->isInteger) {
-        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='" << cmd << "'\n"
                << "                                  use_index='1'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
       } else {
-        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='" << cmd << "'\n"
                << "                                  use_index='1'\n"
                << "                                  clean_command='Clear'\n"
@@ -977,48 +977,48 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                << "                                  default_values='";
       }
       if (initLen > 0) { writeDef(initLen); } else { writeDef(1); }
-      sources_ << "'\n"
+      sources_m << "'\n"
                << "                                  number_of_elements_per_command='" << dim << "'\n"
                << "                                  repeat_command='1'>\n";
       if (c->isInteger) {
-        sources_ << "            </IntVectorProperty>\n\n";
+        sources_m << "            </IntVectorProperty>\n\n";
       } else {
-        sources_ << "            </DoubleVectorProperty>\n\n";
+        sources_m << "            </DoubleVectorProperty>\n\n";
       }
     } else {
       const double sdef = c->defaultValue;
       if (c->isInteger) {
-        sources_ << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
+        sources_m << "            <IntVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
         if (initLen > 0) {
-          for (unsigned i=0;i<initLen;++i) { sources_ << static_cast<int>(sdef); if (i+1<initLen) sources_ << " "; }
+          for (unsigned i=0;i<initLen;++i) { sources_m << static_cast<int>(sdef); if (i+1<initLen) sources_m << " "; }
         } else {
-          sources_ << static_cast<int>(sdef);
+          sources_m << static_cast<int>(sdef);
         }
-        sources_ << "'\n"
+        sources_m << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
                << "                                  >\n"
                << "            </IntVectorProperty>\n\n";
       } else {
-        const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_;
-        const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_;
-        sources_ << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
+        const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_m;
+        const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_m;
+        sources_m << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Double'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
         if (initLen > 0) {
-          for (unsigned i=0;i<initLen;++i) { sources_ << sdef; if (i+1<initLen) sources_ << " "; }
+          for (unsigned i=0;i<initLen;++i) { sources_m << sdef; if (i+1<initLen) sources_m << " "; }
         } else {
-          sources_ << sdef;
+          sources_m << sdef;
         }
-        sources_ << "'\n"
+        sources_m << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
                << "                                  >\n"
@@ -1031,16 +1031,16 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
   bool hasStructMembers = false;
   for (const Channel* c : chans) { if (c->propertyName.find('.') != std::string::npos) { hasStructMembers = true; break; } }
   if (hasStructMembers) {
-    sources_ << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
-    sources_ << "                <Hints>\n";
-    sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
-    sources_ << "                </Hints>\n";
+    sources_m << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
+    sources_m << "                <Hints>\n";
+    sources_m << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
+    sources_m << "                </Hints>\n";
     for (const Channel* c : chans) {
       if (c->propertyName.find('.') == std::string::npos) continue;
       std::string member = c->propertyName.substr(c->propertyName.find('.')+1);
-      sources_ << "                <Property name='" << c->propertyName << "' function='" << ns << ":" << member << "' label='" << c->propertyName << "'/>\n";
+      sources_m << "                <Property name='" << c->propertyName << "' function='" << ns << ":" << member << "' label='" << c->propertyName << "'/>\n";
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
 
   // Property group for basic-type array channels (no struct member part)
@@ -1048,28 +1048,28 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
   bool hasBasicArray = false;
   for (const Channel* c : chans) { if (c->propertyName.find('.') == std::string::npos) { hasBasicArray = true; break; } }
   if (hasBasicArray) {
-    sources_ << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
-    sources_ << "                <Hints>\n";
-    sources_ << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
-    sources_ << "                </Hints>\n";
+    sources_m << "            <PropertyGroup label='" << ns << "' panel_widget='PropertyCollection'>\n";
+    sources_m << "                <Hints>\n";
+    sources_m << "                  <PropertyCollectionWidgetPrototype group='misc' name='" << ns << "Prototype' />\n";
+    sources_m << "                </Hints>\n";
     for (const Channel* c : chans) {
       if (c->propertyName.find('.') != std::string::npos) continue;
       const std::string& P = c->propertyName;
-      sources_ << "                <Property name='" << P << "' function='" << ns << "' label='" << P << "'/>\n";
+      sources_m << "                <Property name='" << P << "' function='" << ns << "' label='" << P << "'/>\n";
     }
-    sources_ << "            </PropertyGroup>\n\n";
+    sources_m << "            </PropertyGroup>\n\n";
   }
 
   // Hints mapping to per-array mesh
-  sources_ << "            <Hints>\n";
-  sources_ << "              <CatalystInitializePropertiesWithMesh mesh='steerable_channel_1D_mesh_array:" << ns << "'>\n";
+  sources_m << "            <Hints>\n";
+  sources_m << "              <CatalystInitializePropertiesWithMesh mesh='steerable_channel_1D_mesh_array:" << ns << "'>\n";
   for (const Channel* c : chans) {
-    sources_ << "                <Property name='" << c->propertyName << "' association='point' array='steerable_field_f_" << c->label << "' />\n";
+    sources_m << "                <Property name='" << c->propertyName << "' association='point' array='steerable_field_f_" << c->label << "' />\n";
   }
-  sources_ << "              </CatalystInitializePropertiesWithMesh>\n";
-  sources_ << "            </Hints>\n";
+  sources_m << "              </CatalystInitializePropertiesWithMesh>\n";
+  sources_m << "            </Hints>\n";
 
-  sources_ << "        </SourceProxy>\n\n";
+  sources_m << "        </SourceProxy>\n\n";
 }
 
 // ------------------------------ Config management --------------------------------
@@ -1089,17 +1089,17 @@ void ProxyWriter::setConfigNode(const conduit_cpp::Node n) {
 
 void ProxyWriter::applyScalarConfig(Channel& ch) const {
   // Start from type default if present
-  if (typeDefaultScalar_.has) {
+  if (typeDefaultScalar_m.has) {
     ch.hasScalarRange = true;
-    ch.scalarMin = typeDefaultScalar_.min;
-    ch.scalarMax = typeDefaultScalar_.max;
+    ch.scalarMin = typeDefaultScalar_m.min;
+    ch.scalarMax = typeDefaultScalar_m.max;
     if (!ch.preserveScalarDefault) {
-      ch.defaultValue = typeDefaultScalar_.def;
+      ch.defaultValue = typeDefaultScalar_m.def;
       ch.hasScalarDefault = true;
     }
   }
-  auto it = labelScalarCfg_.find(ch.label);
-  if (it != labelScalarCfg_.end() && it->second.has) {
+  auto it = labelScalarCfg_m.find(ch.label);
+  if (it != labelScalarCfg_m.end() && it->second.has) {
     ch.hasScalarRange = true;
     ch.scalarMin = it->second.min;
     ch.scalarMax = it->second.max;
@@ -1110,7 +1110,7 @@ void ProxyWriter::applyScalarConfig(Channel& ch) const {
   }
 }
 
-static void parse_inline_map_into(const std::string& inlineMap,
+static void parseInlineMapInto(const std::string& inlineMap,
                                   bool& hasAny,
                                   double& vmin, double& vmax, double& vdef) {
   hasAny = false;
@@ -1120,9 +1120,9 @@ static void parse_inline_map_into(const std::string& inlineMap,
   auto rb = s.rfind('}'); if (rb != std::string::npos) s.erase(rb);
   s = trim(s);
   double tmp;
-  if (extract_number(s, "min", tmp)) { vmin = tmp; hasAny = true; }
-  if (extract_number(s, "max", tmp)) { vmax = tmp; hasAny = true; }
-  if (extract_number(s, "default", tmp)) { vdef = tmp; hasAny = true; }
+  if (extractNumber(s, "min", tmp)) { vmin = tmp; hasAny = true; }
+  if (extractNumber(s, "max", tmp)) { vmax = tmp; hasAny = true; }
+  if (extractNumber(s, "default", tmp)) { vdef = tmp; hasAny = true; }
 }
 
 bool ProxyWriter::loadConfigFromYamlFile(const std::string& path) {
@@ -1134,12 +1134,12 @@ bool ProxyWriter::loadConfigFromYamlFile(const std::string& path) {
 
 bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
   // Reset caches to only track per-label ranges
-  hasConfig_ = false;
-  // Drop support for type defaults and steer_params; keep only label ranges
-  typeDefaultScalar_ = {};
-  typeDefaultVectorComp_ = {};
-  labelScalarCfg_.clear();
-  labelVectorCfg_.clear();
+  hasConfig_m = false;
+  // Drop support for type defaults and steerParams; keep only label ranges
+  typeDefaultScalar_m = {};
+  typeDefaultVectorComp_m = {};
+  labelScalarCfg_m.clear();
+  labelVectorCfg_m.clear();
 
   enum class Mode { None, Ranges };
   Mode mode = Mode::None;
@@ -1148,10 +1148,10 @@ bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
   std::istringstream iss(yaml);
   std::string rawLine;
   while (std::getline(iss, rawLine)) {
-    std::string line = strip_comment(rawLine);
+    std::string line = stripComment(rawLine);
     line = rtrim(line);
     if (line.find_first_not_of(' ') == std::string::npos) continue; // empty
-    int indent = leading_spaces(line);
+    int indent = leadingSpaces(line);
     std::string t = trim(line);
 
     // Only consider the 'ranges:' section
@@ -1170,28 +1170,28 @@ bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
       bool minPresent=false, maxPresent=false, defPresent=false;
       double mn=0.0, mx=0.0, df=0.0, tmp=0.0;
       // Inline parse (handles e.g. "{ min: -1, max: 1 }")
-      bool any=false; parse_inline_map_into("{" + t + "}", any, mn, mx, df);
+      bool any=false; parseInlineMapInto("{" + t + "}", any, mn, mx, df);
       // Explicit single-key parsing (overrides inline if specific)
-      if (starts_with(t, "min:")) { if (extract_number(t, "min", tmp)) { mn = tmp; minPresent = true; } }
-      if (starts_with(t, "max:")) { if (extract_number(t, "max", tmp)) { mx = tmp; maxPresent = true; } }
-      if (starts_with(t, "default:")) { if (extract_number(t, "default", tmp)) { df = tmp; defPresent = true; } }
+      if (startsWith(t, "min:")) { if (extractNumber(t, "min", tmp)) { mn = tmp; minPresent = true; } }
+      if (startsWith(t, "max:")) { if (extractNumber(t, "max", tmp)) { mx = tmp; maxPresent = true; } }
+      if (startsWith(t, "default:")) { if (extractNumber(t, "default", tmp)) { df = tmp; defPresent = true; } }
       // If inline map contained keys but not detected as single-key lines, infer presence
       if (any && !minPresent && t.find("min:") != std::string::npos) minPresent = true;
       if (any && !maxPresent && t.find("max:") != std::string::npos) maxPresent = true;
       if (any && !defPresent && t.find("default:") != std::string::npos) defPresent = true;
 
       if (minPresent || maxPresent || defPresent) {
-        ScalarCfg& sc = labelScalarCfg_[currentLabel]; sc.has = true;
+        ScalarCfg& sc = labelScalarCfg_m[currentLabel]; sc.has = true;
         if (minPresent) sc.min = mn;
         if (maxPresent) sc.max = mx;
         if (defPresent) sc.def = df;
 
-        VectorCfg& vc = labelVectorCfg_[currentLabel]; vc.has = true; vc.uniform = true;
+        VectorCfg& vc = labelVectorCfg_m[currentLabel]; vc.has = true; vc.uniform = true;
         if (minPresent) vc.umin = mn;
         if (maxPresent) vc.umax = mx;
         if (defPresent) vc.udef = df;
 
-        hasConfig_ = true;
+        hasConfig_m = true;
       }
       continue;
     }
@@ -1199,7 +1199,7 @@ bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
     if (indent == 0) { mode = Mode::None; }
   }
 
-  return hasConfig_;
+  return hasConfig_m;
 }
 
 } // namespace ippl

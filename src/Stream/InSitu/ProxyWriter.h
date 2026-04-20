@@ -31,11 +31,11 @@ namespace ippl {
  * - Generate the XML with produce() or produceUnified()
  *
  * YAML schema (implicit typing):
- * type_defaults:
+ * typeDefaults:
  *   scalar: { min: <num>, max: <num>, default: <num> }
  *   vector:
  *     component_defaults: { min: <num>, max: <num>, default: <num> }
- * steer_params:
+ * steerParams:
  *   Efield: { min: <num>, max: <num>, default: <num> }
  *   Bfield:
  *     components:
@@ -96,7 +96,7 @@ public:
   template <typename T>
   void include(const T& defaultValue, const std::string& label);
 
-  template <typename T, unsigned Dim_v>
+  template <typename T, unsigned Dim_V>
   void includeVector(const std::string& label);
 
   /**
@@ -136,7 +136,7 @@ public:
                       const std::string& unifiedGroupLabel);
 
    // Record desired initial tuple count for a given array namespace (e.g., "LinMaps")
-   void setArrayInitialSize(const std::string& ns, std::size_t n) { arrayInitialSize_[ns] = static_cast<unsigned>(n); }
+   void setArrayInitialSize(const std::string& ns, std::size_t n) { arrayInitialSize_m[ns] = static_cast<unsigned>(n); }
 private:
   // Internal XML builders and helpers (implemented in ProxyWriter.cpp)
   void resetStreams();
@@ -153,7 +153,7 @@ private:
   bool loadConfigFromYamlFile(const std::string& path);
   bool loadConfigFromYamlString(const std::string& yaml);
   void applyScalarConfig(Channel& ch) const;
-  template<unsigned Dim_v>
+  template<unsigned Dim_V>
   void applyVectorConfig(Channel& ch) const;
 
   // Parsed config cache (populated by YAML loader or setConfigNode)
@@ -166,26 +166,26 @@ private:
   };
 
   // ------------------------------ Data members ---------------------------------
-  std::filesystem::path outPath_{};
+  std::filesystem::path outPath_m{};
   // Global range defaults are no longer used for emission; kept only for backward compatibility if needed.
-  double rangeMin_{0};
-  double rangeMax_{0};
-  std::string prototypeLabel_{"SteerableParameters"};
+  double rangeMin_m{0};
+  double rangeMax_m{0};
+  std::string prototypeLabel_m{"SteerableParameters"};
 
-  std::vector<Channel> channels_{};
-  std::ostringstream header_{};
-  std::ostringstream sources_{};
-  std::ostringstream misc_{};
-  std::ostringstream footer_{};
+  std::vector<Channel> channels_m{};
+  std::ostringstream header_m{};
+  std::ostringstream sources_m{};
+  std::ostringstream misc_m{};
+  std::ostringstream footer_m{};
 
-  bool hasConfig_{false};
-  ScalarCfg typeDefaultScalar_{};
-  VectorCompCfg typeDefaultVectorComp_{};
-  std::map<std::string, ScalarCfg> labelScalarCfg_{};
-  std::map<std::string, VectorCfg> labelVectorCfg_{};
+  bool hasConfig_m{false};
+  ScalarCfg typeDefaultScalar_m{};
+  VectorCompCfg typeDefaultVectorComp_m{};
+  std::map<std::string, ScalarCfg> labelScalarCfg_m{};
+  std::map<std::string, VectorCfg> labelVectorCfg_m{};
 
   // Initial lengths for array namespaces; used to pre-populate default_values count
-  std::map<std::string, unsigned> arrayInitialSize_{};
+  std::map<std::string, unsigned> arrayInitialSize_m{};
 };
 } // namespace ippl
 
