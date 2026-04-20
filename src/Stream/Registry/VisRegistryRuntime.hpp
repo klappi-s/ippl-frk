@@ -27,79 +27,81 @@ namespace ippl {
                 effectiveLabel = std::string("array:") + effectiveLabel;
             }
         }
-    // Materialize label as an owned copy for safe capture in lambdas
-    std::string L = effectiveLabel;
-    Entry e; e.label = L;
+        // Materialize label as an owned copy for safe capture in lambdas
+        std::string L = effectiveLabel;
+        Entry e; e.label_m = L;
 
-        // Visualization types (fields/particles)
         if constexpr (AllowedVisType_v<T>) {
-            e.do_init = [&value, L](InitVisitor_t& v) { v(L, value); };
-            e.do_exec = [&value, L](ExecuteVisitor_t& v) { v(L, value); };
-            entries_.push_back(std::move(e));
-            index_exec_[L] = entries_.size() - 1;
-            return;
+            e.dispatchVis_m = [&value, L](CatalystAdaptor::VisVisitorVariant_t var) {
+                std::visit([&](auto* active_ptr) {
+                    if (active_ptr) (*active_ptr)(L, value);
+                }, var);
+            };
+        } 
+        else if constexpr (AllowedSteerType_v<T>) {
+            e.dispatchSteer_m = [&value, L](CatalystAdaptor::SteerVisitorVariant_t var) {
+                std::visit([&](auto* active_ptr) {
+                    if (active_ptr) (*active_ptr)(L, value);
+                }, var);
+            };
         }
-
-        // Standard steerables (scalars, vectors, buttons, enums, etc.)
-        if constexpr (AllowedSteerType_v<T>) {
-            e.do_steer_init  = [&value, L](SteerInitVisitor_t& v)    { v(L, value); };
-            e.do_steer_fwd   = [&value, L](SteerForwardVisitor_t& v) { v(L, value); };
-            e.do_steer_fetch = [&value, L](SteerFetchVisitor_t& v)   { v(L, value); };
-            entries_.push_back(std::move(e));
-            return; // no execute index for pure steerables
+        else if (ippl::detail::StructMeta<DecayT>::registered) {
+            e.dispatchSteer_m = [&value, L](CatalystAdaptor::SteerVisitorVariant_t var) {
+                ippl::detail::StructMeta<DecayT>::dispatch(var, value, L);
+            };
         }
-
-        // Registered user struct (simple steering aggregation)
-        if (ippl::detail::StructMeta<DecayT>::registered) {
-            e.do_steer_init  = [&value, L](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<DecayT>::do_init(v, value, L); };
-            e.do_steer_fwd   = [&value, L](SteerForwardVisitor_t& v) { ippl::detail::StructMeta<DecayT>::do_fwd(v, value, L); };
-            e.do_steer_fetch = [&value, L](SteerFetchVisitor_t& v)   { ippl::detail::StructMeta<DecayT>::do_fetch(v, value, L); };
-            entries_.push_back(std::move(e));
-            return;
-        }
-
-        // Vector<RegisteredStruct>: aggregate members across elements
-        if constexpr (is_std_vector_v<DecayT>) {
-            using ElemT = typename DecayT::value_type;
-            std::cout << "is_std_vector" << std::endl;
-            if (ippl::detail::StructMeta<ElemT>::registered) {
-                std::cout << "is_registered ..." << std::endl;
-                e.do_steer_init  = [&value, L](SteerInitVisitor_t& v)    { ippl::detail::StructMeta<ElemT>::do_init_vec(v, value, L); };
-                e.do_steer_fwd   = [&value, L](SteerForwardVisitor_t& v){ ippl::detail::StructMeta<ElemT>::do_fwd_vec(v, value, L); };
-                e.do_steer_fetch = [&value, L](SteerFetchVisitor_t& v)  { ippl::detail::StructMeta<ElemT>::do_fetch_vec(v, value, L); };
-                entries_.push_back(std::move(e));
-                return;
+        else {
+            if constexpr (is_std_vector_v<DecayT>) {
+                using ElemT = typename DecayT::value_type;
+                if (ippl::detail::StructMeta<ElemT>::registered) {
+                    e.dispatchSteer_m = [&value, L](CatalystAdaptor::SteerVisitorVariant_t var) {
+                        ippl::detail::StructMeta<ElemT>::dispatch_vec(var, value, L);
+                    };
+                }
             }
         }
+        entries_m.push_back(std::move(e));
+        if constexpr (AllowedVisType_v<T>) {
+            indexExec_m[L] = entries_m.size() - 1;
+        }
 
-        // Fallback: unsupported type -> throw (runtime instead of static_assert for flexibility)
-    throw IpplException("VisRegistryRuntime::add", std::string("Unsupported value type for registry entry '") + label + "' (type=" + typeid(T).name() + ")");
+        // Check if type is completely unsupported
+        bool supported = false;
+        if constexpr (AllowedVisType_v<T> || AllowedSteerType_v<T>) {
+            supported = true;
+        } else if (ippl::detail::StructMeta<DecayT>::registered) {
+            supported = true;
+        } else {
+            if constexpr (is_std_vector_v<DecayT>) {
+                using ElemT = typename DecayT::value_type;
+                if (ippl::detail::StructMeta<ElemT>::registered) {
+                    supported = true;
+                }
+            }
+        }
+        
+        if (!supported) {
+            throw IpplException("VisRegistryRuntime::add", std::string("Unsupported value type for registry entry '") + label + "' (type=" + typeid(T).name() + ")");
+        }
     }
 
 
     // Overload: add shared_ptr<U> by binding to referenced object and keeping lifetime
     template<class U>
     void VisRegistryRuntime::add(const std::string& label, const std::shared_ptr<U>& ptr) {
-        // using DecayU = std::decay_t<U>;
         if (!ptr) return;
 
-        // Allow visualisation, steerables, and registered structs.
-        // if constexpr (!(AllowedRegistryType_v<DecayU>)) {
-        //     if (!ippl::detail::StructMeta<DecayU>::registered) {
-        //         throw IpplException("VisRegistryRuntime::add(shared_ptr)", std::string("Unsupported shared_ptr type for entry '") + label + "' (type=" + typeid(U).name() + ")");
-        //     }
-        // }
-
         add(label, *ptr); // delegates to lvalue path (already handles struct/meta)
-        // keep alive by capturing shared_ptr in a no-op callback
-        auto& e = entries_.back();
+        // keep alive by capturing shared_ptr in a wrapper callback
+        auto& e = entries_m.back();
         auto keep = ptr; // copy
-        // augment one of the callbacks or create a dummy fetch to hold lifetime
-        if (!e.do_init) {
-            e.do_init = [keep](InitVisitor_t&) {};
-        } else {
-            auto fn = e.do_init;
-            e.do_init = [keep, fn](InitVisitor_t& v) { fn(v); };
+        if (e.dispatchVis_m) {
+            auto fn = e.dispatchVis_m;
+            e.dispatchVis_m = [keep, fn](CatalystAdaptor::VisVisitorVariant_t v) { fn(v); };
+        }
+        if (e.dispatchSteer_m) {
+            auto fn = e.dispatchSteer_m;
+            e.dispatchSteer_m = [keep, fn](CatalystAdaptor::SteerVisitorVariant_t v) { fn(v); };
         }
     }
     

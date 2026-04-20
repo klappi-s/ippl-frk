@@ -138,13 +138,13 @@ struct CatalystAdaptor::InitVisitor {
     template<typename T>
     requires(AllowedVisType_v<T>)
     void operator()(const std::string& label, const T& entry) const {
-        ca.init_entry(entry, label);
+        ca.InitVizChannel(entry, label);
     }
 
     template<typename T>
     requires(!AllowedVisType_v<T>)
     void operator()(const std::string label, const T& entry) const {
-       throw IpplException("CatalystAdaptor::ExecuteVisitor", "Unsupported VIS type for channel: " + label);
+       throw IpplException("CatalystAdaptor::ExecVisitor", "Unsupported VIS type for channel: " + label);
     }
     
 };
@@ -153,22 +153,22 @@ struct CatalystAdaptor::InitVisitor {
 
 
 /**
- * @struct CatalystAdaptor::ExecuteVisitor
+ * @struct CatalystAdaptor::ExecVisitor
  * @brief Publishes data views each step for registered fields/particles.
  */
-struct CatalystAdaptor::ExecuteVisitor {
+struct CatalystAdaptor::ExecVisitor {
     CatalystAdaptor& ca;
 
     template<typename T>
     requires(AllowedVisType_v<T>)
     void operator()(const std::string& label, const T& entry) const {
-        ca.execute_entry(entry, label );
+        ca.ExecVizChannel(entry, label );
     }
 
     template<typename T>
     requires(!AllowedVisType_v<T>)
     void operator()(const std::string label, const T& entry) const {
-       throw IpplException("CatalystAdaptor::ExecuteVisitor", "Unsupported VIS type for channel: " + label);
+       throw IpplException("CatalystAdaptor::ExecVisitor", "Unsupported VIS type for channel: " + label);
     }
 
 };
@@ -189,13 +189,13 @@ struct CatalystAdaptor::SteerInitVisitor {
     template<class S> 
     requires(AllowedSteerType_v<S>)
     void operator()(const std::string& label, const S& entry) const {
-        ca.InitSteerableChannel(entry, label);
+        ca.InitSteerChannel(entry, label);
     }
 
     template<class S>
     requires(!AllowedSteerType_v<S>)
     void operator()(const std::string label , const S&) const {
-        throw IpplException("CatalystAdaptor::AddSteerableChannel", "Unsupported steerable type for channel: " + label);
+        throw IpplException("CatalystAdaptor::ForwardSteerChannel", "Unsupported steerable type for channel: " + label);
     }
 };
 
@@ -211,13 +211,13 @@ struct CatalystAdaptor::SteerForwardVisitor {
     template<class S>
     requires(AllowedSteerType_v<S>)
     void operator()(const std::string& label, const S& entry) const {
-        ca.AddSteerableChannel(entry, label);
+        ca.ForwardSteerChannel(entry, label);
     }
 
     template<class S>
     requires(!AllowedSteerType_v<S>)
     void operator()(const std::string label , const S&) const {
-        throw IpplException("CatalystAdaptor::AddSteerableChannel", "Unsupported steerable type for channel: " + label);
+        throw IpplException("CatalystAdaptor::ForwardSteerChannel", "Unsupported steerable type for channel: " + label);
     }
 };
 
@@ -231,13 +231,13 @@ struct CatalystAdaptor::SteerFetchVisitor {
     template<class S> 
     requires( AllowedSteerType_v<S> )
     void operator()(const std::string& label, S& value) const {
-        ca.FetchSteerableChannelValue(value, label);
+        ca.FetchSteerChannel(value, label);
     }
 
     template<class S>
     requires(!AllowedSteerType_v<S>)
     void operator()(const std::string label, S&) const { 
-        throw IpplException("CatalystAdaptor::FetchSteerableChannel", "Unsupported steerable type for channel: " + label);
+        throw IpplException("CatalystAdaptor::FetchSteerChannel", "Unsupported steerable type for channel: " + label);
     }
 };
 

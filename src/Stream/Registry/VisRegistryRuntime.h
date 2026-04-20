@@ -8,7 +8,7 @@
 //  * Scalars   (arithmetic types) – for steerable parameters or simple values
 //  * Particles (deriving from ParticleBaseBase)
 //  * Fields    (ippl::Field<V,Dim,...>)
-// Provides visitor-based for_each with overload resolution on real concrete type.
+// Provides visitor-based forEach with overload resolution on real concrete type.
 // NOTE: To allow mutation of scalars through steering, store reference_wrapper<T>.
 
 #include <memory>
@@ -38,6 +38,8 @@
 
 
 
+#include <variant>
+
 // Category traits
 namespace ippl {
 
@@ -64,104 +66,94 @@ struct access_traits<T*> {
 /**
  * @brief Non-templated heterogeneous registry for visualization & steering.
  *
- * Stores only three allowed categories:
+ * Stores three allowed categories:
  *  - Scalars   (arithmetic types) – for steerable parameters or simple values
  *  - Particles (deriving from ParticleBaseBase)
  *  - Fields    (ippl::Field<V,Dim,...>)
  *
- * Provides visitor-based for_each with overload resolution on real concrete type.
+ * Provides visitor-based forEach with overload resolution on real concrete type.
  * NOTE: To allow mutation of scalars through steering, store reference_wrapper<T>.
  */
 class VisRegistryRuntime {
-    using InitVisitor_t          = CatalystAdaptor::InitVisitor;
-    using ExecuteVisitor_t       = CatalystAdaptor::ExecuteVisitor;
-    using SteerInitVisitor_t     = CatalystAdaptor::SteerInitVisitor;
-    using SteerForwardVisitor_t  = CatalystAdaptor::SteerForwardVisitor;
-    using SteerFetchVisitor_t    = CatalystAdaptor::SteerFetchVisitor;
-
+private:
     /**
      * @brief Internal struct representing a registry entry.
      *
      * Holds the label and per-visitor callbacks for each registered object.
      */
     struct Entry {
-        std::string label;
-        // Per-visitor callbacks; only relevant ones are set per entry
-        std::function<void(InitVisitor_t&)>         do_init;
-        std::function<void(ExecuteVisitor_t&)>      do_exec;
-        std::function<void(SteerInitVisitor_t&)>    do_steer_init;
-        std::function<void(SteerForwardVisitor_t&)> do_steer_fwd;
-        std::function<void(SteerFetchVisitor_t&)>   do_steer_fetch;
+        std::string label_m;
+        std::function<void(CatalystAdaptor::VisVisitorVariant_t)> dispatchVis_m;
+        std::function<void(CatalystAdaptor::SteerVisitorVariant_t)> dispatchSteer_m;
     };
 
     /**
      * @brief Container for all registered entries.
      */
-    std::vector<Entry> entries_;
+    std::vector<Entry> entries_m;
 
     // Fast index for execute-ables: last one wins on duplicate labels.
-    std::unordered_map<std::string, std::size_t> index_exec_;
+    std::unordered_map<std::string, std::size_t> indexExec_m;
 
 public:
 
     /**
-     * @brief Apply a visitor to all entries with an init callback.
+     * @brief Apply a visitor to all registered entries.
      * @param v The visitor to apply.
      */
-    void for_each(InitVisitor_t& v) const {
-        for (auto const& e : entries_) if (e.do_init) e.do_init(v);
-    }
-    /**
-     * @brief Apply a visitor to all entries with an execute callback.
-     * @param v The visitor to apply.
-     */
-    void for_each(ExecuteVisitor_t& v) const {
-        for (auto const& e : entries_) if (e.do_exec) e.do_exec(v);
-    }
-    void for_each(SteerInitVisitor_t& v) const {
-        for (auto const& e : entries_) if (e.do_steer_init) e.do_steer_init(v);
-    }
-    /**
-     * @brief Apply a visitor to all entries with a steer forward callback.
-     * @param v The visitor to apply.
-     */
-    void for_each(SteerForwardVisitor_t& v) const {
-        for (auto const& e : entries_) if (e.do_steer_fwd) e.do_steer_fwd(v);
-    }
-    /**
-     * @brief Apply a visitor to all entries with a steer fetch callback.
-     * @param v The visitor to apply.
-     */
-    void for_each(SteerFetchVisitor_t& v) const {
-        for (auto const& e : entries_) if (e.do_steer_fetch) e.do_steer_fetch(v);
+    template <typename VisitorT>
+    void forEach(VisitorT& v) const {
+        if constexpr (std::is_constructible_v<CatalystAdaptor::VisVisitorVariant_t, VisitorT*>) {
+            CatalystAdaptor::VisVisitorVariant_t var = &v;
+            for (const auto& e : entries_m) {
+                if (e.dispatchVis_m) e.dispatchVis_m(var);
+            }
+        } else if constexpr (std::is_constructible_v<CatalystAdaptor::SteerVisitorVariant_t, VisitorT*>) {
+            CatalystAdaptor::SteerVisitorVariant_t var = &v;
+            for (const auto& e : entries_m) {
+                if (e.dispatchSteer_m) e.dispatchSteer_m(var);
+            }
+        }
     }
 
     /**
      * @brief we guarenteed that label is in index_entry_ by checking in remember function
      * 
      *
-     * @brief Apply ExecuteVisitor to a single entry identified by label.
+     * @brief Apply ExecVisitor to a single entry identified by label.
      * @return true if found and executed, false otherwise.
      */
-    bool for_one(const std::string label, ExecuteVisitor_t& v) const {
-        auto it = index_exec_.find(label);
-            if (it == index_exec_.end()) {
-                // Label not found among executable entries; emit a small diagnostic once
-                std::cerr << "VisRegistryRuntime::for_one: label not found: '" << label << "'\n";
-                std::cerr << "  Available exec labels (" << index_exec_.size() << "):" << std::endl;
-                for (const auto& kv : index_exec_) std::cerr << " " << kv.first << std::endl;
-                std::cerr << std::endl;
-                return false;
-        }
-        const auto& e = entries_[it->second];
-        if (!e.do_exec) {
-            // Entry exists but has no execute callback (e.g., steer-only)
-
-            std::cout << "for_one: No execute CallBack" << std::endl;
+    template <typename VisitorT>
+    bool forOne(const std::string& label, VisitorT& v) const {
+        auto it = indexExec_m.find(label);
+        if (it == indexExec_m.end()) {
+            std::cerr << "VisRegistryRuntime::forOne: label not found: '" << label << "'\n";
+            std::cerr << "  Available exec labels (" << indexExec_m.size() << "):" << std::endl;
+            for (const auto& kv : indexExec_m) std::cerr << " " << kv.first << std::endl;
+            std::cerr << std::endl;
             return false;
         }
-        e.do_exec(v);
-        return true;
+        const auto& e = entries_m[it->second];
+        
+        if constexpr (std::is_constructible_v<CatalystAdaptor::VisVisitorVariant_t, VisitorT*>) {
+            if (!e.dispatchVis_m) {
+                std::cout << "forOne: No vis dispatch CallBack" << std::endl;
+                return false;
+            }
+            CatalystAdaptor::VisVisitorVariant_t var = &v;
+            e.dispatchVis_m(var);
+            return true;
+        } else if constexpr (std::is_constructible_v<CatalystAdaptor::SteerVisitorVariant_t, VisitorT*>) {
+            if (!e.dispatchSteer_m) {
+                std::cout << "forOne: No steer dispatch CallBack" << std::endl;
+                return false;
+            }
+            CatalystAdaptor::SteerVisitorVariant_t var = &v;
+            e.dispatchSteer_m(var);
+            return true;
+        } else {
+            return false;
+        }
     }
 
 public:
@@ -222,14 +214,14 @@ public:
      * @brief Get the number of registered entries.
      * @return The number of entries.
      */
-    std::size_t size() const noexcept { return entries_.size(); }
+    std::size_t size() const noexcept { return entries_m.size(); }
 
 
     /**
      * @brief Check if the registry is empty.
      * @return True if empty, false otherwise.
      */
-    bool empty() const noexcept { return entries_.empty(); }
+    bool empty() const noexcept { return entries_m.empty(); }
 };
 
 

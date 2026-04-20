@@ -585,7 +585,7 @@ public:
         
 #ifdef IPPL_ENABLE_CATALYST
         IpplTimings::startTimer(TMR_CAremember);
-        cat_vis.Remember_now("density");
+        cat_vis.rememberNow("density");
         IpplTimings::stopTimer(TMR_CAremember);
 #endif
 #ifdef IPPL_ENABLE_ASCENT
