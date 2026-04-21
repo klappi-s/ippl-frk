@@ -142,16 +142,16 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
 // ===================== Typed enum choices registration (definitions) =====================
 
 
-template<typename E>
-requires (std::is_enum_v<std::decay_t<E>>)
-void CatalystAdaptor::RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries) {
-    std::vector<std::pair<std::string,int>> conv;
-    conv.reserve(entries.size());
-    for (const auto& p : entries) {
-        conv.emplace_back(p.first, static_cast<int>(p.second));
-    }
-    RegisterEnumChoices(label, conv);
-}
+// template<typename E>
+// requires (std::is_enum_v<std::decay_t<E>>)
+// void CatalystAdaptor::RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries) {
+//     std::vector<std::pair<std::string,int>> conv;
+//     conv.reserve(entries.size());
+//     for (const auto& p : entries) {
+//         conv.emplace_back(p.first, static_cast<int>(p.second));
+//     }
+//     RegisterEnumChoices(label, conv);
+// }
 
 template<typename E>
 requires (std::is_enum_v<std::decay_t<E>>)

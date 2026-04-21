@@ -381,7 +381,7 @@ public:
 
         static IpplTimings::TimerRef CAinit = IpplTimings::getTimer("CAinit");
         IpplTimings::startTimer(CAinit);
-        cat_vis.InitializeRuntime(runtime_vis_registry, runtime_steer_registry);
+        cat_vis.Initialize(runtime_vis_registry, runtime_steer_registry);
         IpplTimings::startTimer(CAinit);
 
 
@@ -612,7 +612,7 @@ public:
 
 #ifdef IPPL_ENABLE_CATALYST
         IpplTimings::startTimer(TMR_CAexecute);
-        cat_vis.ExecuteRuntime(it, this->time_m);
+        cat_vis.Execute(it, this->time_m);
         IpplTimings::stopTimer(TMR_CAexecute); 
 #endif
 

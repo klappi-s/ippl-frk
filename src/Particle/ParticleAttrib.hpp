@@ -36,27 +36,16 @@ namespace ippl {
 
 
 #ifdef IPPL_ENABLE_CATALYST
-            /* cant use reequires since using it here means having to use in derived class as well
-            and using it in derived class means having to use it in base class as well which does not make sense
-            so we switched to SFINAE approach instead */
-            // requires(!std::is_scalar_v<T>)
-
-            // In general, for runtime performance, neither function overloading nor if 
-            // constexpr has an inherent advantage when used correctly for compile-time 
-            // dispatch. Both eliminate runtime overhead compared to dynamic checks (like 
-            // function pointers or switch statements).
-            // function overloading with template parameter extraction or constraints or sfinae 
-            // are all pretty impossible to use in this case so we switched to if const expr
-
-            // In general, for runtime performance, neither function overloading nor if constexpr
-            //  has an inherent advantage when used correctly for compile-time dispatch. 
-            //  Both eliminate runtime overhead compared to dynamic checks 
-            // (like function pointers or switch statements).
-
-
-
+    //////////////////////////////////////////////////////////////////////////////////////
+    // Note:
+    // In general, for runtime performance, neither function overloading nor if 
+    // constexpr has an inherent advantage when used correctly for compile-time 
+    // dispatch. .
+    // Function overloading with template parameter extraction or constraints or sfinae 
+    // are all hard to implement in this case, so we switched to if const expr.
+    //////////////////////////////////////////////////////////////////////////////////////
     template <typename T, class... Properties>
-    void ParticleAttrib<T, Properties...>::signConduitBlueprintNode_rememberHostCopy(
+    void ParticleAttrib<T, Properties...>::signConduitBlueprintNode(
         const size_type Np_local, 
         conduit_cpp::Node& node_fields, 
         ViewRegistry& viewRegistry,
@@ -70,14 +59,10 @@ namespace ippl {
             hostMirror  = this->getHostMirror();
             Kokkos::deep_copy(hostMirror ,  this->getView());
         } else{
-            // Creates a host-accessible mirror view and copies the data from the device view to the host.
-            // comType HostMirror would let the function auto deduct the wanted space ...
             hostMirror =   Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), this->getView());
         }
         auto field = node_fields[this->name];
-        // auto field = node_fields["tester"];
         field["association"].set_string("vertex");
-        // must name a topology defined in the channel
         field["topology"].set_string("p_unstructured_topo");
         field["volume_dependent"].set_string("false");
     
@@ -98,32 +83,24 @@ namespace ippl {
                 << "                          ParticleAttribute<ippl::vector<" << typeid(typename T::value_type).name()<<","<<T::dim<<">>::signConduitBlueprintNode()" << endl;
 
                 
-            // const size_t stride_bytes = sizeof(typename T::value_type)*T::dim;
             using elem_t = std::remove_pointer_t<decltype(hostMirror.data())>;
-            //avoids padding etc
             const size_t stride_bytes = sizeof(elem_t);
             // static constexpr size_t stride_bytes = sizeof(elem_t);
 
             if(Np_local>0){
                                 field["values/x"].set_external(&hostMirror.data()[0][0], Np_local, 0 , stride_bytes );
                             if constexpr (T::dim>=2){
-                                //ca_m <<"2"<<endl;
                                 field["values/y"].set_external(&hostMirror.data()[0][1], Np_local, 0 ,  stride_bytes );
                             }
                             if constexpr (T::dim>=3) {
-                                // ca_m <<"3"<<endl;
                                 field["values/z"].set_external(&hostMirror.data()[0][2], Np_local, 0 ,  stride_bytes  );
                             }
             }else /* (Np_local=0) */ {
-
-
-            // Np_local is 0. We MUST provide valid, empty arrays for the gather to work.
-            using component_type = typename T::value_type;
-            
-
-                                     field["values/x"].set_external(static_cast<component_type*>(nullptr), 0);
-            if constexpr (T::dim>=2) field["values/y"].set_external(static_cast<component_type*>(nullptr), 0);
-            if constexpr (T::dim>=3) field["values/z"].set_external(static_cast<component_type*>(nullptr), 0);
+                // If Np_local is 0. We MUST provide valid, empty arrays for the gather to work.
+                using component_type = typename T::value_type;
+                                         field["values/x"].set_external(static_cast<component_type*>(nullptr), 0);
+                if constexpr (T::dim>=2) field["values/y"].set_external(static_cast<component_type*>(nullptr), 0);
+                if constexpr (T::dim>=3) field["values/z"].set_external(static_cast<component_type*>(nullptr), 0);
             }
         } else {
             // --- INVALID CASE ---
@@ -135,7 +112,6 @@ namespace ippl {
                     << "                          supported for visualisation." << endl;
         }
         viewRegistry.set(hostMirror);
-        // node_fields.print();
     }
     #endif
 

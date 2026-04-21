@@ -64,7 +64,7 @@ inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::val
 
 
             #ifdef IPPL_ENABLE_CATALYST
-            void signConduitBlueprintNode_rememberHostCopy(
+            void signConduitBlueprintNode(
                               const size_type Np_local
                             , conduit_cpp::Node& node_fields
                             , ViewRegistry& viewRegistry

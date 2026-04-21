@@ -3,8 +3,8 @@
  * @brief Declarations and lightweight types for ParaView Catalyst in-situ integration.
  *
  * This header provides helper types, forward declarations, and includes used by the
- * Catalyst adaptor. Heavy implementation details live in `CatalystAdaptor.hpp` to
- * keep compile times down.
+ * Catalyst adaptor. Heavy implementation details live in `CatalystAdaptor.hpp` and 
+ * `CatalystAdaptorSteering.hpp`.
  */
 #ifndef CatalystAdaptor_h
 #define CatalystAdaptor_h
@@ -44,15 +44,15 @@ class VisRegistryRuntime;
 
 
 
-    /**
-     * @struct Button
-     * @brief Momentary-action control for steering.
-     *
-     * A Button acts like an edge-trigger: it reports a single transition when
-     * pressed and then resets. Useful for one-shot actions triggered from the
-     * Catalyst GUI without latching state.
-     */
-    struct Button {
+/**
+ * @struct Button
+ * @brief Momentary-action control for steering.
+ *
+ * A Button acts like an edge-trigger: it reports a single transition when
+ * pressed and then resets. Useful for one-shot actions triggered from the
+ * Catalyst GUI without latching state.
+ */
+struct Button {
         Button() = default;
         
         // explicit not explicit allows: if(my_btn) to work  
@@ -110,24 +110,26 @@ class VisRegistryRuntime;
         private: 
             bool value_m = false;
             bool priorState_m = false;
-    }; 
+};// Button
 
- /**
-  * @brief Host-side 1D mask view (0/1) used for ghost/halo flags.
-  */
+
+/**
+ * @brief Host-side 1D mask view (0/1) used for ghost/halo flags.
+ */
 using HostMaskView1D_t = Kokkos::View<unsigned char*, Kokkos::LayoutLeft, Kokkos::HostSpace>;
-// 1. Define an alias for your key type for cleanliness
- /**
-  * @brief Cache key for ghosted data.
-  *
-  * Tuple components:
-  *  - pointer identifying the mesh/topology
-  *  - pointer identifying the owning view/container
-  *  - size/extent of the ghost region
-  */
+
+
+/**
+ * @brief Cache key for ghosted data.
+ *
+ * Tuple components:
+ *  - pointer identifying the mesh/topology
+ *  - pointer identifying the owning view/container
+ *  - size/extent of the ghost region
+ */
 using GhostKey_t = std::tuple<const void*, const void*, size_t>;
 
-// 2. Define the custom hash function struct
+
 /**
  * @brief Hash functor for GhostKey_t used in unordered caches.
  */
@@ -146,17 +148,14 @@ struct GhostKeyHash {
     }
 };
 
-// namespace CatalystAdaptor {
+
 /**
  * @class CatalystAdaptor
  * @brief High-level orchestrator for Catalyst initialization, execution, and steering.
  *
- * The adaptor wires up registered fields/particles and steerables to Conduit `node_m` instances.
- * @brief High-level orchestrator for Catalyst initialization, execution, and steering.
- *
  * The adaptor wires up registered fields/particles and steerables to Conduit `node_m` instances,
  * invokes Catalyst scripts, and forwards/fetches steering values between the
- * simulation and the GUI. Use the runtime registry API (InitializeRuntime/ExecuteRuntime)
+ * simulation and the GUI. Use the runtime registry API (Initialize/Execute)
  * for flexible, non-templated integration.
  */
 class CatalystAdaptor {
@@ -175,7 +174,6 @@ private:
     std::shared_ptr<ippl::VisRegistryRuntime> steerRegistry_m;
     
     ViewRegistry viewRegistry_m;
-    // conduit_cpp::Node node_init;
     conduit_cpp::Node node_m;
     conduit_cpp::Node results_m;
     public:
@@ -184,20 +182,16 @@ private:
     private:
 
     ProxyWriter proxyWriter_m;
-    // Optional enum metadata: label -> list of (text,value) choices
-    std::unordered_map<std::string, std::vector<std::pair<std::string,int>>> enumChoices_m;
-    // Optional enum metadata registered by type (reusable across labels)
     std::unordered_map<std::type_index, std::vector<std::pair<std::string,int>>> enumChoicesByType_m;
-    // Optional enum metadata: type -> list of (text,value) choices (for reuse across labels)
-    // std::unordered_map<std::type_index, std::vector<std::pair<std::string,int>>> enumChoicesByType_m;
+    std::unordered_map<std::string, std::vector<std::pair<std::string,int>>> enumChoices_m;
 
     
-    /* taken from environemnt can be const... */
     const char* catalystVis_m  ;
     const char* catalystLive_m  ;
     const char* catalystSteer_m;
     const char* catalystPng_m  ;
     const char* catalystVtk_m  ;
+    const char* catalystVerbosity_m;
     const char* catalystGhostMask_m  ;
     const char* proxyOption_m;
     
@@ -206,31 +200,22 @@ private:
     const bool steerEnabled_m;
     const bool pngExtracts_m ;
     const bool vtkExtracts_m ;
+    const int  outputLevel_m  ; 
     const bool useGhostMasks_m;
     
-    std::string associate_m;
+    // std::string associate_m;
     const std::filesystem::path sourceDir_m;
 
     std::unordered_map<std::string, bool> forceHostCopy_m;    
     
-    // std::unordered_map<std::tuple<const void*, const void*,const size_t>, HostMaskView1D_t> ghostMaskCache_m;
     std::unordered_map<GhostKey_t, HostMaskView1D_t, GhostKeyHash> ghostMaskCache_m;
 
 public:
-    // Typed enum choices registration: provide choices as (name, enum) pairs for a specific label
-    template<typename E>
-    requires (std::is_enum_v<std::decay_t<E>>)
-    void RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries);
 
-    // Typed enum choices registration without label: register once per enum type (reused across labels)
-    template<typename E>
-    requires (std::is_enum_v<std::decay_t<E>>)
-    void RegisterEnumChoicesTyped(const std::vector<std::pair<std::string, E>>& entries);
 
-    CatalystAdaptor() : CatalystAdaptor(ippl::Info->getOutputLevel()){}
+    
 
-    CatalystAdaptor(int outputLevel_) : 
-    // CatalystAdaptor() : 
+    CatalystAdaptor() : 
                 catalystInfo_m("CatalystAdaptor::", 0),  // Only print on rank 0
                 catalystWarn_m("CatalystAdaptor_WARNING", std::cerr, INFORM_ALL_NODES), 
                 catalystVis_m(std::getenv("IPPL_CATALYST_VIS")),
@@ -238,6 +223,7 @@ public:
                 catalystSteer_m(std::getenv("IPPL_CATALYST_STEER")),
                 catalystPng_m(std::getenv("IPPL_CATALYST_PNG")),
                 catalystVtk_m(std::getenv("IPPL_CATALYST_VTK")),
+                catalystVerbosity_m(std::getenv("IPPL_CATALYST_VERBOSITY")),
                 catalystGhostMask_m(std::getenv("IPPL_CATALYST_GHOST_MASKS")),
                 proxyOption_m(std::getenv("IPPL_CATALYST_PROXY_OPTION")),
                 visEnabled_m( ! (catalystVis_m        && std::string(catalystVis_m)    == "OFF") ),
@@ -245,16 +231,17 @@ public:
                 steerEnabled_m(  catalystSteer_m      && std::string(catalystSteer_m)  == "ON"),
                 pngExtracts_m(   catalystPng_m        && std::string(catalystPng_m)    == "ON"),
                 vtkExtracts_m(   catalystVtk_m        && std::string(catalystVtk_m)    == "ON"),
+                outputLevel_m(   catalystVerbosity_m  ? std::stoi(catalystVerbosity_m) : ippl::Info->getOutputLevel()),
                 useGhostMasks_m(catalystGhostMask_m && std::string(catalystGhostMask_m) == "ON"),
                 sourceDir_m(std::filesystem::path(CATALYST_ADAPTOR_ABS_DIR) / "Stream" / "InSitu")
     {
-        associate_m="element";
+        // associate_m="element";
 
         if(!liveEnabled_m){
             catalystLive_m ="OFF";
         }
         
-        catalystInfo_m.setOutputLevel(outputLevel_);
+        catalystInfo_m.setOutputLevel(outputLevel_m);
         
         #if defined(MPI_VERSION)
         MPI_Barrier(MPI_COMM_WORLD);
@@ -263,14 +250,6 @@ public:
         if(ippl::Comm->rank()==1) catalystWarn_m << "[rank= 1 size=" << ippl::Comm->size() << "]" << endl;
         MPI_Barrier(MPI_COMM_WORLD);
         #endif
-
-
-        // catalystWarn_m << "[rank=" << ippl::Comm->rank() << " size=" << ippl::Comm->size() << "]" << endl;
-        // catalystWarn_m.setOutputLevel(5);
-        // catalystInfo_m.setMessageLevel(2);
-        // catalystWarn_m.setMessageLevel(5);
-
-
 
         catalystInfo_m << "::CatalystAdaptor()   Global        Output  Level setting: " << ippl::Info->getOutputLevel() << endl;
         catalystInfo_m << "::CatalystAdaptor()   Catalyst Info Output  Level setting: " << catalystInfo_m.getOutputLevel() << endl;
@@ -288,8 +267,11 @@ public:
 
     }
 
+    private:
 
-    /*  sets a file path to a certain node, first tries to fetch from environment, afterwards uses the dafault path passed  */
+    // ==============================================================================================
+    //  HELPERS =====================================================================================
+    // ==============================================================================================
     /**
      * @brief Sets a file path to a node, using an environment variable if available, otherwise a default path.
      *
@@ -306,7 +288,7 @@ public:
 
 
     // ==========================================================
-    // CHANNEL INITIALIZERS =====================================
+    // VISUALIZATION CHANNEL INITIALIZERS =======================
     // ==========================================================
 
 
@@ -332,22 +314,22 @@ public:
 
     /* VECTOR FIELDS - handles both reference and shared_ptr */
     // == ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>, Cell>*
-        /**
-         * @brief Initializes a Conduit `node_m` instance entry for a vector field.
-         *
-         * @tparam T Vector value type.
-         * @tparam Dim Field dimension.
-         * @tparam Dim_v Vector dimension.
-         * @tparam ViewArgs Additional template arguments for the field.
-         * @param entry The vector field to initialize.
-         * @param label The label for the field/channel.
-         */
-        template<typename T, unsigned Dim, unsigned Dim_v, class... ViewArgs>
-        void InitVizChannel( 
-                                          [[maybe_unused]]  
-                                          const Field<Vector<T, Dim_v>, Dim, ViewArgs...>& entry
-                                        , const std::string label
-        );
+    /**
+     * @brief Initializes a Conduit `node_m` instance entry for a vector field.
+     *
+     * @tparam T Vector value type.
+     * @tparam Dim Field dimension.
+     * @tparam Dim_v Vector dimension.
+     * @tparam ViewArgs Additional template arguments for the field.
+     * @param entry The vector field to initialize.
+     * @param label The label for the field/channel.
+     */
+    template<typename T, unsigned Dim, unsigned Dim_v, class... ViewArgs>
+    void InitVizChannel( 
+                                      [[maybe_unused]]  
+                                      const Field<Vector<T, Dim_v>, Dim, ViewArgs...>& entry
+                                    , const std::string label
+    );
 
 
 
@@ -370,14 +352,14 @@ public:
 
 
     /* SHARED_PTR DISPATCHER - automatically unwraps and dispatches to appropriate overload */
-        /**
-         * @brief Dispatcher for InitVizChannel: unwraps shared_ptr and dispatches to the appropriate overload.
-         *
-         * @tparam T Entry type.
-         * @param entry Shared pointer to the entry.
-         * @param label The label for the entry/channel.
-         */
-        template<typename T>
+    /**
+     * @brief Dispatcher for InitVizChannel: unwraps shared_ptr and dispatches to the appropriate overload.
+     *
+     * @tparam T Entry type.
+     * @param entry Shared pointer to the entry.
+     * @param label The label for the entry/channel.
+     */
+    template<typename T>
     void InitVizChannel( 
                   const std::shared_ptr<T>&   entry
                 , const std::string           label
@@ -385,9 +367,12 @@ public:
 
 
 
-    // BASE CASE: only enabled if EntryT is NOT derived from ippl::ParticleBaseBase
+    // BASE CASE: 
+    // only enabled if EntryT is NOT derived from ippl::ParticleBaseBase
     /**
-     * @brief Fallback for InitVizChannel: handles types not derived from ParticleBaseBase.
+     * @brief Fallback for InitVizChannel: handles types not derived from ParticleBaseBase 
+     * and not having specific overloads. Should never be called since these types are already 
+     * filtered out inside a Visitor struct with AllowedVisType_v.
      *
      * @tparam T Entry type.
      * @param entry The entry to initialize (not a particle container).
@@ -405,15 +390,14 @@ public:
 
 
     // ==========================================================
-    // CHANNEL EXECUTIONERS =====================================
+    // VISUALIZATION CHANNEL EXECUTIONERS =======================
     // ==========================================================
                
-        /* VECTOR FIELDS - handles both reference and shared_ptr */
-     
-        /* SCALAR FIELDS - handles both reference and shared_ptr */
-        // == ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>, Cell>
-        // == ippl::Field<double, 3, ippl::UniformCartesian<double, 3>, Cell>*
-        // == ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>, Cell>*
+    
+    /* SCALAR FIELDS - handles both reference and shared_ptr */
+    /* VECTOR FIELDS - handles both reference and shared_ptr */
+    // == ippl::Field<double, 3, ippl::UniformCartesian<double, 3>, Cell>
+    // == ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>, Cell>
     /**
      * @brief Executes a scalar/vector field entry, populating the Conduit `node_m` instance and updating the view registry.
      *
@@ -423,9 +407,6 @@ public:
      * @param entry The scalar/vector field to execute.
      * @param label The label for the field/channel.
      *
-     * @brief Populates a Conduit `node_m` instance with field data for Catalyst (3D fields only).
-     *
-     * @tparam Field Field type (must have dim == 3).
     */
     template<typename T, unsigned Dim, class... ViewArgs>
     void ExecVizChannel(    
@@ -434,18 +415,6 @@ public:
     );
 
 
-
-    /* instead of maps storing kokkos view in scope we use the registry to keep everything in frame .... and be totally type indepedent
-    we can set with name (but since we likely will not have the need to ever retrieve we can just stire nameless
-    to redzcede unncessary computin type ...) */
-
-
-
-
-    /**
-     * @brief Populates a Conduit `node_m` instance with particle container data for Catalyst.
-     *
-     */
     // PARTICLECONTAINERS DERIVED FROM PARTICLEBASE:
     /**
      * @brief Executes a particle container entry (derived from ParticleBaseBase), populating the Conduit `node_m` instance and updating the view registry.
@@ -493,6 +462,18 @@ public:
     );
 
 
+
+    // ==========================================================
+    // STEERING CHANNEL INITIALIZERS===== =======================
+    // ==========================================================
+
+    /**
+     * @brief Initializes a steerable channel in the Conduit `node_m` instance for runtime parameter adjustment.
+     *
+     * @tparam T Type of the steerable parameter.
+     * @param steerableScalarForwardpass The initial value to set.
+     * @param label The label for the steerable channel.
+     */
     template<typename T>
     requires (!std::is_enum_v<std::decay_t<T>>)
     void InitSteerChannel( const T& steerableScalarForwardpass,  const std::string& label );
@@ -522,6 +503,9 @@ public:
     void InitSteerChannel( const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label );
 
 
+    // ==========================================================
+    // STEERING CHANNEL EXECUTIONERS=============================
+    // ==========================================================
 
     /**
      * @brief Adds a steerable channel to the Conduit `node_m` instance for runtime parameter adjustment.
@@ -541,6 +525,7 @@ public:
 
     // Bool-like switch overload
     void ForwardSteerChannel(const bool& sw, const std::string& steerableSuffix);
+
     // Button-like push overloads
     void ForwardSteerChannel(const ippl::Button& btn, const std::string& steerableSuffix);
 
@@ -559,6 +544,10 @@ public:
 
 
 
+    // ==========================================================
+    // STEERING CHANNEL FETCHERS    =============================
+    // ==========================================================
+
     /**
      * @brief Fetches the value of a steerable channel from Catalyst results.
      *
@@ -569,15 +558,17 @@ public:
     template<typename T>
     requires (!std::is_enum_v<std::decay_t<T>>)
     void FetchSteerChannel( T& steerableScalarBackwardpass, const std::string& steerableSuffix);
+
     // Enum overloads (arbitrary enum types)
     template<typename E>
     requires (std::is_enum_v<std::decay_t<E>>)
     void FetchSteerChannel( E& e, const std::string& steerableSuffix);
     
-    // Vector overloads for steerable channels
+    // ippl Vector overload
     template<typename T, unsigned Dim_v>
     void FetchSteerChannel( ippl::Vector<T, Dim_v>& steerableVecBackwardpass, const std::string& steerableSuffix);
 
+    // standard vector overload for basic types
     template<typename Elem>
     requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
     void FetchSteerChannel( std::vector<Elem>& out, const std::string& label);
@@ -586,25 +577,107 @@ public:
     template<typename T, unsigned Dim_v>
     void FetchSteerChannel( std::vector<ippl::Vector<T, Dim_v>>& out, const std::string& label);
         
-    // ---------------------------------------------------------------------
-    // Struct steering registration (simple initial version)
-    // ---------------------------------------------------------------------
-    // Expose any user struct composed of already supported steerable member
-    // types (arithmetic, bool, ippl::Button, ippl::Vector<>, enums, LinMap,
-    // LinMaps, std::vector<LinMap>). Nested structs are intentionally not
-    // supported yet. Must be called before adding the struct instance to a
-    // runtime registry.
-    template<typename T, typename... Args>
-    static void RegisterStructMembers(Args&&... args);
-
 
     /**
      * @brief Retrieves results from Catalyst and populates the given Conduit `node_m` instance.
      *
      */
     void fetchResults();
+    
+
+    // =====================================================================================
+    //  CatalystAdaptor Public Methods
+    // =====================================================================================
+    public:
+
+    /**
+     * @brief Struct steering registration.
+     *
+     * Expose any user struct composed of already supported steerable member
+     * types (arithmetic, bool, ippl::Button, ippl::Vector<>, enums). Nested structs are not
+     * supported yet. Must be called before adding the struct instance to a
+     * runtime registry.
+     * 
+     * @tparam T The struct type to register.
+     * @tparam Args Types of the member pointers.
+     * @param args Pointers to the struct members.
+     */
+    template<typename T, typename... Args>
+    static void RegisterStructMembers(Args&&... args);
 
 
+
+    // Optional enum metadata: label -> list of (text,value) choices
+    // std::unordered_map<std::string, std::vector<std::pair<std::string,int>>> enumChoices_m;
+    // /**
+    //  * @brief Provides enum choices metadata so the GUI shows a dropdown.
+    //  *
+    //  * Use this before InitializeRuntime. 
+    //  * Example: RegisterEnumChoices("mode", {{"Off",0},{"Basic",1},{"Advanced",2}});
+    //  * 
+    //  * @param label The label for the enum choice.
+    //  * @param entries A vector of pairs containing the display name and integer value.
+    //  */
+    // void RegisterEnumChoices(const std::string& label,
+    //                          const std::vector<std::pair<std::string,int>>& entries) {
+    //     enumChoices_m[label] = entries;
+    // }
+
+    // /**
+    //  * @brief Provides typed enum choices metadata mapped to a specific label for the GUI dropdown.
+    //  *
+    //  * @tparam E The enumeration type.
+    //  * @param label The specific label of the steerable channel to associate the choices with.
+    //  * @param entries A vector of pairs containing the display name and the enumeration value.
+    //  */
+    // template<typename E>
+    // requires (std::is_enum_v<std::decay_t<E>>)
+    // void RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries);
+
+    /**
+     * @brief Provides typed enum choices metadata registered by the enum type, to be reused across labels.
+     *
+     * @tparam E The enumeration type.
+     * @param entries A vector of pairs containing the display name and the enumeration value.
+     */
+    template<typename E>
+    requires (std::is_enum_v<std::decay_t<E>>)
+    void RegisterEnumChoicesTyped(const std::vector<std::pair<std::string, E>>& entries);
+
+
+
+
+    /**
+     * @brief Initializes Catalyst using runtime registries (visualization and steering).
+     *
+     * @param visReg Shared pointer to the visualization runtime registry.
+     * @param steerReg Shared pointer to the steering runtime registry.
+     */
+    void Initialize(
+                           const std::shared_ptr<VisRegistryRuntime>& visReg,
+                           const std::shared_ptr<VisRegistryRuntime>& steerReg
+    );
+
+    /**
+     * @brief Explicitly forces a host copy for a specifically labelled channel right now.
+     * 
+     * @param label The label specifying which field or particle to remember currently.
+     */
+    void rememberNow(const std::string label);
+
+    /**
+     * @brief Executes Catalyst for a given timestep using the runtime registry.
+     *
+     * Populates forward steerable values and fetches back updated ones.
+     * 
+     * @param cycle The current simulation cycle or timestep index.
+     * @param time The current simulation time.
+     * @param rank The MPI rank of the executing process (defaults to ippl::Comm->rank()).
+     */
+    void Execute(
+                        int cycle, double time, 
+                        int rank = ippl::Comm->rank()
+    );
 
 
     /**
@@ -612,44 +685,12 @@ public:
      */
     void Finalize();
 
-// =====================================================================================
-// Runtime registry based Initialize / Execute (non-templated registry)
-// =====================================================================================
-
-
-    // Runtime (non-templated) API additions -------------------------------------------------
-    // Initialize Catalyst using a runtime registry (vis + steer)
-    void InitializeRuntime(
-                           const std::shared_ptr<VisRegistryRuntime>& visReg,
-                           const std::shared_ptr<VisRegistryRuntime>& steerReg
-    );
-
-    // Provide enum choices metadata before InitializeRuntime, so the GUI shows a dropdown.
-    // Example: RegisterEnumChoices("mode", {{"Off",0},{"Basic",1},{"Advanced",2}});
-    void RegisterEnumChoices(const std::string& label,
-                             const std::vector<std::pair<std::string,int>>& entries) {
-        enumChoices_m[label] = entries;
-    }
-
-    void rememberNow(const std::string);
-
-
-
-
-    // Execute Catalyst for a given timestep using runtime registry.
-    // Populates forward steerable values and fetches back updated ones.
-    void ExecuteRuntime(
-                        int cycle, double time, 
-                        int rank = ippl::Comm->rank()
-    );
-
 
 
 };//class CatalystAdaptor
 } //namespace ippl
   
 #include "Stream/InSitu/CatalystVisitors.h"
-  // runtime non-templated flexible (slow?) registry
 #include "Stream/Registry/VisRegistryRuntime.h"     // visitor structs
 #include "CatalystAdaptor.hpp"
 

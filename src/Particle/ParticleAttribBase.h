@@ -43,7 +43,7 @@ namespace ippl {
             
             
             #ifdef IPPL_ENABLE_CATALYST
-            virtual void signConduitBlueprintNode_rememberHostCopy(
+            virtual void signConduitBlueprintNode(
                               const size_type Np_local
                             , conduit_cpp::Node& node_fields
                             , ViewRegistry& viewRegistry

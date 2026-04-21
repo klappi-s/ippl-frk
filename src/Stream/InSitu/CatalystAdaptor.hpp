@@ -9,29 +9,8 @@
 namespace ippl{
 
 // ==============================================================================================
-// META PRPOGRAMMING HELPERS ====================================================================
-// ==============================================================================================
-
-template <typename T, typename = void>
-struct has_getRegionLayout : std::false_type {};
-
-template <typename T>
-struct has_getRegionLayout<T, std::void_t<decltype(std::declval<T>().getRegionLayout())>> 
-    : std::true_type {};
-
-template <typename T>
-constexpr bool has_getRegionLayout_v = has_getRegionLayout<T>::value;
-
-
-
-
-// ==============================================================================================
 //  HELPERS =====================================================================================
 // ==============================================================================================
-
- 
-/*  sets a file path to a certain node, first tries to fetch from environment, 
-afterwards uses the dafault path passed  */
 void CatalystAdaptor::setNodeScript(
     conduit_cpp::Node nodePath,
     const std::string envVar,
@@ -58,8 +37,7 @@ void CatalystAdaptor::setNodeScript(
 // VIS CHANNEL INITIALIZER:======================================================================
 // ==============================================================================================
 
-// init visualisation for SCALAR FIELDS 
-// == ippl::Field<double, 3, ippl::UniformCartesian<double, 3>, Cell>*
+// == ippl::Field<double, 3, ippl::UniformCartesian<double, 3>, Cell>
 template<typename T, unsigned Dim, class... ViewArgs>
 void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const Field<T, Dim, ViewArgs...>& entry , const std::string label)
 {
@@ -70,7 +48,6 @@ void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const Field<T, Dim, View
         if(pngExtracts_m){
             const std::string script = "catalyst/scripts/" + label;
             setNodeScript( node_m[script + "/filename"],
-                            // "CATALYST_EXTRACTOR_SCRIPT_S",
                             "CATALYST_EXTRACTOR_SCRIPT_" +label,
                             sourceDir_m /"catalyst_scripts" / "catalyst_extractors" /"png_ext_sfield.py"
                         );
@@ -93,7 +70,6 @@ void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const Field<T, Dim, View
 }
 
 
-// init visualisation for VECTOR FIELDS  
 // == ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>, Cell>
 template<typename T, unsigned Dim, unsigned Dim_v, class... ViewArgs>
 void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const Field<Vector<T, Dim_v>, Dim, ViewArgs...>& entry , const std::string label)
@@ -110,7 +86,6 @@ void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const Field<Vector<T, Di
             const std::string script = "catalyst/scripts/" + label;
 
             setNodeScript( node_m[script + "/filename"],
-                            // "CATALYST_EXTRACTOR_SCRIPT_S",
                             "CATALYST_EXTRACTOR_SCRIPT_" + label,
                             sourceDir_m /"catalyst_scripts" / "catalyst_extractors" /"png_ext_vfield.py"
                             
@@ -134,7 +109,7 @@ void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const Field<Vector<T, Di
 
 }
 
-// init visualisation for PARTICLECONTAINERS derived from ParticleBaseBase:
+// PARTICLECONTAINERS derived from ParticleBaseBase:
 // == ippl::ParticleBase<PLayout<T, dim>,...>,...>
 template<typename T>
 requires (std::derived_from<std::decay_t<T>, ParticleBaseBase>)
@@ -144,7 +119,6 @@ void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const T& entry, const st
                 << typeid(particle_value_t<T>).name() << ","<< particle_dim_v<T> 
                 << ",...>...> [or subclass]) called" << endl;
                     
-            
         forceHostCopy_m[label] = false;
 
             const std::string channelName = "ippl_particles_" + label;
@@ -153,7 +127,6 @@ void CatalystAdaptor::InitVizChannel( [[maybe_unused]]  const T& entry, const st
 
                 setNodeScript( 
                             node_m[script + "/filename"],
-                            // "CATALYST_EXTRACTOR_SCRIPT_S",
                             "CATALYST_EXTRACTOR_SCRIPT_" +label,
                             sourceDir_m /"catalyst_scripts" / "catalyst_extractors" /"png_ext_particle.py"
                 );
@@ -182,9 +155,8 @@ template<typename T>
 void CatalystAdaptor::InitVizChannel( const std::shared_ptr<T>&   entry, const std::string label)
 {
     if (entry) {
-        // catalystInfo_m << level4 <<"  dereferencing shared pointer and reattempting execute..." << endl;
         InitVizChannel(  *entry
-                    , label
+                        , label
         );
     }
     else {
@@ -195,7 +167,7 @@ void CatalystAdaptor::InitVizChannel( const std::shared_ptr<T>&   entry, const s
 }
 
 
-// BASE CASE: only enabled if EntryT is NOT derived from ippl::ParticleBaseBase
+// BASE CASE: 
 template<typename T>
 requires (!std::derived_from<std::decay_t<T>, ParticleBaseBase>)
 void CatalystAdaptor::InitVizChannel([[maybe_unused]] const T& entry, const std::string label)
@@ -203,24 +175,20 @@ void CatalystAdaptor::InitVizChannel([[maybe_unused]] const T& entry, const std:
         catalystWarn_m <<  "::Initialize()InitVizChannel(nullptr): Entry type can't be processed."   << endl 
                 <<  "       ID: "<< label                                   << endl 
                 <<  "       Type: "<< typeid(std::decay_t<T>).name()        << endl 
-                <<  "   ==>Channel will not be registered in Conduit Node." << endl;
+                <<  "   ==>Channel will not be registered in Conduit Node." << endl
+                <<  "   If you see this something is wrong with: CatalystAdaptor::InitVisitor!!" << endl;
 }
   
 
 
 
-// execute visualisation for FIELDS: check dimension independence
 // == ippl::Field<double, 3, ippl::UniformCartesian<double, 3>, Cell>*
 // == ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>, Cell>*
 template<typename T, unsigned Dim, class... ViewArgs>
 void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, const std::string label)
-{   /* HANDLES CASE IF ENTRY HAS BEEN EXECUTED WITH REMEMBER_NOW */
+{   
+    /* In case entry has already been executed with rememberNow there is nothing to do. */
     if(viewRegistry_m.contains(label)) return;
-
-    // bool associate_by_element = 1;
-    // if(associate_by_element)
-    // std::string associate = "element";
-    // std::string associate = "vertex";
 
 
     using Field_type = Field<T, Dim, ViewArgs...>;
@@ -243,22 +211,12 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
                     << "    supported for visualisation." << endl;
         }
 
-        
-        // channel for this field
-        // channel of type mesh adheres to conduits mesh blueprint
+        // channel for this field of type mesh adheres to conduits mesh blueprint
         auto channel = node_m["catalyst/channels/"+ channelName];
         auto channel_state = channel["state"];
-        // channel_state["multiblock"].set(1);
 
         channel["type"].set_string("mesh");
         auto data   = channel["data"];
-        
-        
-        // multimesh?
-        // const std::string blockName = "block_rank" + std::to_string(ippl::Comm->rank());
-        // const std::string blockName = "block_allRanks";
-        // channel["type"].set_string("multimesh");
-        // auto data   = channel["data"][blockName];
         
         
         auto fields = data["fields"];
@@ -298,13 +256,9 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         const auto Oy = Origin_[1] + (double(int(LocalNDIndex_[1].first()) - int(index_offset)) + extra_origin) * Spacing_[1];
         const auto Oz = Origin_[2] + (double(int(LocalNDIndex_[2].first()) - int(index_offset)) + extra_origin) * Spacing_[2];
 
-        
-
         const size_t nx =               LocalNDIndex_[0].length() + extra                 ;
         const size_t ny = (Dim >= 2) ?  LocalNDIndex_[1].length() + extra      :         1;
         const size_t nz = (Dim >= 3) ?  LocalNDIndex_[2].length() + extra      :         1;
-
-
 
         const void* meshKey   = static_cast<const void*>(&Mesh_);
         const void* layoutKey = static_cast<const void*>(&Layout_);
@@ -314,9 +268,11 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         const int rank = ippl::Comm->rank();
 
         // using RankViewCells_t = Kokkos::View<int*, Kokkos::HostSpace>;
+        // RankViewCells_t rank_id_view_cells("rank_id_view_cells", localNumCells);
+        // auto host_policy = getRangePolicy(rank_id_view_cells);
+
         using RankViewCells_t = Kokkos::View<int***, Kokkos::HostSpace>;
         using HostExecSpace = Kokkos::DefaultHostExecutionSpace;
-        // RankViewCells_t rank_id_view_cells("rank_id_view_cells", localNumCells);
         RankViewCells_t rank_id_view_cells("rank_id_view_cells_3D", nx, ny, nz);
 
         if (localNumCells > 0) {
@@ -324,7 +280,6 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
                 {0, 0, 0},      // Start indices {i, j, k}
                 {nx, ny, nz}    // End indices {i, j, k}
             );
-            // auto host_policy = getRangePolicy(rank_id_view_cells);
             Kokkos::parallel_for("fill_rank_ids_3D", host_policy, 
                 KOKKOS_LAMBDA(const int i, const int j, const int k) {
                 rank_id_view_cells(i, j, k) = rank;
@@ -332,7 +287,7 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         }
 
         auto rank_field = fields["RankID"];
-        rank_field["association"].set_string(associate_m); // vs vertex ...
+        rank_field["association"].set_string("element"); // associate_m);
         rank_field["topology"].set_string("fmesh_topo");
         rank_field["volume_dependent"].set_string("false");
         if (localNumCells > 0) {
@@ -343,8 +298,6 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         data["metadata/vtk_fields/RankID/attribute_type"].set_string("ProcessIds");
         viewRegistry_m.set(label + "_rank_id_cells", rank_id_view_cells);
 
-       
-
 
         auto print_ranked_mesh_info = [&](){
             catalystWarn_m << "[  rank="          << ippl::Comm->rank() << "]"
@@ -354,13 +307,13 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
                     << " | spacing=("      << Spacing_[0] << "," << (Dim>=2?Spacing_[1]:0)<< "," << (Dim>=3?Spacing_[2]:0) << ")" << endl;
         };
 
-        #if defined(MPI_VERSION)
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(ippl::Comm->rank()==0)  print_ranked_mesh_info();
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(ippl::Comm->rank()==1)  print_ranked_mesh_info();
-        MPI_Barrier(MPI_COMM_WORLD);
-        #endif
+        // #if defined(MPI_VERSION)
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // if(ippl::Comm->rank()==0)  print_ranked_mesh_info();
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // if(ippl::Comm->rank()==1)  print_ranked_mesh_info();
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // #endif
      
         {
             data["coordsets/cart_uniform_coords/dims/i"].set(nx+ dims_n );
@@ -381,30 +334,39 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
             data["topologies/fmesh_topo/origin/z"].set(         Oz );
         }
 
+        
 
-
-        const auto& fullDeviceView = field->getView(); // Assuming this is your original view
+        const auto& fullDeviceView = field->getView(); // original view
         using DeviceView_t = typename Field<T, Dim, ViewArgs...>::view_type;
+        // Fix HostView_t to use LayoutLeft, the layout ParaView requires.
+        using HostView_t = Kokkos::View<
+            typename DeviceView_t::data_type,
+            Kokkos::LayoutLeft,  
+            Kokkos::HostSpace
+        >;
+        
+        ////////////////////////////////////////////////////////////////////////
+        // NOTE: 
+        // in genral if Layout of IPPL and Catalyst would align we simply could use 
+        // create_mirror_view_and_copy for enforced deep copy. But IPPL's memoy 
+        // space is user defined.
+        //
         // using device_memory_space =
-                // typename Kokkos::View<typename DeviceView_t::data_type>::memory_space;
-        // --- NEEDED OF FIX : LAYOUT ---
-        // in genral if Layout of IPPL and Catalyst would align we could use 
-        // create_mirror_view_and_copy over enforced deep copy.
+        // typename Kokkos::View<typename DeviceView_t::data_type>::memory_space;
+        //
         // using HostView_t =
         //     Kokkos::View<typename DeviceView_t::data_type,
         //                  typename DeviceView_t::array_layout,
         //                  Kokkos::HostSpace>;
-        // --- START OF FIX ---
-        // Change HostView_t to use LayoutLeft, the layout ParaView wants.
-        using HostView_t = Kokkos::View<
-            typename DeviceView_t::data_type,
-            Kokkos::LayoutLeft,  // <-- THE IMPORTANT CHANGE
-            Kokkos::HostSpace
-        >;
-        // --- END OF FIX ---
+        ////////////////////////////////////////////////////////////////////////
+        
 
+        // ==================================
+        // Prepare Field Data in a HostMirror
+        // ==================================
+
+        // Version 1: Cut out Ghost Cells from data during a deep copy into a new Kokkos View.
         auto getHostMirrorView_noGhosts = [&]() -> HostView_t {
-            /* CREATE VIEW OF DATA WITHOUT GHOSTS */
 
             auto r0 = 
                         Kokkos::make_pair(nGhost, nGhost + nx);
@@ -418,48 +380,53 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
             
             auto deviceSubView = Kokkos::subview(fullDeviceView, r0, r1, r2);
                 
-            // if (!forceHostCopy_m[label] && std::is_same<device_memory_space, Kokkos::HostSpace>::value) 
-            //      can't use subview direct since data of subview isn't meaningfull accessible in raw format with data() 
-            //      further this function can't convert from LayoutRight to LayoutLeft  // so we can't use SHALLOW_COPY
-            // B. DEEP COPY (Different memory spaces OR deep copy explicitly forced)
-            // --- NEEDED OF FIX: LAYOUT ---
-            // HostView_t hostMirrorFinal = HostView_t("hostMirrorNoGhosts",nx,ny,nz); 
             HostView_t hostMirrorFinal = HostView_t("hostMirrorNoGhosts_LayoutLeft", nx, ny, nz);
             // This single deep_copy now performs:
             //    - Device-to-Host transfer
             //    - LayoutRight-to-LayoutLeft transpose
+            //    - Cutting Ghost Cells from data.
             Kokkos::deep_copy(hostMirrorFinal, deviceSubView);
-            // --- END OF FIX ---
-
-
             return hostMirrorFinal  ;
+
+            /////////////////////////////////////////////////////////////////////////////////////////////////////////
+            // NOTE: 
+            // for both lambdas:
+            // Technically, we need to use deep copy: 1. when explicitly forced 2. In case of Different memory spaces.
+            // 3.(?) when layouts don't match up
+            // Even if we can't use a subview directly since data of subview isn't meaningfull accessible in raw format 
+            // with data() (so the subview can't be used by Conduit), but Conduit has it's own methods to access a 
+            // substructures of arrays. See: Conduit Strided Structured Field descriptions.
+            // more efficient versions without default deep copies should be possible partially relying on shallow copies.
+            //
+            // if (!forceHostCopy_m[label] && std::is_same<device_memory_space, Kokkos::HostSpace>::value) 
+            //      HostView_t hostMirrorFinal = HostView_t("hostMirrorNoGhosts",nx,ny,nz); 
+            //      -> use data directy if possible eg
+            //     HostView_t hostMirrorFinal = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), fullDeviceView);
+            //     return hostMirrorFinal;
+            //
+            //
+            // (?) create_mirror_and_copy, adapts to spaces! but can convert from LayoutRight to LayoutLeft?  
+            /////////////////////////////////////////////////////////////////////////////////////////////////////////
         };
         
         
+        // Version 2: Mark Ghost Cells in data with VTK meta data.
         auto getHostMirrorView_withGhosts = [&]() -> HostView_t 
         {
+            using m_t = unsigned char;  // Element Type for Field Mask 
+            
+            /* Define the N-D Host View types we needed for the upcoming section/copying. */
+            using DeviceMaskView_t = typename Field<m_t, Dim, ViewArgs...>::view_type; //Fetch original Field View Type 
+            using HostMaskView1D_t = Kokkos::View<m_t*, Kokkos::LayoutLeft, Kokkos::HostSpace>; //  Host STORAGE
+            using HostMaskView_t = Kokkos::View<
+                    typename DeviceMaskView_t::data_type, // e.g., unsigned char***
+                    Kokkos::LayoutLeft,
+                    Kokkos::HostSpace
+                >;    // Host WRAPPER
+            HostMaskView1D_t hostMaskView1D; // Declare storage view
+            
             
             // --- START OF CACHING LOGIC ---
-            // HostMaskView_t hostMaskView; // Declare view
-            /* CREATE VIEW OF DATA WITH GHOSTS + ADD GHOST FIELD TO CONDUIT*/
-            
-
-            using m_t = unsigned char;
-
-            // 3. Define the N-D Host View type we need for the copy
-            using DeviceMaskView_t = typename Field<m_t, Dim, ViewArgs...>::view_type;
-            /* STORAGE */
-            using HostMaskView1D_t = Kokkos::View<m_t*, Kokkos::LayoutLeft, Kokkos::HostSpace>;
-            /* WRAPPER */
-            using HostMaskView_t = Kokkos::View<
-                typename DeviceMaskView_t::data_type, // e.g., unsigned char***
-                Kokkos::LayoutLeft,
-                Kokkos::HostSpace
-            >;
-            
-            HostMaskView1D_t hostMaskView1D; // Declare view
-            
-            
             auto it = ghostMaskCache_m.find(ghostKey);
             if (it != ghostMaskCache_m.end()) 
             {
@@ -469,17 +436,18 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
             } 
             else 
             {   
-
                 // --- CACHE MISS ---
                 catalystInfo_m << level4 <<"::Execute()::ExecVizChannel(" << label << ") | GhostCache MISS" << endl;
-                // Allocate a mask field matching the source field (same mesh/layout/nghost)
-                // auto & meshRef   = field->get_mesh();
-                // auto & layoutRef = field->getLayout();
+
+                /* Allocate a mask field matching the source field (same mesh/layout/nghost) */
                 Field<m_t, Dim, ViewArgs...> ghostMaskField(Mesh_, Layout_, static_cast<int>(nGhost));
-                //Fill entire allocation (owned + ghosts) with 1
+                
+                /* Fill entire allocation (owned + ghosts) with 1 */
                 ghostMaskField = static_cast<m_t>(1);
                 DeviceMaskView_t deviceMaskView   = ghostMaskField.getView();
                 auto interior   = ghostMaskField.template getFieldRangePolicy<>(); 
+
+                /* Fill inner cells with 0 */
                 //  TODO(?): use ippl dimension independent iterators
                 if constexpr (Dim == 1) {
                     Kokkos::parallel_for("ZeroOwnedMask1D", interior, KOKKOS_LAMBDA(const int i) {
@@ -499,14 +467,14 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
                 }
                 Kokkos::fence();
                 
-                
-                //    Allocate the 1D host view that will own the memory
-                //    This view has the correct LayoutLeft for ParaView.
+                /* Allocate the 1D host view that will own the memory */
                 hostMaskView1D = HostMaskView1D_t("hostGhostMask_1D", deviceMaskView.size());
 
-                //    Create a temporary, UNMANAGED N-D view
-                //    that wraps the 1D view's data. This is our copy target.
-                //    This constructor handles any rank automatically.
+                /*  Create a temporary, UNMANAGED (8)N-D view that wraps the 1D view's data. 
+                    This is our copy target. The constructor handles any rank automatically.  
+                    (?) The 8-dim extent constructor is flexible for any dimension up to 8
+                    but eg 3 analog is not (or it seems so at the moment).
+                */
                 HostMaskView_t hostMaskView_N_Rank(
                     hostMaskView1D.data(),
                     deviceMaskView.extent(0),
@@ -516,91 +484,71 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
                     deviceMaskView.extent(4),
                     deviceMaskView.extent(5),
                     deviceMaskView.extent(6),
-                    deviceMaskView.extent(7) // Good for up to 8D
+                    deviceMaskView.extent(7) 
                 );
-                // The 8-dim extent constructor is flexible for any dimension
-                // but eg 3 analog is not .... seems so
 
-                //    Perform the transforming D->H + R->L copy
-                //    (Device, LayoutRight) -> (Host, LayoutLeft)
+                
+                // The deep_copy now performs:
+                    //  - Device-to-Host transfer
+                    //  - LayoutRight-to-LayoutLeft
+                    //  - Since ND wraps 1D; Copied data is in the hostMaskView1D owned data
                 Kokkos::deep_copy(hostMaskView_N_Rank, deviceMaskView);
 
-                //    Store the 1D view (which owns the memory) in the cache, enough to keep in memory
+                //  Store the 1D view (which owns the memory) in the cache, enough to keep in memory
                 ghostMaskCache_m[ghostKey] = hostMaskView1D;                
+                // --- END OF CACHING LOGIC ---
                 
-                // --- NEEDED OF FIX: LAYOUT ---
-                // using HostMaskView_t = Kokkos::View<typename decltype(deviceMaskView)::data_type,
-                //                                     typename decltype(deviceMaskView)::array_layout,
-                //                                     Kokkos::HostSpace>;
-                // ---                  ---
+                ////////////////////////////////////////////////////////////////////////////////////////
+                // NOTE: 
+                // I am unsure why a 3D wrapper would not succeed also, but currently a
+                // code along the following line will run into compilation issues (?).
+                //
+                // using HostMaskView_t = Kokkos::View<
+                //     typename decltype(deviceMaskView)::data_type,
+                //     typename decltype(deviceMaskView)::array_layout,
+                //     Kokkos::HostSpace
+                // >;
+                // ---      or              ---
                 // using HostMaskView_t = Kokkos::View<
                 //     typename decltype(deviceMaskView)::data_type,
                 //     Kokkos::LayoutLeft, // <-- Use LayoutLeft
                 //     Kokkos::HostSpace
                 // >;    
-                // HostMaskView_t hostMaskView("hostGhostMask_LayoutLeft",
+                //
+                // HostMaskView_t hostMaskView(hostMaskView1D.data(),
                 //                             deviceMaskView.extent(0),
                 //                             deviceMaskView.extent(1),
                 //                             deviceMaskView.extent(2));
+                //
                 // Kokkos::deep_copy(hostMaskView, deviceMaskView);
-                // //Store the newly created view in the cache
-                // ghostMaskCache_m[ghostKey] = hostMaskView;
-                // /* Cache Void pointer is not enough to not discard data->
-                // REMEMEBER MASK AND SET CONDUIT NODE */
-                // viewRegistry_m.set(hostMaskView);
+                //
+                // ghostMaskCache_m[ghostKey] = hostMaskView1D;
+                ////////////////////////////////////////////////////////////////////////////////////////
             }
-            // --- END OF CACHING LOGIC ---
-                
+            
 
 
 
-            // FIELD NAME IN DATA/FIELDS AND META_DATA/VTK_FIELDS SHOULD COINCIDE
             // auto ghostMask_field_meta  =  data["metadata/vtk_fields/GhostMask_field"]; // can't chooses arbitrary name!!!!
             auto ghostMask_field_meta  =  data["metadata/vtk_fields/vtkGhostType"]; 
             ghostMask_field_meta["attribute_type"] = "Ghosts";  // same as set string??...
             // auto ghostMask_field_node  =  fields["ghostMask_field"]; // can't chooses arbitrary name!!!! must be vtkGhostType
             auto ghostMask_field_node  =  fields["vtkGhostType"];
-            ghostMask_field_node["association"].set_string(associate_m); // vs vertex ...
+            ghostMask_field_node["association"].set_string("element");  //associate_m); // vs vertex ...
             ghostMask_field_node["topology"].set_string("fmesh_topo");
             ghostMask_field_node["volume_dependent"].set_string("false");
             // ghostMask_field_node["values"].set_external(hostMaskView.data(), hostMaskView.size());
             ghostMask_field_node["values"].set_external(hostMaskView1D.data(), hostMaskView1D.size());
+            
 
+            ////////////////////////////////////////////////////////////////////////////////////////////
+            // Note:
+            // Field name in the conduit nodes for data/fields and metadata/vtk_fields has to coincide
+            // so the meta data can be properly associated with the data.
+            ////////////////////////////////////////////////////////////////////////////////////////////
 
-
-
-
-
-
-
-
-
-
-
-
-
-            // --- NEEDED OF FIX: LAYOUT --- CANTT CHANGE LAYOUT SO WE ARE FORCED TO USE DEEP COPY OVER SHALLOW COPY
-            // if (!forceHostCopy_m[label] && std::is_same<device_memory_space, Kokkos::HostSpace>::value) 
-            // {   /* can't use this way since subview isnt accessible this way */
-            //     // A. SHALLOW COPY (No deep copy needed, device is on host memory)
-            //     // NOTE: This assumes LayoutLeft for the subview, or a layout conversion could be needed.
-            //     HostView_t hostMirrorFinal = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), fullDeviceView);
-            //     return hostMirrorFinal;
-            // } 
-            // else
-            // {   
-            //     // B. DEEP COPY (Different memory spaces OR deep copy explicitly forced)
-            //     // Kokkos::View<typename Field<T, Dim, ViewArgs...>::view_type::data_type, Kokkos::LayoutLeft, Kokkos::HostSpace>
-            //     HostView_t hostMirrorFinal = HostView_t("hostMirrorNoGhosts",nx,ny,nz);
-            //     //     fullDeviceView.extent(0),
-            //     Kokkos::deep_copy(hostMirrorFinal, fullDeviceView);
-            //     return hostMirrorFinal;
-            // }
-            // --- FIX FOR MAIN FIELD ---
             HostView_t hostMirrorFinal = HostView_t("hostMirrorWithGhosts_LayoutLeft", nx, ny, nz);
             Kokkos::deep_copy(hostMirrorFinal, fullDeviceView);
-
-            // hostMirrorFinal = fullDeviceView;
 
             return hostMirrorFinal;
             // --- END FIX FOR MAIN FIELD ---
@@ -608,9 +556,9 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
 
          
         HostView_t hostMirrorFinal = (useGhostMasks_m) ? getHostMirrorView_withGhosts() : getHostMirrorView_noGhosts();
-            /* FOR BOTH CASES FINAL NODE SETTINS ARE DONE AND WE HAVE THE DATA INSIDE hostMirrorFinal */
+            /* FOR BOTH CASES FINAL NODE SETTINGS ARE DONE AND WE HAVE THE DATA INSIDE hostMirrorFinal */
         using elem_t = std::remove_pointer_t<decltype(hostMirrorFinal.data())>;
-            // will return size of vector and amounts of vectors (not double)
+            // will return size of vector and amounts of vectors (not size of multiple doubles)
         const auto n_elems = hostMirrorFinal.size();
             // Use true element size as stride (handles padding)
         static constexpr size_t stride_bytes = sizeof(elem_t);
@@ -618,7 +566,7 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         const size_t offset = 0;
 
 
-        field_node["association"].set_string(associate_m);
+        field_node["association"].set_string("element"); //associate_m);
         field_node["topology"].set_string("fmesh_topo");
         field_node["volume_dependent"].set_string("false");
         if constexpr (std::is_scalar_v<T>) {
@@ -634,19 +582,19 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         // else {
             // --- INVALID CASE ---
         // }
-        /* SAVE VIEW SO DATA ISNT DISCARDED*/
+
+        /* save view so data isn't discarded */
         viewRegistry_m.set(label, hostMirrorFinal);
 }
 
 
 
-
-// execute visualisation for PARTICLECONTAINERS derived from ParticleBaseBase:
-// == ippl::ParticleBase<PLayout<T, dim>,...>,...>
+// ==  PARTICLECONTAINERS derived from ippl::ParticleBase<PLayout<T, dim>,...>,...>
 template<typename T>
 requires (std::derived_from<std::decay_t<T>, ParticleBaseBase>)
 void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label) 
 {   
+    /* In case entry has already been executed with rememberNow there is nothing to do. */
     if(viewRegistry_m.contains(label)) return;
 
         catalystInfo_m        << "::Execute()::ExecVizChannel(" << label << ") | Type : ParticleBase<PLayout<" 
@@ -667,34 +615,35 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
 
 
         auto channel = node_m["catalyst/channels/"+ channelName];
-        // channel["type"].set_string("mesh");
-        channel["type"].set_string("multimesh");
-    
 
+
+
+        channel["type"].set_string("multimesh");
+        
+        
         auto data =     channel["data/block_main"];
         auto data_help =     channel["data/block_help"];
         channel["assembly/main"] = "block_main";
         channel["assembly/help"] = "block_help";
-        // channel["assembly/ALL"].append().set_string("block_main");
-        // channel["assembly/ALL"].append().set_string("block_help");
-
-
-        // multimesh ??
-        // auto channel = node_m["catalyst/channels/"+ channelName];
-        // channel["type"].set_string("multimesh");
-        // auto data   = channel["data"][blockName];
+        
+        ////////////////////////////////////////////////////////
+        // Note:
+        // Multimesh currently seems to have caused more headaches compared to what
+        // we have seemed to have gained from using it. So if the bugs or inconveniences stay
+        // in upcoming updates for ParaView catalyst we might want to use two normal meshes
+        // instead.
+        // channel["type"].set_string("mesh");
+        ////////////////////////////////////////////////////////
+        
         auto fields = data["fields"];
-
         data["type"].set_string("mesh");
 
-        
-        
         
         // Creates a host-accessible mirror view and copies the data from the device view to the host.
         // compared to get_mirror and get_mirror_view host space is not guaranteed default behaviour so we specify...
         // comType HostMirror would let the function auto deduct the wanted space ...
         
-        // Get attribute types for ID and R, then their HostMirror types
+        /* Get attribute types for ID and R, then their HostMirror types */
         using IDAttrib_t = std::remove_reference_t<decltype(particleContainer->ID)>;
         using RAttrib_t  = std::remove_reference_t<decltype(particleContainer->R)>;
 
@@ -703,12 +652,13 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
 
         hostMirror_ID_t ID_hostMirror ;
         hostMirror_R_t  R_hostMirror  ;
+        //////////////////////////////////////////////////////////////////////
+        // Note: (not sure anympre why I switched away from something like this)
+        // auto ID_hostMirror = particleContainer->ID.getHostMirror();
+        // auto R_hostMirror  = particleContainer->R.getHostMirror();
+        //////////////////////////////////////////////////////////////////////
 
         if(forceHostCopy_m[label]){
-            // ParticleAttrib<std::int64_t>::HostMirror      ID_hostMirror;
-            // ParticleAttrib<Vector<double, 3>>::HostMirror R_hostMirror;
-            // auto ID_hostMirror = particleContainer->ID.getHostMirror();
-            // auto R_hostMirror  = particleContainer->R.getHostMirror();
             ID_hostMirror = particleContainer->ID.getHostMirror();
             R_hostMirror  = particleContainer->R.getHostMirror();
             Kokkos::deep_copy(ID_hostMirror,  particleContainer->ID.getView());
@@ -716,9 +666,7 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
             viewRegistry_m.set(label, ID_hostMirror);
             viewRegistry_m.set(R_hostMirror);
         }else{
-            /* if original is on host space no copy will b created and any changs will be taken over ... */
-            // auto ID_hostMirror =   Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particleContainer->ID.getView());
-            // auto  R_hostMirror  =   Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particleContainer->R.getView());
+            /* if original is on host space -> shallow copy (?) */
             ID_hostMirror =   Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particleContainer->ID.getView());
             R_hostMirror  =   Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particleContainer->R.getView());
             viewRegistry_m.set(label, ID_hostMirror);
@@ -726,22 +674,18 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
         }
 
 
-
         using PLayout_t = T::Layout_t;
         // using vector_t = T::Layout_t::vector_type;
         // using value_t  = T::Layout_t::value_type;
-        //avoids padding etc
-        using R_elem_t = std::remove_pointer_t<decltype(R_hostMirror.data())>;
+        using R_elem_t = std::remove_pointer_t<decltype(R_hostMirror.data())>; //avoids padding etc  (?) Rattrib_t
         static constexpr size_t R_stride_bytes = sizeof(R_elem_t);
 
-
-        /* CHECK IF PLAYOUT IS SPATIAL LAYOUT OR PURE LAYOUT */
+        /* checks if playput it spatial or pure layout */
         if constexpr (has_getRegionLayout_v<PLayout_t>){
 
             using RLayout_t  = PLayout_t::RegionLayout_t;
             using NDRegion_t = RLayout_t::NDRegion_t;
             constexpr unsigned dim_ = PLayout_t::dim;
-            // using value_type = PLayout_t::value_type;
             const NDRegion_t ndr = particleContainer->getLayout().getRegionLayout().getDomain();
             
             /* HELPER COORDINATES TO PASS THE BOUNDING BOX in vtk format*/
@@ -771,31 +715,27 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
     } 
     // else {
             /* will use raw particle data instead .. */
-            /* or do we now anything like unit square ??? */
-            // data["coordsets/bound_helper_coords/type"].set_string("uniform");
-            // data["topologies/bound_helper_topo/coordset"].set_string("bound_helper_coords");
-            // data["topologies/bound_helper_topo/type"].set_string("uniform");
-            // {
-            //     data["coordsets/bound_helper_coords/dims/i"].set(2);
-            //     data["coordsets/bound_helper_coords/spacing/dx"].set(1);
-            //     data["coordsets/bound_helper_coords/origin/x"].set(  0);
-            //     data["topologies/bound_helper_topo/origin/x"].set(   1);
-            // }....
         // }
         
         
         /* ATTRIBUTES HARDCODED IN PARTICELBASE are identity ID and position R */
         /* EXPLICIT COORDINATES -> EACH PARTICLE POSITION */
+
         const size_t localNum = particleContainer->getLocalNum();
         const int rank = ippl::Comm->rank(); 
 
-        #if defined(MPI_VERSION)
+
+        /////////////////////////////////////////////////////////////
+        // Note:
+        // For debuggng purposes checking distribution of particles on ranks...
+        // #if defined(MPI_VERSION)
+        // // MPI_Barrier(MPI_COMM_WORLD);
+        // // if(ippl::Comm->rank()==0)  catalystInfo_m << level4 <<"[Rank 0] Local Particles: " << localNum << endl;
         // MPI_Barrier(MPI_COMM_WORLD);
-        // if(ippl::Comm->rank()==0)  catalystInfo_m << level4 <<"[Rank 0] Local Particles: " << localNum << endl;
-        MPI_Barrier(MPI_COMM_WORLD);
-        catalystWarn_m << "Local Particles: " << localNum << endl;
-        MPI_Barrier(MPI_COMM_WORLD);
-        #endif
+        // catalystWarn_m << "Local Particles: " << localNum << endl;
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // #endif
+        /////////////////////////////////////////////////////////////
         
         
         using IotaView_t = Kokkos::View<int64_t*, Kokkos::HostSpace>;
@@ -808,7 +748,7 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
             Kokkos::parallel_for("fill_iota_host", host_policy, KOKKOS_LAMBDA(const int64_t i) {
                 iota_view(i) = i;
             });
-            // Kokkos::Experimental::fill(HostExecSpace(), rank_id_view, rank);
+            // Kokkos::Experimental::fill(HostExecSpace(), rank_id_view, rank); // doesn't work currently (01.2026)
             Kokkos::parallel_for("fill_rank_ids", host_policy, KOKKOS_LAMBDA(const int64_t i) {
                 rank_id_view(i) = rank; 
             });
@@ -820,19 +760,16 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
 
 
             data["coordsets/p_explicit_coords/type"].set_string("explicit");
-            /* UNSTRUCTURED TOPOLOGY RELYING ON UNIQUE PARTICLE ID'S */
+            /* unstructured topology relying on per rank unique particle ID */
             data["topologies/p_unstructured_topo/coordset"].set_string("p_explicit_coords");
             data["topologies/p_unstructured_topo/type"].set_string("unstructured");
             data["topologies/p_unstructured_topo/elements/shape"].set_string("point");
             data["topologies/p_unstructured_topo/elements/connectivity"].set_external(iota_view.data(),particleContainer->getLocalNum());
-            //OLD bug !! only works rank 1 since it is supposed to be an index for access when global ids are passed access will be out of bounds!!!
-            // data["topologies/p_unstructured_topo/elements/connectivity"].set_external(ID_hostMirror.data(),particleContainer->getLocalNum()); 
-
             
-            // this can be left hardcodeed or made part of the for loop, but more efficient to do it right here since we already have the hostView
+            // left hardcodeed we already have the hostViews (instead of integrating the into the loop)
 
             /* Process ID ATTRIBUTE */
-            auto rank_field = fields["RankID"]; // You can name this anything
+            auto rank_field = fields["RankID"];
             rank_field["association"].set_string("vertex");
             rank_field["topology"].set_string("p_unstructured_topo");
             rank_field["volume_dependent"].set_string("false");
@@ -880,29 +817,22 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
             R_field["values/z"].set_external(static_cast<component_type*>(nullptr), 0);
         }
 
-
-
-         /* "no way" to know what dimensions and types particle attributes will have
-            from pointer instance since is base pointer make execute member method instead to 
-            use virtual functions. Is most pragmatic approach. */
-
-            // entry.template forAllAttributes<void>(
-            //     [&]<typename Attributes>(const Attributes& atts) {
-            //         for (auto* attribute : atts) {
-            // const size_t n_attributes =  entry.getAttributeNum();
-            // for(size_t i = 2; i < n_attributes; ++i){
-            //     const auto attribute = entry.getAttribute(i);
-            //     const std::string  attribute_name = attribute->get_name();
-            //     // catalystInfo_m << level4 <<"Execute attribute: " << attribute_name << endl;
-            //     attribute->signConduitBlueprintNode_rememberHostCopy(particleContainer->getLocalNum(), fields, viewRegistry, catalystInfo_m, catalystWarn_m, forceHostCopy_m[label]);
-            // }
-
-        // (This function must also be safe for localNum == 0)
         const size_t n_attributes =  entry.getAttributeNum();
         for(size_t i = 2; i < n_attributes; ++i){
             const auto attribute = entry.getAttribute(i);
-            attribute->signConduitBlueprintNode_rememberHostCopy(localNum, fields, viewRegistry_m, catalystInfo_m, catalystWarn_m, forceHostCopy_m[label]);
+            attribute->signConduitBlueprintNode(localNum, fields, viewRegistry_m, catalystInfo_m, catalystWarn_m, forceHostCopy_m[label]);
         }
+         ////////////////////////////////////////////////////////////////////////////////////////////
+         // Note:
+         // All ways on how to iterate over particle attributes rely on base class pointers.
+         // In whih case dimensions and types particle attributes is not retrievable from the 
+         // a pointer instance. Therefore conduit maniupulation are done as a membermethod
+         // for paricleAttrib (overriding a virtual method in the base class).
+         //
+         // entry.template forAllAttributes<void>(
+         //     [&]<typename Attributes>(const Attributes& atts) {
+         //         for (auto* attribute : atts) {
+         ////////////////////////////////////////////////////////////////////////////////////////////
         
 }
 
@@ -922,9 +852,7 @@ template<typename T>
 {
         if (entry) {
             catalystInfo_m << level4 <<"  dereferencing shared pointer and reattempting execute..." << endl;
-            ExecVizChannel(*entry, label
-                // ,  node, vr
-            );  // Dereference and dispatch to reference version
+            ExecVizChannel(*entry, label ); 
         } else {
             catalystInfo_m << level4 <<"  Null shared_ptr encountered" << endl;
         }
@@ -941,6 +869,11 @@ template<typename T>
 // =====================================================================================
 
 namespace ippl{
+///////////////////////////////////////////////////////////////
+// Note:
+// this does not really need to be a separate function call,
+// May we should just inline this into the execute functions ...
+///////////////////////////////////////////////////////////////
 void CatalystAdaptor::fetchResults() {
         
         catalyst_status err = catalyst_results(conduit_cpp::c_node(&results_m));
@@ -955,7 +888,7 @@ void CatalystAdaptor::fetchResults() {
 // Runtime registry based Initialize / Execute (non-templated registry)
 // =====================================================================================
 
-void CatalystAdaptor::InitializeRuntime(
+void CatalystAdaptor::Initialize(
                            const std::shared_ptr<VisRegistryRuntime>& visReg,
                            const std::shared_ptr<VisRegistryRuntime>& steerReg
                         ) {
@@ -969,10 +902,6 @@ if ( !visEnabled_m) return;
         MPI_Allreduce(MPI_IN_PLACE, &all_ready, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     #endif
     catalystInfo_m << level4 <<"::InitializeRuntime() Ranks ready for catalyst int: " << all_ready << " ranks" << endl;  
-    
-    
-        // if ( !(catalystSteer_m && std::string(catalystSteer_m) == "OFF") ){
-        // m << "Catalyst Visualisation was deactivated via setting env variable IPPL_CATALYST_VIS=OFF"
                     
     visRegistry_m   = visReg;
     steerRegistry_m = steerReg;
@@ -983,20 +912,17 @@ if ( !visEnabled_m) return;
     node_m["catalyst/mpi_comm"].set(fcomm64);   
 
 
-
-    // Pipeline script (allow override by environment)
-    setNodeScript(node_m["catalyst/scripts/script/filename"],
-                    "CATALYST_PIPELINE_PATH",
-                    sourceDir_m / "catalyst_scripts" / "pipeline_default.py");
+    setNodeScript(  node_m["catalyst/scripts/script/filename"], //where in node_m
+                    "CATALYST_PIPELINE_PATH",                   // environment override
+                    sourceDir_m / "catalyst_scripts" / "pipeline_default.py") //default
+                ;
     conduit_cpp::Node args = node_m["catalyst/scripts/script/args"];
 
-    args.append().set_string("--channel_names");
     
-    // If PNG extraction requested, run init visitor over visualization registry
-    // InitVizChannel will also add channel names here into the node_m.
+    args.append().set_string("--channel_names");
     InitVisitor initV{*this};
-    visRegistry_m->forEach(initV);
-
+    visRegistry_m->forEach(initV); 
+    // Visitor will (also) append channel names here into the node_m (sequence of overall arguments is important!!)
 
     args.append().set_string("--verbosity");
     args.append().set_string(std::to_string(catalystInfo_m.getOutputLevel()));
@@ -1015,7 +941,6 @@ if ( !visEnabled_m) return;
     args.append().set_string("--steer_channel_names");
         
     auto proxyPath = (sourceDir_m / "catalyst_scripts" / "catalyst_proxy.xml").string() ;
-    // Config YAML: env override IPPL_PROXY_CONFIG_YAML, else default in catalyst_scripts
     std::string cfgYaml;
     if (const char* cfg_env = std::getenv("IPPL_PROXY_CONFIG_YAML")) {
         if (std::filesystem::exists(cfg_env)) {
@@ -1028,9 +953,8 @@ if ( !visEnabled_m) return;
         auto default_cfgYaml = (sourceDir_m / "catalyst_scripts" / "proxy_default_config.yaml").string();
         if (std::filesystem::exists(default_cfgYaml)) {
             cfgYaml = std::move(default_cfgYaml);
-        } // else leave empty -> ProxyWriter proceeds without config
+        } // else leave empty -> ProxyWriter can proceed without config
     }
-
 
 
     proxyWriter_m.initialize(proxyPath, cfgYaml);
@@ -1054,10 +978,8 @@ if ( !visEnabled_m) return;
     }
 
 
-
     catalystInfo_m << level4 <<"::Initialize()   Printing Conduit `node_m` instance passed to catalyst_initialize() =>" << endl;
-    // catalystInfo_m << level4 <<node.to_json() << endl;
-    catalystInfo_m << level4 <<node_m.to_yaml() << endl;
+    catalystInfo_m << level4 <<node_m.to_yaml() << endl; // or node.to_json() 
         
     catalyst_status err = catalyst_initialize(conduit_cpp::c_node(&node_m));
     if (err != catalyst_status_ok) {
@@ -1086,12 +1008,13 @@ if ( !visEnabled_m) return;
         throw IpplException("Stream::InSitu::CatalystAdaptor::rememberNow", "Visualization registry is not initialized (nullptr)");
     }
 
-    // Temporarily force a host copy for this label during one execute
+    // Temporarily force a host copy for this label during an execute
     bool tmp = it->second;
     forceHostCopy_m[label] = true;
     ExecVisitor execV{*this};
     const bool ok = visRegistry_m->forOne(label, execV);
-    // Restore prior state regardless of outcome
+
+    // Restore prior state
     forceHostCopy_m[label] = tmp;
     if (!ok) {
         throw IpplException("Stream::InSitu::CatalystAdaptor::rememberNow", "Label not found in executable entries or has no execute callback: " + label);
@@ -1099,13 +1022,10 @@ if ( !visEnabled_m) return;
 
 }
 
-void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* default = ippl::Comm->rank() */) {
+void CatalystAdaptor::Execute( int cycle, double time, int rank /* default = ippl::Comm->rank() */) {
     if ( !visEnabled_m) return;
 
-
     catalystInfo_m << level4 <<"::Execute() START =============================================================== 0" << endl;
-    
-
     
     static IpplTimings::TimerRef TMRcatalyst_execute = IpplTimings::getTimer("catalyst_execute");
     static IpplTimings::TimerRef TMRexecVizVisitor   = IpplTimings::getTimer("execVizVisitor");
@@ -1115,9 +1035,7 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
     auto state = node_m["catalyst/state"];
     state["cycle"].set(cycle);
     state["time"].set(time);
-    state["domain_id"].set(rank);
-    // state["multiblock"].set(1);
-    
+    state["domain_id"].set(rank);    
 
     IpplTimings::startTimer(TMRexecVizVisitor);
     if ( !!visEnabled_m){
@@ -1135,7 +1053,6 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
         steerRegistry_m->forEach(steerV); 
     }
     IpplTimings::stopTimer(TMRexecSteerVisitor);
-
 
 
     if(cycle == 0){
@@ -1158,28 +1075,31 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
     }
 
 
-    
-
-    
+    ////////////////////////////////////////////////////////////////
+    // Note:
+    // Possibly helpful for further debugging.
+    //
     // Kokkos::fence();
     // #if defined(MPI_VERSION)
     // MPI_Barrier(MPI_COMM_WORLD);
     // #endif
-
+    //
     // int all_ready = 1;
     // #if defined(MPI_VERSION)
     //     MPI_Allreduce(MPI_IN_PLACE, &all_ready, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     // #endif
     // catalystInfo_m << level4 <<"::Execute() All ranks ready for catalyst_execute:    " << all_ready << " ranks" << endl;  
-        
+    ////////////////////////////////////////////////////////////////        
         
     catalystInfo_m << level4 <<"::Execute()::catalyst_execute() ==>" << endl;
     IpplTimings::startTimer(TMRcatalyst_execute);
         catalyst_status err = catalyst_execute(conduit_cpp::c_node(&node_m));
     IpplTimings::stopTimer(TMRcatalyst_execute);
 
-    /* catalyst execute seems to be the current bottleneck of a medium sized simulation... */
-
+    ////////////////////////////////////////////////////////////////////////////////
+    // Note: 
+    // catalyst execute seems to be the current bottleneck of a medium sized simulation... 
+    ////////////////////////////////////////////////////////////////////////////////
 
 
     if (err != catalyst_status_ok) {
@@ -1201,11 +1121,8 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
 
         if(true){
         // if(cycle == 0){
-        // if(true){
-            catalystInfo_m << level4 <<"::Execute()   Printing first Conduit Node received from catalyst_execute() ==>" << endl;
-            // catalystInfo_m << level4 <<node.to_json() << endl;
-            catalystInfo_m << level4 <<results_m.to_yaml() << endl;
-
+            catalystInfo_m << level4 <<"::Execute()   Printing Conduit Node received from catalyst_execute() ==>" << endl;
+            catalystInfo_m << level4 << results_m.to_yaml() << endl;
         }
 
     }
@@ -1214,7 +1131,18 @@ void CatalystAdaptor::ExecuteRuntime( int cycle, double time, int rank /* defaul
         viewRegistry_m.clear();
         ghostMaskCache_m.clear();
         node_m.reset();
+
+        ///////////////////////////////////////////////////
+        // Note: 
+        // We deliberately don't reset results since
+        //  1. they will be properly overwritten by Catalyst.
+        //  2. If the part of the Catalyst backend crashes and the 
+        //      results are not sent back, the old results will be used, possibly 
+        //      avoiding a problems during result retrieval.
+        //
         // results.reset();
+        ///////////////////////////////////////////////////
+
         
     catalystInfo_m << level4 <<"::Execute()  DONE =============================================================== 1" << endl;
  

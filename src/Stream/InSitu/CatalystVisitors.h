@@ -1,6 +1,6 @@
 /**
  * @file CatalystVisitors.h
- * @brief Visitor functors used by CatalystAdaptor for init, execute, and steering.
+ * @brief Visitor functors used by CatalystAdaptor for initialization, execution, and steering.
  */
 #pragma once
 #include <filesystem>
@@ -10,39 +10,16 @@
 #include <memory>
 
 #include <Stream/InSitu/CatalystAdaptor.h>
-// #include <Stream/Registry/VisRegistryRuntime.h>
 #include <catalyst.hpp>
 
-// template<class T>
-// struct is_scalar : std::integral_constant<bool, std::is_arithmetic<T>::value
-//                                              || std::is_enum<T>::value
-//                                              || std::is_pointer<T>::value
-//                                              || std::is_member_pointer<T>::value
-//                                              || std::is_null_pointer<T>::value>
-
-
-
-/* 
-We can do case distinctions here or later... 
-Currently we only check for permission to use the current type. The basic templated implementations in this file redirecting to the real
-case distinction in the actual function overloads inside Catalyst____.hpp files.
-*/
-
-
-/* 
-fails because overload is identical ... -> cheat by reference variation ...
-
-cant overload identical function with requires conditions
-since requires does not affect signature so they end up with identical singature
-but we can switch reference or constness of arguments like the label, changiing function signature allowing 
-for early throwing of exception (in this file) instead of the additional function overloading in the hpp files.
-*/
 
 
 
 namespace ippl{
 
-
+// =========================================
+// METAPROGRAMMING HELPER TRAITS
+// =========================================
 
 template<class T>
 inline constexpr bool is_particle_v = std::is_base_of<ippl::ParticleBaseBase, typename std::decay<T>::type>::value;
@@ -66,7 +43,7 @@ struct is_ippl_vector<ippl::Vector<V, Dim>> : std::true_type {};
 template<typename T>
 inline constexpr bool is_ippl_vector_v = is_ippl_vector<std::decay_t<T>>::value;
 
-// Helper: detect std::vector of supported scalar/button types
+// detect std::vector of supported scalar/button types
 template<typename U>
 struct is_std_vector_of_allowed_scalar : std::false_type {};
 template<typename U>
@@ -76,7 +53,7 @@ struct is_std_vector_of_allowed_scalar<std::vector<U>> : std::bool_constant<
     || std::is_same_v<std::decay_t<U>, bool>
     || std::is_same_v<std::decay_t<U>, Button>> {};
 
-// Helper: detect std::vector of ippl::Vector<...>
+// detect std::vector of ippl::Vector<...>
 template<typename U>
 struct is_std_vector_of_ippl_vector : std::false_type {};
 template<typename U>
@@ -85,7 +62,7 @@ struct is_std_vector_of_ippl_vector<std::vector<U>> : std::bool_constant<is_ippl
 
 
 
-// Helper: detect any std::vector<...> (used to route struct arrays via StructMeta)
+// detect any std::vector<...> (used to route struct arrays via StructMeta)
 template<typename U>
 struct is_std_vector_any : std::false_type {};
 template<typename U>
@@ -124,10 +101,34 @@ inline constexpr bool AllowedRegistryTypeOrShared_v =
     AllowedRegistryType_v<T> || is_allowed_shared_ptr<std::decay_t<T>>::value;
 
 
+// Checks for region Layout indicating Particle Spatial Layout vs Pure Layout
+template <typename T, typename = void>
+struct has_getRegionLayout : std::false_type {};
+
+template <typename T>
+struct has_getRegionLayout<T, std::void_t<decltype(std::declval<T>().getRegionLayout())>> 
+    : std::true_type {};
+
+template <typename T>
+constexpr bool has_getRegionLayout_v = has_getRegionLayout<T>::value;
 
 
 
-/* we might want to get rid of this virtual function call */
+
+
+// =========================================
+// VISITORS
+// =========================================
+///////////////////////////////////////////////////////////////////////////////////
+// Note: 
+// Cant overload identical function with requires conditions
+// since requires does not affect signature so they end up with identical singature
+// but we can switch reference or constness of arguments like the label, changiing 
+// function signature allowing for early throwing of exception (in this file) 
+// instead of the additional function overloading in the hpp files.
+///////////////////////////////////////////////////////////////////////////////////
+
+
 /**
  * @struct CatalystAdaptor::InitVisitor
  * @brief Builds Conduit channel metadata for registered fields/particles.
