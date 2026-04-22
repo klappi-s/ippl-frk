@@ -3,7 +3,6 @@
 #include "Stream/InSitu/CatalystAdaptor.h"
 #include "Stream/InSitu/CatalystVisitors.h" // ensure AllowedSteerType_v available
 #include <array>
-// Added standard headers required by RegisterStructMembers and helpers
 #include <tuple>
 #include <utility>
 #include <functional>
@@ -16,59 +15,63 @@ namespace ippl{
 
 namespace detail {
 
-// Label sanitation: replace '/' to avoid unintended Conduit subtree splitting.
-inline std::string sanitize_label(const std::string& in) {
-    std::string tmp; tmp.reserve(in.size());
-    std::string out; out.reserve(in.size());
-    for (char c : in)  tmp += (c=='/' ? '_' : c);
-    for (char c : tmp) out += (c=='/' ? '_' : c);
-    
-        
-    return out;
-}
+    /////////////////////////////////////////////////
+    // Note: 
+    // Label sanitation: replace '/' to avoid 
+    // unintended Conduit subtree splitting.
+    // TODO: Shoul be used also in Viz channels
+    /////////////////////////////////////////////////
+    inline std::string sanitize_label(const std::string& in) {
+        std::string tmp; tmp.reserve(in.size());
+        std::string out; out.reserve(in.size());
+        for (char c : in)  tmp += (c=='/' ? '_' : c);
+        for (char c : tmp) out += (c=='/' ? '_' : c);
 
-// Recursive applicators with const and non-const overloads to avoid const_cast.
-// Base cases (no members left).
-template <typename Visitor, typename T>
-inline void apply_struct_members(Visitor&, T&, const std::string&) {}
-template <typename Visitor, typename T>
-inline void apply_struct_members(Visitor&, const T&, const std::string&) {}
 
-// Recursive steps: visit (name, pointer-to-member) then recurse.
-template <typename Visitor, typename T, typename NameType, typename MemberPtr, typename... Rest>
-inline void apply_struct_members(Visitor& vis, T& obj, const std::string& rootLabel,
-                                 NameType name, MemberPtr ptr, Rest&&... rest) {
-    // Build full label and dispatch to existing visitor overloads.
-    std::string fullLabel = rootLabel + "." + sanitize_label(std::string(name));
-    vis(fullLabel, obj.*ptr);  // rely on visitor operator() overload selection
-    apply_struct_members(vis, obj, rootLabel, std::forward<Rest>(rest)...);
-}
-template <typename Visitor, typename T, typename NameType, typename MemberPtr, typename... Rest>
-inline void apply_struct_members(Visitor& vis, const T& obj, const std::string& rootLabel,
-                                 NameType name, MemberPtr ptr, Rest&&... rest) {
-    std::string fullLabel = rootLabel + "." + sanitize_label(std::string(name));
-    vis(fullLabel, obj.*ptr);
-    apply_struct_members(vis, obj, rootLabel, std::forward<Rest>(rest)...);
-}
+        return out;
+    }
 
-// Meta storage per struct type T.
-template <typename T>
-struct StructMeta {
-    static inline bool registered = false;
-    // Dispatch lambda handles scalar/member steering. Takes a variant of visitors.
-    static inline std::function<void(CatalystAdaptor::SteerVisitorVariant_t, T&, const std::string&)> dispatch;
-    // Array-of-struct aggregation (vector<T>) – built at registration time.
-    static inline std::function<void(CatalystAdaptor::SteerVisitorVariant_t, std::vector<T>&, const std::string&)> dispatch_vec;
-};
+    // Recursive applicators with const and non-const overloads to avoid const_cast.
+    // Base cases (no members left).
+    template <typename Visitor, typename T>
+    inline void apply_struct_members(Visitor&, T&, const std::string&) {}
+    template <typename Visitor, typename T>
+    inline void apply_struct_members(Visitor&, const T&, const std::string&) {}
+
+    // Recursive steps: visit (name, pointer-to-member) then recurse.
+    template <typename Visitor, typename T, typename NameType, typename MemberPtr, typename... Rest>
+    inline void apply_struct_members(Visitor& vis, T& obj, const std::string& rootLabel,
+                                     NameType name, MemberPtr ptr, Rest&&... rest) {
+        // Build full label and dispatch to existing visitor overloads.
+        std::string fullLabel = rootLabel + "." + sanitize_label(std::string(name));
+        vis(fullLabel, obj.*ptr);  // rely on visitor operator() overload selection
+        apply_struct_members(vis, obj, rootLabel, std::forward<Rest>(rest)...);
+    }
+    template <typename Visitor, typename T, typename NameType, typename MemberPtr, typename... Rest>
+    inline void apply_struct_members(Visitor& vis, const T& obj, const std::string& rootLabel,
+                                     NameType name, MemberPtr ptr, Rest&&... rest) {
+        std::string fullLabel = rootLabel + "." + sanitize_label(std::string(name));
+        vis(fullLabel, obj.*ptr);
+        apply_struct_members(vis, obj, rootLabel, std::forward<Rest>(rest)...);
+    }
+
+    // Meta storage per struct type T.
+    template <typename T>
+    struct StructMeta {
+        static inline bool registered = false;
+        // Dispatch lambda handles scalar/member steering. Takes a variant of visitors.
+        static inline std::function<void(CatalystAdaptor::SteerVisitorVariant_t, T&, const std::string&)> dispatch;
+        // Array-of-struct aggregation (vector<T>) – built at registration time.
+        static inline std::function<void(CatalystAdaptor::SteerVisitorVariant_t, std::vector<T>&, const std::string&)> dispatch_vec;
+    };
 
 } // namespace detail
 
-// -------------------------------------------------------------------------------------
-// Registration function (static method of CatalystAdaptor declared in header)
-// -------------------------------------------------------------------------------------
-// Args must be an even-sized pack of: name(string-like), pointer-to-member.
-// Validates each member type at registration (throws IpplException if invalid).
-// Stores three lambdas which expand the pack and delegate to visitor overloads.
+
+
+// =====================================================================================
+// Registration functions
+// =====================================================================================
 template<typename T, typename... Args>
 void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
     using DecayT = std::decay_t<T>;
@@ -122,10 +125,10 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
                     std::vector<MType> tmp; tmp.reserve(arr.size());
                     for (auto& el : arr) tmp.push_back(el.*mptr);
                     
-                    vis(memberLabel, tmp); // fetch, init, or fwd
+                    vis(memberLabel, tmp);
                     
                     if constexpr (std::is_same_v<VisitorType, CatalystAdaptor::SteerFetchVisitor>) {
-                        if (tmp.size() != arr.size()) arr.resize(tmp.size()); // default construct new structs
+                        if (tmp.size() != arr.size()) arr.resize(tmp.size());
                         // Write back member values
                         for (std::size_t i = 0; i < tmp.size(); ++i) {
                             arr[i].*mptr = tmp[i];
@@ -139,9 +142,7 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
     detail::StructMeta<DecayT>::registered = true;
 }
 
-// ===================== Typed enum choices registration (definitions) =====================
-
-
+/* DEPRECATED atm ... */
 // template<typename E>
 // requires (std::is_enum_v<std::decay_t<E>>)
 // void CatalystAdaptor::RegisterEnumChoicesTyped(const std::string& label, const std::vector<std::pair<std::string, E>>& entries) {
@@ -326,18 +327,17 @@ void CatalystAdaptor::InitSteerChannel( [[maybe_unused]] const std::vector<ippl:
 
 
 // =====================================================================================
-// SETTING UP CONDUIT NODE:
+// SETTING UP / FORWARDING CONDUIT NODE:
 // =====================================================================================
 
-
+// basic integer and double scalar overload
 template<typename T>
 requires (!std::is_enum_v<std::decay_t<T>>)
 void CatalystAdaptor::ForwardSteerChannel( const T& steerableScalarForwardpass,  const std::string& steerableSuffix ) 
 {
         catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: " << typeid(T).name() << endl;
         
-    auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
-        // auto steerableChannel = node_m["catalyst/channels/steerableChannels_forward_all"];
+        auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
 
         steerableChannel["type"].set("mesh");
         auto steerableData = steerableChannel["data"];
@@ -349,13 +349,6 @@ void CatalystAdaptor::ForwardSteerChannel( const T& steerableScalarForwardpass, 
         steerableData["topologies/sMesh_topo/elements/shape"].set("point");
         steerableData["topologies/sMesh_topo/elements/connectivity"].set( 0 );
         
-        /* 3D double is not mandatory ?? and irrelevant we want to pass minimal vtk object with 1 data point */
-        // steerableData["coordsets/coords/values/x"].set_float64_vector({ 0 });
-        // steerableData["coordsets/coords/values/y"].set_float64_vector({ 0 });
-        // steerableData["coordsets/coords/values/z"].set_float64_vector({ 0 });
-
-        // steerableData["topologies/sMesh_topo/elements/connectivity"].set_int32_vector({ 0 });
-
 
         conduit_cpp::Node steerableField = steerableData["fields/steerableField_f_" + steerableSuffix];
         steerableField["association"].set("vertex");
@@ -364,20 +357,19 @@ void CatalystAdaptor::ForwardSteerChannel( const T& steerableScalarForwardpass, 
 
         conduit_cpp::Node values = steerableField["values"];
 
-        // std::is_scalar_v<std::decay_t<T>>
-        if constexpr(std::is_enum_v<std::decay_t<T>>){
-            values.set(static_cast<int>(steerableScalarForwardpass));
-        }
-        else if constexpr(std::is_scalar_v<T>){
+        // if constexpr(std::is_enum_v<std::decay_t<T>>){
+        //     values.set(static_cast<int>(steerableScalarForwardpass));
+        // }
+        // else 
+        if constexpr(std::is_scalar_v<T>){
             values.set(steerableScalarForwardpass);
-            // lastForwardSteerVal[steerableSuffix] = static_cast<double>(steerableScalarForwardpass);
         }        
         else {
             throw IpplException("Stream::InSitu::CatalystAdaptor::ForwardSteerChannel", "Unsupported steerable type for channel: " + steerableSuffix);
         }
 }
 
-// Enum overload explicit (clarity)
+// Enum overload (explicitfor clarity)
 template<typename E>
 requires (std::is_enum_v<std::decay_t<E>>)
 void CatalystAdaptor::ForwardSteerChannel( const E& e, const std::string& steerableSuffix )
@@ -399,7 +391,7 @@ void CatalystAdaptor::ForwardSteerChannel( const E& e, const std::string& steera
     steerableField["values"].set(static_cast<int>(e));
 }
 
-// Bool-like Switch: forward as single-sample scalar (0/1)
+// Bool-like Switch overload: forward as single scalar (0/1)
 void CatalystAdaptor::ForwardSteerChannel( const bool& sw, const std::string& steerableSuffix )
 {
     catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: bool/Switch" << endl;
@@ -424,7 +416,7 @@ void CatalystAdaptor::ForwardSteerChannel( const bool& sw, const std::string& st
     steerableField["values"].set(boolAsInt);
 }
 
-// Button-like: forward as single-sample scalar (0/1)
+// Bool-like Button overload: forward as single scalar (0/1)
 void CatalystAdaptor::ForwardSteerChannel( const ippl::Button& btn, const std::string& steerableSuffix )
 {
     catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: Button" << endl;
@@ -446,7 +438,13 @@ void CatalystAdaptor::ForwardSteerChannel( const ippl::Button& btn, const std::s
     steerableField["values"].set(static_cast<int>(btn ? 1 : 0));
 }
 
-// ippl::Vector overload
+// ippl::Vector overload: forward single scalar conduit field with 3 components in "values"
+//////////////////////////////////////////////////
+// Note:
+// I think x/y/z and 0/1/2 are valid syntax to send 
+// multicomponents forward, but in when returned in
+// results the usual syntax is 0/1/2.
+//////////////////////////////////////////////////
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::ForwardSteerChannel( const ippl::Vector<T, Dim_v>& steerableVecForwardpass, const std::string& steerableSuffix )
 {
@@ -463,9 +461,7 @@ void CatalystAdaptor::ForwardSteerChannel( const ippl::Vector<T, Dim_v>& steerab
     steerableData["topologies/sMesh_topo/elements/shape"].set("point");
     steerableData["topologies/sMesh_topo/elements/connectivity"].set(0);
 
-    // Single vector field with 3 components (x,y,z) under one name
     const std::string base = std::string("fields/steerableField_f_") + steerableSuffix;
-    // Ensure gotX/Y/Z are defined before use, fix the summary logging, and print time per-map.
     auto fnode = steerableData[base];
     fnode["association"].set_string("vertex");
     fnode["topology"].set_string("sMesh_topo");
@@ -497,15 +493,14 @@ void CatalystAdaptor::ForwardSteerChannel( const ippl::Vector<T, Dim_v>& steerab
 }
 
 
-// std::vector<T> forward: publish as 1D mesh array under fields/steerableField_f_<label>/values
+// std::vector<T> overload: forward, publish as 1D mesh array under fields/steerableField_f_<label>/values
 template<typename Elem>
 requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::ForwardSteerChannel( const std::vector<Elem>& arr, const std::string& label )
 {
-    // Normalize: ensure 'array:' prefix so downstream pipeline/proxies match
+    // Normalize: ensure 'array:' prefix so downstream pipeline/proxies can identify arrray channel
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
     catalystInfo_m << "::Execute()::ForwardSteerChannel(vector<elem>) " << alabel << " | N=" << arr.size() << endl;
-    // Group by dynamic array prefix: everything before first underscore.
     std::string prefix = alabel;
     auto us_pos = prefix.find('.');
     if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
@@ -533,7 +528,14 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<Elem>& arr, const s
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
-    // store values as ints/doubles as appropriate
+    
+    /////////////////////////////////////////////////////////////////
+    // Note: 
+    // Currently only enums are saved as integers to the conduit Node
+    // the rest (bools, buttons, integers, float/doubles are in someway
+    // transformed to doubles. This is not  pretty or neat but simplifies 
+    // the case handling in the proxy file and works for the moment.
+    /////////////////////////////////////////////////////////////////
     if constexpr (std::is_enum_v<std::decay_t<Elem>>) {
         std::vector<int32_t> vals; vals.reserve(N);
         for (const auto& e : arr) vals.push_back(static_cast<int32_t>(e));
@@ -541,19 +543,19 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<Elem>& arr, const s
     } else {
         std::vector<double> vals; vals.reserve(N);
         for (const auto& e : arr) {
-            if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)             vals.push_back(e ? 1.0 : 0.0);
+            if      constexpr (std::is_same_v<std::decay_t<Elem>, bool>)         vals.push_back(e ? 1.0 : 0.0);
             else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) vals.push_back(static_cast<int>(e ? 1 : 0));
-            else                                                                vals.push_back(static_cast<double>(e));
+            else                                                                 vals.push_back(static_cast<double>(e));
         }
         f["values"].set(vals);
     }
 }
 
-// std::vector<ippl::Vector<T,Dim>> forward: publish as 1D mesh with 3-component field arrays
+// std::vector<ippl::Vector<T,Dim>> overload: forward, publish as 1D mesh with 3-component field arrays
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::ForwardSteerChannel( const std::vector<ippl::Vector<T, Dim_v>>& arr, const std::string& label )
 {
-    // Normalize: ensure 'array:' prefix so downstream pipeline/proxies match
+    // Normalize: ensure 'array:' prefix so downstream pipeline/proxies can identify arrray channel
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
     catalystInfo_m << "::Execute()::ForwardSteerChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << alabel << " | N=" << arr.size() << endl;
     std::string prefix = alabel;
@@ -621,11 +623,10 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<ippl::Vector<T, Dim
 // =====================================================================================
 
 
-/* overload for: Scalar, Bool(switch), Button */
+// basic fetch overload for: Scalar, Bool(switch), Button 
 template<typename T>
 requires (!std::is_enum_v<std::decay_t<T>>)
 void CatalystAdaptor::FetchSteerChannel( T& steerableScalarBackwardpass, const std::string& label) {
-    // catalystInfo_m << "::Execute()::FetchSteerChannel(" << label  << ") | Type: " << typeid(T).name() << endl;
 
     std::string unified_path = std::string("catalyst/steerableChannel_backward_all/fields/") +
                                "steerableField_b_" + label + "/values";
@@ -655,7 +656,7 @@ void CatalystAdaptor::FetchSteerChannel( T& steerableScalarBackwardpass, const s
         throw IpplException("Stream::InSitu::CatalystAdaptor::FetchSteerChannel(" + label +  ")", "Unsupported type for channel: " + label);
     }
 
-    // Safe logging: avoid operator<< on non-streamable types like std::vector<Struct>
+
     if constexpr (is_std_vector_any<std::decay_t<T>>::value) {
         catalystInfo_m << "::Execute()::FetchSteerChannel(" << label << ") | Type: " << typeid(T).name() << " | received vector | size="
              << steerableScalarBackwardpass.size() << endl;
@@ -664,12 +665,11 @@ void CatalystAdaptor::FetchSteerChannel( T& steerableScalarBackwardpass, const s
     }
 }
 
-// Enum overload explicit (clarity)
+// fetch overload for Enum (explicit for clarity)
 template<typename E>
 requires (std::is_enum_v<std::decay_t<E>>)
 void CatalystAdaptor::FetchSteerChannel( E& e, const std::string& label)
 {
-    // catalystInfo_m << "::Execute()::FetchSteerChannel(" << label  << ") | Type: Enum| Value sent:" << /* enumChoices_m[label].second  */to_string(e) << endl;
     std::string unified_path = std::string("catalyst/steerableChannel_backward_all/fields/") +
                                "steerableField_b_" + label + "/values";
     if (!results_m.has_path(unified_path)) {
@@ -680,11 +680,16 @@ void CatalystAdaptor::FetchSteerChannel( E& e, const std::string& label)
     if (!values_node.dtype().is_number()) return;
     e = static_cast<E>(values_node.to_int32());
 
-    catalystInfo_m << "::Execute()::FetchSteerChannel(" << label  << ") | Type: Enum | received: " << to_string(e) << endl;
+    catalystInfo_m << "::Execute()::FetchSteerChannel(" << label  << ") | Type: Enum | received: " << e << endl;
+    /////////////////////////////////////////////7
+    // Note:
+    // We should find a smooth way to log explicit name an enum type similar to
+    // catalystInfo_m << "::Execute()::FetchSteerChannel(" << label  << ") | Type: Enum | received: " << to_string(e) << endl;
+    /////////////////////////////////////////////7
 }
 
 
-/* overload for: ippl::Vector */
+// fetch overload for: ippl::Vector 
 template<typename T, unsigned Dim_v>
 void CatalystAdaptor::FetchSteerChannel( ippl::Vector<T, Dim_v>& steerableVecBackwardpass, const std::string& label)
 {
@@ -731,14 +736,23 @@ void CatalystAdaptor::FetchSteerChannel( ippl::Vector<T, Dim_v>& steerableVecBac
 }
 
 
-// Fetch std::vector<T> from unified backward channel; resize destination to match
+
+/////////////////////////////////////////////////
+// Note:
+// Thefollowing two code segment were partially generated with 
+// Copilot. It's currently unclear if all fall backs
+// are really needed. Or if some variants are redundant.
+/////////////////////////////////////////////////
+
+
+// Fetch overload for std::vector<T> from unified backward channel;
+// resize destination to match dynamic size of return array
 template<typename Elem>
 requires (std::is_arithmetic_v<std::decay_t<Elem>> || std::is_enum_v<std::decay_t<Elem>> || std::is_same_v<std::decay_t<Elem>, bool> || std::is_same_v<std::decay_t<Elem>, ippl::Button>)
 void CatalystAdaptor::FetchSteerChannel( std::vector<Elem>& out, const std::string& label)
 {
     // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
-    // catalystInfo_m << "::Execute()::FetchSteerChannel(vector<elem>) " << alabel << endl;
     const std::string path = std::string("catalyst/steerableChannel_backward_all/fields/") +
                              "steerableField_b_" + alabel + "/values";
     if (!results_m.has_path(path)) {
@@ -761,15 +775,15 @@ void CatalystAdaptor::FetchSteerChannel( std::vector<Elem>& out, const std::stri
         if constexpr (std::is_same_v<std::decay_t<Elem>, bool>)              out[i] = (d != 0.0);
         else if constexpr (std::is_same_v<std::decay_t<Elem>, ippl::Button>) out[i] = (static_cast<int>(d) != 0);
         else if constexpr (std::is_enum_v<std::decay_t<Elem>>)               out[i] = static_cast<Elem>(static_cast<int>(d));
-        else                                                                  out[i] = static_cast<Elem>(d);
+        else                                                                 out[i] = static_cast<Elem>(d);
     };
 
+    
     // Prefer child iteration when available (safe for lists and objects)
     if (vals.number_of_children() > 0) {
         for (size_t i = 0; i < n; ++i) {
             assign_from_double(i, vals.child(i).to_double());
         }
-        // return; // Don't return yet, we want to log
     } else {
 
         // Otherwise, try direct pointer access but guard with try/catch and a final safe fallback
@@ -828,7 +842,6 @@ void CatalystAdaptor::FetchSteerChannel( std::vector<ippl::Vector<T, Dim_v>>& ou
 {
     // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
-    // catalystInfo_m << "::Execute()::FetchSteerChannel(vector<Vector<" << typeid(T).name() << "," << Dim_v << ">>) " << alabel << endl;
     const std::string root = std::string("catalyst/steerableChannel_backward_all/fields/") +
                              "steerableField_b_" + alabel + "/values";
     
@@ -864,7 +877,6 @@ void CatalystAdaptor::FetchSteerChannel( std::vector<ippl::Vector<T, Dim_v>>& ou
         }
     }
 
-    // Prefer named component arrays x/y/z
     bool has_xyz = results_m.has_path(root + "/0");
     if constexpr (Dim_v >= 2) has_xyz = has_xyz && results_m.has_path(root + "/1");
     if constexpr (Dim_v >= 3) has_xyz = has_xyz && results_m.has_path(root + "/2");

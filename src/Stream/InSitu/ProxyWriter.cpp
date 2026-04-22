@@ -8,7 +8,7 @@
 #include <cctype>
 #include <algorithm>
 
-namespace {
+namespace {  // ananymus namespace, accessible from within this file but not from outside ...
 inline std::string ltrim(std::string s) {
   size_t i = 0; while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i; return s.substr(i);
 }
@@ -73,37 +73,21 @@ namespace ippl {
 // -------------------------------- Initialization ---------------------------------
 
 void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
-                             std::string prototypeLabel) {
+                             const std::string& configYamlPath) {
   outPath_m = std::move(xmlOutputPath);
-  prototypeLabel_m = std::move(prototypeLabel);
-  resetStreams();
-  // Attempt to load default config from the output folder.
-  std::filesystem::path baseDir = outPath_m.parent_path();
-  std::filesystem::path cfg1 = baseDir / "proxys_default_config.yaml";
-  std::filesystem::path cfg2 = baseDir / "proxy_default_config.yaml";
-  if (std::filesystem::exists(cfg1)) {
-    loadConfigFromYamlFile(cfg1.string());
-  } else if (std::filesystem::exists(cfg2)) {
-    loadConfigFromYamlFile(cfg2.string());
-  }
-}
-
-void ProxyWriter::initialize(std::filesystem::path xmlOutputPath,
-                             const std::string& configYamlPath,
-                             std::string prototypeLabel) {
-  outPath_m = std::move(xmlOutputPath);
-  prototypeLabel_m = std::move(prototypeLabel);
   resetStreams();
   if (!configYamlPath.empty()) {
     loadConfigFromYamlFile(configYamlPath);
+  } else {
+    // Attempt to load default config from the output folder.
+    std::filesystem::path baseDir = outPath_m.parent_path();
+    std::filesystem::path configDefault = baseDir / "proxy_default_config.yaml";
+    if (std::filesystem::exists(configDefault)) {
+      loadConfigFromYamlFile(configDefault.string());
+    }
   }
 }
 
-// Convenience overload: only output path and YAML config path.
-// Uses existing defaults for rangeMin_m/rangeMax_m and prototypeLabel_m.
-// removed legacy overload
-
-// removed legacy overload taking conduit node
 
 // --------------------------------- Inclusions ------------------------------------
 
@@ -157,39 +141,39 @@ void ProxyWriter::includeEnum(const std::string& label,
 
 // ------------------------------- Produce (XML) -----------------------------------
 
-bool ProxyWriter::produce() {
-  resetStreams();
+// bool ProxyWriter::produce() {
+//   resetStreams();
 
-  // Header
-  header_m << "<ServerManagerConfiguration>\n\n";
+//   // Header
+//   header_m << "<ServerManagerConfiguration>\n\n";
 
-  // Sources group with one SourceProxy per channel
-  sources_m << "    <ProxyGroup name='sources'>\n";
-  for (const auto& ch : channels_m) {
-    appendSourceProxy(ch);
-  }
-  sources_m << "    </ProxyGroup>\n\n";
+//   // Sources group with one SourceProxy per channel
+//   sources_m << "    <ProxyGroup name='sources'>\n";
+//   for (const auto& ch : channels_m) {
+//     appendSourceProxy(ch);
+//   }
+//   sources_m << "    </ProxyGroup>\n\n";
 
-  // Misc group with a single prototype used by PropertyCollection
-  misc_m << "    <ProxyGroup name='misc'>\n";
-  appendPrototype();
-  misc_m << "    </ProxyGroup>\n";
+//   // Misc group with a single prototype used by PropertyCollection
+//   misc_m << "    <ProxyGroup name='misc'>\n";
+//   appendPrototype();
+//   misc_m << "    </ProxyGroup>\n";
 
-  footer_m << "</ServerManagerConfiguration>\n";
+//   footer_m << "</ServerManagerConfiguration>\n";
 
-  // Stitch everything into a single buffer
-  std::ostringstream full;
-  full << header_m.str() << sources_m.str() << misc_m.str() << footer_m.str();
+//   // Stitch everything into a single buffer
+//   std::ostringstream full;
+//   full << header_m.str() << sources_m.str() << misc_m.str() << footer_m.str();
 
-  // Ensure directory exists and write file
-  std::error_code ec;
-  std::filesystem::create_directories(outPath_m.parent_path(), ec);
-  std::ofstream ofs(outPath_m);
-  if (!ofs) return false;
-  ofs << full.str();
-  ofs.close();
-  return ofs.good();
-}
+//   // Ensure directory exists and write file
+//   std::error_code ec;
+//   std::filesystem::create_directories(outPath_m.parent_path(), ec);
+//   std::ofstream ofs(outPath_m);
+//   if (!ofs) return false;
+//   ofs << full.str();
+//   ofs.close();
+//   return ofs.good();
+// }
 
 bool ProxyWriter::produceUnified(const std::string& unifiedProxyName,
                                  const std::string& unifiedGroupLabel) {
@@ -243,37 +227,37 @@ void ProxyWriter::resetStreams() {
   footer_m.str(""); footer_m.clear();
 }
 
-void ProxyWriter::appendSourceProxy(const Channel& ch) {
-  const std::string& L = ch.label;
-  sources_m << "        <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_" << L << "'>\n"
-           << "            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>\n"
-           << "            </IntVectorProperty>\n\n"
-           << "            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>\n"
-           << "            </IntVectorProperty>\n\n"
-           << "            <DoubleVectorProperty name='scaleFactor'\n"
-           << "                                  command='SetTuple1Double'\n"
-           << "                                  clean_command='Clear'\n"
-           << "                                  use_index='1'\n"
-           << "                                  initial_string='steerable_field_b_" << L << "'\n"
-           << "                                  number_of_elements_per_command='1'\n"
-           << "                                  repeat_command='1'\n"
-           << "                                  panel_widget='DoubleRange'>\n";
-  // Per requirements: no DoubleRangeDomain in the SOURCE section
-  sources_m << "            </DoubleVectorProperty>\n\n";
-  if(!ch.isBool){
-    sources_m << "            <PropertyGroup label='SteerableParameters' panel_widget='PropertyCollection'>\n";
-  }
-  sources_m << "                <Hints>\n"
-           << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableParametersPrototype' />\n"
-           << "                </Hints>\n"
-           << "            </PropertyGroup>\n\n"
-           << "            <Hints>\n"
-           << "              <CatalystInitializePropertiesWithMesh mesh='steerable_channel_0D_mesh'>\n"
-           << "                <Property name='scaleFactor' association='point' array='steerable_field_f_" << L << "' />\n"
-           << "              </CatalystInitializePropertiesWithMesh>\n"
-           << "            </Hints>\n"
-           << "        </SourceProxy>\n\n";
-}
+// void ProxyWriter::appendSourceProxy(const Channel& ch) {
+//   const std::string& L = ch.label;
+//   sources_m << "        <SourceProxy class='vtkSteeringDataGenerator' name='SteerableParameters_" << L << "'>\n"
+//            << "            <IntVectorProperty name='PartitionType' command='SetPartitionType' number_of_elements='1' default_values='1' panel_visibility='never'>\n"
+//            << "            </IntVectorProperty>\n\n"
+//            << "            <IntVectorProperty name='FieldAssociation' command='SetFieldAssociation' number_of_elements='1' default_values='0' panel_visibility='never'>\n"
+//            << "            </IntVectorProperty>\n\n"
+//            << "            <DoubleVectorProperty name='scaleFactor'\n"
+//            << "                                  command='SetTuple1Double'\n"
+//            << "                                  clean_command='Clear'\n"
+//            << "                                  use_index='1'\n"
+//            << "                                  initial_string='steerable_field_b_" << L << "'\n"
+//            << "                                  number_of_elements_per_command='1'\n"
+//            << "                                  repeat_command='1'\n"
+//            << "                                  panel_widget='DoubleRange'>\n";
+//   // Per requirements: no DoubleRangeDomain in the SOURCE section
+//   sources_m << "            </DoubleVectorProperty>\n\n";
+//   if(!ch.isBool){
+//     sources_m << "            <PropertyGroup label='SteerableParameters' panel_widget='PropertyCollection'>\n";
+//   }
+//   sources_m << "                <Hints>\n"
+//            << "                  <PropertyCollectionWidgetPrototype group='misc' name='SteerableParametersPrototype' />\n"
+//            << "                </Hints>\n"
+//            << "            </PropertyGroup>\n\n"
+//            << "            <Hints>\n"
+//            << "              <CatalystInitializePropertiesWithMesh mesh='steerable_channel_0D_mesh'>\n"
+//            << "                <Property name='scaleFactor' association='point' array='steerable_field_f_" << L << "' />\n"
+//            << "              </CatalystInitializePropertiesWithMesh>\n"
+//            << "            </Hints>\n"
+//            << "        </SourceProxy>\n\n";
+// }
 
 void ProxyWriter::appendPrototype() {
   // Prototype for numeric steerables (scalars and vectors)
@@ -373,7 +357,6 @@ void ProxyWriter::appendPrototype() {
   }
   misc_m << "      </Proxy>\n";
 
-  // (Removed legacy LinMap prototype; LinMap-like labels are now handled by generic prototypes.)
 
   // Prototypes per struct namespace for single (non-array) members (numeric / bool / enum / button)
   // For each ns where channels contain 'ns.member' and not isArray, create a prototype named '<ns>Prototype'
@@ -821,7 +804,6 @@ void ProxyWriter::appendUnifiedSourceProxy(const std::string& proxyName,
     sources_m << "            </PropertyGroup>\n\n";
   }
 
-  // Removed legacy LinMap Property Group; generic grouping applies now.
 
   bool hasEnums = false;
   for (const auto& ch : channels_m) { if (!ch.isArray && ch.propertyName.find('.') == std::string::npos && ch.isEnum && !ch.enumEntries.empty()) { hasEnums = true; break; } }
@@ -913,7 +895,6 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                << "                                  command='SetTuple1Int'\n"
                << "                                  clean_command='Clear'\n"
                << "                                  use_index='1'\n"
-              //  << "                                  number_of_elements='1'\n"
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  default_values='";
       if (initLen > 0) {
@@ -935,7 +916,6 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                << "                                  initial_string='steerable_field_b_" << L << "'\n"
                << "                                  number_of_elements_per_command='1'\n"
                << "                                  repeat_command='1'\n"
-              //  << "                                  number_of_elements='1'\n"
                << "                                  default_values='";
       if (initLen > 0) {
         for (unsigned i=0;i<initLen;++i) { sources_m << c->defaultInt; if (i+1<initLen) sources_m << " "; }
@@ -1005,8 +985,6 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
                << "                                  >\n"
                << "            </IntVectorProperty>\n\n";
       } else {
-        const double smin = c->hasScalarRange ? c->scalarMin : rangeMin_m;
-        const double smax = c->hasScalarRange ? c->scalarMax : rangeMax_m;
         sources_m << "            <DoubleVectorProperty name='" << P << "' label='" << P << "'\n"
                << "                                  command='SetTuple1Double'\n"
                << "                                  clean_command='Clear'\n"
@@ -1074,39 +1052,14 @@ void ProxyWriter::appendArraySourceProxy(const std::string& ns,
 
 // ------------------------------ Config management --------------------------------
 
-void ProxyWriter::setConfigNode(const conduit_cpp::Node n) {
-  // Deep copy via YAML serialization, then re-parse into our caches
-  std::string ys;
-  try {
-    ys = n.to_yaml();
-  } catch (...) {
-    ys.clear();
-  }
-  if (!ys.empty()) {
-    loadConfigFromYamlString(ys);
-  }
-}
-
 void ProxyWriter::applyScalarConfig(Channel& ch) const {
-  // Start from type default if present
-  if (typeDefaultScalar_m.has) {
-    ch.hasScalarRange = true;
-    ch.scalarMin = typeDefaultScalar_m.min;
-    ch.scalarMax = typeDefaultScalar_m.max;
-    if (!ch.preserveScalarDefault) {
-      ch.defaultValue = typeDefaultScalar_m.def;
-      ch.hasScalarDefault = true;
-    }
-  }
   auto it = labelScalarCfg_m.find(ch.label);
   if (it != labelScalarCfg_m.end() && it->second.has) {
     ch.hasScalarRange = true;
     ch.scalarMin = it->second.min;
     ch.scalarMax = it->second.max;
-    if (!ch.preserveScalarDefault) {
-      ch.defaultValue = it->second.def;
-      ch.hasScalarDefault = true;
-    }
+    ch.defaultValue = it->second.def;
+    ch.hasScalarDefault = true;
   }
 }
 
@@ -1134,10 +1087,6 @@ bool ProxyWriter::loadConfigFromYamlFile(const std::string& path) {
 
 bool ProxyWriter::loadConfigFromYamlString(const std::string& yaml) {
   // Reset caches to only track per-label ranges
-  hasConfig_m = false;
-  // Drop support for type defaults and steerParams; keep only label ranges
-  typeDefaultScalar_m = {};
-  typeDefaultVectorComp_m = {};
   labelScalarCfg_m.clear();
   labelVectorCfg_m.clear();
 

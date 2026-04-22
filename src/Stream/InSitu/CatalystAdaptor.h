@@ -596,7 +596,9 @@ public:
      * Expose any user struct composed of already supported steerable member
      * types (arithmetic, bool, ippl::Button, ippl::Vector<>, enums). Nested structs are not
      * supported yet. Must be called before adding the struct instance to a
-     * runtime registry.
+     * runtime registry. Args must be an even-sized pack of: name(string-like), pointer-to-member.
+     * Validates each member type at registration (throws IpplException if invalid).
+     * Stores three lambdas which expand the pack and delegate to visitor overloads.
      * 
      * @tparam T The struct type to register.
      * @tparam Args Types of the member pointers.
@@ -607,6 +609,7 @@ public:
 
 
 
+    /* DEPRECATED atm ... */
     // Optional enum metadata: label -> list of (text,value) choices
     // std::unordered_map<std::string, std::vector<std::pair<std::string,int>>> enumChoices_m;
     // /**
