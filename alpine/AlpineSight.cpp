@@ -46,10 +46,6 @@ const char* TestName   = "AlpineSight";
 #include "Stream/InSitu/CatalystAdaptor.h"
 #endif
 
-#ifdef IPPL_ENABLE_ASCENT
-#include "Stream/InSitu/AscentAdaptor.h"
-#endif
-
 
 int main(int argc, char* argv[]) {
 

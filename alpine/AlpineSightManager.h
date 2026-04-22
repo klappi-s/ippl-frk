@@ -24,11 +24,6 @@
 // #include <vtkSMProxyManager.h>
 #endif
 
-
-#ifdef IPPL_ENABLE_ASCENT
-#include "Stream/InSitu/AscentAdaptor.h"
-#endif
-
 using view_type = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
 using namespace std::chrono_literals;
 
@@ -388,14 +383,6 @@ public:
     
         #endif
         
-        #ifdef IPPL_ENABLE_ASCENT
-            m << "Ascent is enabled" << endl; 
-            ippl::AscentAdaptor::Initialize();
-        #endif
-
-
-
-
         this->dump();
 
         m << "Done\n\n\n";
@@ -587,17 +574,6 @@ public:
         IpplTimings::startTimer(TMR_CAremember);
         cat_vis.rememberNow("density");
         IpplTimings::stopTimer(TMR_CAremember);
-#endif
-#ifdef IPPL_ENABLE_ASCENT
-        std::vector<AscentAdaptor::ParticlePair<T, Dim>> particles_asc = {
-            {"particle", std::shared_ptr<ParticleContainer<T, Dim> >(pc)},
-        };
-        std::vector<AscentAdaptor::FieldPair<T, Dim>> fields_asc = {
-            {"E",   AscentAdaptor::FieldVariant<T, Dim>(&this->fcontainer_m->getE())},
-            // {"roh", AscentAdaptor::FieldVariant<T, Dim>(&this->fcontainer_m->getRho())},
-            // {"phi", Ascent    ::FieldVariant<T, Dim>(&this->fcontainer_m->getPhi())},
-        };
-        ippl::AscentAdaptor::Execute(it, this->time_m ,  particles_asc, fields_asc);
 #endif
 
         // Field solve: charge density -(insitu)->  potential -> EField

@@ -172,52 +172,6 @@ if (IPPL_ENABLE_CATALYST)
 endif()
 
 
-if (IPPL_ENABLE_ASCENT)
-    message (STATUS "ASCENT Enabled")
-
-
-    # Create a list to hold all hint paths
-    set(ASCENT_HINTS "")
-    # If a path is provided from the command line, add it to the list first
-    if(DEFINED ASCENT_HINT_PATH AND EXISTS "${ASCENT_HINT_PATH}")
-        message(STATUS "Using user-provided Ascent hint path: ${ASCENT_HINT_PATH}")
-        list(APPEND ASCENT_HINTS "${ASCENT_HINT_PATH}")
-    endif()
-
-    find_package(Ascent REQUIRED 
-    HINTS ${ASCENT_HINTS}
-    )
-    # fails if ascent isn't found ...
-
-    target_compile_definitions(ippl PUBLIC
-        IPPL_ENABLE_ASCENT
-    )
-        # Use the correct target based on what's available
-        if(TARGET ascent::ascent_mpi)
-            target_link_libraries(ippl PUBLIC ascent::ascent_mpi)
-            message(STATUS "Linking with ascent::ascent_mpi")
-        elseif(TARGET ascent::ascent)
-            target_link_libraries(ippl PUBLIC ascent::ascent)
-            message(STATUS "Linking with ascent::ascent (no MPI)")
-        else()
-            message(FATAL_ERROR "No suitable Ascent target found")
-        endif()
-        ####################################################
-        # Detailed INFO automatically printed by ascent ...#
-        ####################################################
-
-    
-        ##-> done automatically ...
-        ### INSTALL_PREFIX defined upon linking of the library...
-    # include_directories ( 
-    #     ${ASCENT_INSTALL_PREFIX}/include/ascent>
-    # )
-
-
-endif()
-
-
-
 include(${PROJECT_SOURCE_DIR}/cmake/PlatformOptions.cmake)
 
 target_link_libraries(ippl PUBLIC Kokkos::kokkos MPI::MPI_CXX)

@@ -21,7 +21,5 @@ install(FILES
     CatalystAdaptorSteering.h
     CatalystAdaptor.hpp
     CatalystVisitors.h
-    AscentAdatpor.h
-    VisBaseAdaptor.h
     DESTINATION include/Stream/InSitu 
 )
