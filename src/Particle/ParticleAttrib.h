@@ -16,6 +16,8 @@
 #ifndef IPPL_PARTICLE_ATTRIB_H
 #define IPPL_PARTICLE_ATTRIB_H
 
+#include <cstring>
+
 #include "Expression/IpplExpressions.h"
 
 #include "Interpolation/CIC.h"
@@ -52,7 +54,7 @@ inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::val
 
         using view_type = typename detail::ViewType<T, 1, Properties...>::view_type;
 
-        using HostMirror = typename view_type::host_mirror_type;
+        using host_mirror_type = typename view_type::host_mirror_type;
 
         using memory_space    = typename view_type::memory_space;
         using execution_space = typename view_type::execution_space;
@@ -102,19 +104,19 @@ inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::val
         }
 
         virtual ~ParticleAttrib() = default;
-
+        
         size_type size() const override { return dview_m.extent(0); }
-
+        
         size_type packedSize(const size_type count) const override {
             return count * sizeof(value_type);
         }
-
+        
         void resize(size_type n) { Kokkos::resize(dview_m, n); }
-
+        
         void realloc(size_type n) { Kokkos::realloc(dview_m, n); }
 
         void print() {
-            HostMirror hview = Kokkos::create_mirror_view(dview_m);
+            host_mirror_type hview = Kokkos::create_mirror_view(dview_m);
             Kokkos::deep_copy(hview, dview_m);
             for (size_type i = 0; i < *(this->localNum_mp); ++i) {
                 std::cout << hview(i) << std::endl;
@@ -127,7 +129,18 @@ inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::val
 
         const view_type& getView() const { return dview_m; }
 
-        HostMirror getHostMirror() const { return Kokkos::create_mirror(dview_m); }
+        host_mirror_type getHostMirror() const { return Kokkos::create_mirror(dview_m); }
+
+        void set_name(const std::string& name_) override {
+            size_t len = name_.size();
+            if (len >= detail::ATTRIB_NAME_MAX_LEN) {
+                len = detail::ATTRIB_NAME_MAX_LEN - 1;
+            }
+            std::memcpy(this->name_m, name_.c_str(), len);
+            this->name_m[len] = '\0';
+        }
+
+        std::string get_name() const override { return std::string(this->name_m); }
 
         /*!
          * Assign the same value to the whole attribute.

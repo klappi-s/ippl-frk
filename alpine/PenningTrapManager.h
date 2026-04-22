@@ -2,6 +2,7 @@
 #define IPPL_PENNING_TRAP_MANAGER_H
 
 #include <memory>
+#include <filesystem>
 
 #include "FieldContainer.hpp"
 #include "FieldSolver.hpp"
@@ -540,6 +541,7 @@ public:
         }
 
         if (ippl::Comm->rank() == 0) {
+            std::filesystem::create_directory("data");
             std::stringstream fname;
             fname << "data/ParticleField_";
             fname << ippl::Comm->size();

@@ -1,17 +1,29 @@
+build/
+doc/html
+doc/latex
+manual/*.aux
+manual/*.log
+manual/*.toc
+manual/*.idx
+manual/*.lof
+manual/*.lot
+manual/ippl_user_guide.pdf
+build*/
+*~
+*.~
+*.orig
 
+# ignore build directories
+build*/
+
+# ignore .vscode directory
 .vscode
+.cache
+
+# mac
+.DS_Store
+
 
 .cache
 *pycache*
 *__pycache__
-
-*png
-*svg
-*puml*
-
-./old
-*old*
-
-build/
-build*/
-
