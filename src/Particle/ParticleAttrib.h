@@ -61,22 +61,6 @@ inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::val
 
         using size_type = detail::size_type;
 
-        void  set_name(const std::string & name_) override;
-        std::string get_name() const override;
-
-
-            #ifdef IPPL_ENABLE_CATALYST
-            void signConduitBlueprintNode(
-                              const size_type Np_local
-                            , conduit_cpp::Node& node_fields
-                            , ViewRegistry& viewRegistry
-                            , Inform& ca_m
-                            , Inform& ca_warn
-                            , const bool forceHostCopy
-                        ) const override ;       
-            #endif
-
-
         // Create storage for M particle attributes.  The storage is uninitialized.
         // New items are appended to the end of the array.
         void create(size_type) override;
@@ -238,6 +222,17 @@ inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::val
          * @param indices The indices to copy.
          */
         void internalCopy(const hash_type& indices) override;
+
+        #ifdef IPPL_ENABLE_CATALYST
+            void signConduitBlueprintNode(
+                              const size_type Np_local
+                            , conduit_cpp::Node& node_fields
+                            , ViewRegistry& viewRegistry
+                            , Inform& ca_m
+                            , Inform& ca_warn
+                            , const bool forceHostCopy
+                        ) const override ;       
+        #endif
 
     private:
         view_type dview_m;

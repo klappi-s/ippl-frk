@@ -41,23 +41,6 @@ namespace ippl {
             };
 
         public:
-            ParticleAttribBase(){this->name = "UNNAMED";}
-
-            virtual void set_name(const std::string & name_) = 0;
-            virtual std::string get_name() const = 0;
-            
-            
-            #ifdef IPPL_ENABLE_CATALYST
-            virtual void signConduitBlueprintNode(
-                              const size_type Np_local
-                            , conduit_cpp::Node& node_fields
-                            , ViewRegistry& viewRegistry
-                            , Inform& ca_m
-                            , Inform& ca_warn
-                            , const bool forceHostCopy
-                        )  const = 0;
-            #endif
-
             using hash_type       = ippl::detail::hash_type<MemorySpace>;
             using memory_space    = MemorySpace;
             using execution_space = typename memory_space::execution_space;
@@ -101,7 +84,18 @@ namespace ippl {
             size_type getParticleCount() const { return *localNum_mp; }
 
             virtual void applyPermutation(const hash_type&) = 0;
-            virtual void internalCopy(const hash_type&) = 0;
+            virtual void internalCopy(const hash_type&) = 0;          
+            
+            #ifdef IPPL_ENABLE_CATALYST
+                virtual void signConduitBlueprintNode(
+                              const size_type Np_local
+                            , conduit_cpp::Node& node_fields
+                            , ViewRegistry& viewRegistry
+                            , Inform& ca_m
+                            , Inform& ca_warn
+                            , const bool forceHostCopy
+                        )  const = 0;
+            #endif
 
         protected:
             const size_type* localNum_mp;

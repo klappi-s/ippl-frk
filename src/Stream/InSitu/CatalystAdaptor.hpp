@@ -647,8 +647,8 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
         using IDAttrib_t = std::remove_reference_t<decltype(particleContainer->ID)>;
         using RAttrib_t  = std::remove_reference_t<decltype(particleContainer->R)>;
 
-        using hostMirror_ID_t = typename IDAttrib_t::HostMirror;
-        using hostMirror_R_t  = typename RAttrib_t::HostMirror;
+        using hostMirror_ID_t = typename IDAttrib_t::host_mirror_type;
+        using hostMirror_R_t  = typename RAttrib_t::host_mirror_type;
 
         hostMirror_ID_t ID_hostMirror ;
         hostMirror_R_t  R_hostMirror  ;
