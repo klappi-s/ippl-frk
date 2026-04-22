@@ -389,16 +389,7 @@ namespace ippl {
         const Vector<point_t, QuadratureType::numElementNodes> q =
             this->quadrature_m.getIntegrationNodesForRefElement();
 
-        // Evaluate the basis functions for the DOF at the quadrature nodes
-        Vector<Vector<T, this->numElementDOFs>, QuadratureType::numElementNodes> basis_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < this->numElementDOFs; ++i) {
-                basis_q[k][i] = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
         // TODO move outside of evaluateAx (I think it is possible for other problems as well)
-        // TO THINK ABOUT; IS IT?
         // Gradients of the basis functions for the DOF at the quadrature nodes
         Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
         for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
@@ -456,7 +447,7 @@ namespace ippl {
                     global_dof_ndindices[i] = this->getMeshVertexNDIndex(global_dofs[i]);
                 }
 
-                // local DOF indices (both i and j go from 0 to numDOFs-1 in the element)
+                // local DOF indices
                 size_t i, j;
 
                 // global DOF n-dimensional indices (Vector of N indices representing indices in

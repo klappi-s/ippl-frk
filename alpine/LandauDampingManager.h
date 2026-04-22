@@ -15,10 +15,6 @@
 #include "Random/NormalDistribution.h"
 #include "Random/Randn.h"
 
-#ifdef IPPL_ENABLE_CATALYST
-#include "Stream/InSitu/CatalystAdaptor.h"
-#endif
-
 using view_type = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
 
 // define functions used in sampling particles
@@ -155,15 +151,6 @@ public:
         IpplTimings::stopTimer(SolveTimer);
 
         this->grid2par();
-
-
-
-
-        #ifdef IPPL_ENABLE_CATALYST
-            m << "Catalyst is enabled" << endl; 
-            
-        #endif
-        
 
         this->dump();
 
@@ -318,21 +305,11 @@ public:
         // scatter the charge onto the underlying grid
         this->par2grid();
 
-
-#ifdef IPPL_ENABLE_CATALYST
-        
-
- #endif
-
-
-
         // Field solve
         IpplTimings::startTimer(SolveTimer);
         this->fsolver_m->runSolver();
         IpplTimings::stopTimer(SolveTimer);
 
-
-        
         // gather E field
         this->grid2par();
 

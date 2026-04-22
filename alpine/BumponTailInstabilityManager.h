@@ -16,11 +16,6 @@
 #include "Random/Randn.h"
 #include "Random/UniformDistribution.h"
 
-
-#ifdef IPPL_ENABLE_CATALYST
-#include "Stream/InSitu/CatalystAdaptor.h"
-#endif
-
 using view_type = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
 
 constexpr bool EnablePhaseDump = false;
@@ -193,14 +188,6 @@ public:
 
         this->grid2par();
 
-
-        #ifdef IPPL_ENABLE_CATALYST
-            m << "Catalyst is enabled" << endl; 
-
-
-        #endif
-        
-
         this->dump();
 
         m << "Done";
@@ -367,12 +354,6 @@ public:
 
         // scatter the charge onto the underlying grid
         this->par2grid();
-
-
-#ifdef IPPL_ENABLE_CATALYST
-        
-
- #endif
 
         // Field solve
         IpplTimings::startTimer(SolveTimer);
