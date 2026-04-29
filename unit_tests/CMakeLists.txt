@@ -33,3 +33,7 @@ add_subdirectory(Meshes)
 add_subdirectory(Particle)
 add_subdirectory(PIC)
 add_subdirectory(Utility)
+
+if(IPPL_ENABLE_NBODY)
+  add_subdirectory(NBody)
+endif()
