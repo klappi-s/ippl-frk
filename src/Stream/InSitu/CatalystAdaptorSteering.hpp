@@ -120,7 +120,7 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
                     using MemberPtrT = std::tuple_element_t<2*I+1, decltype(pack)>;
                     MemberPtrT mptr = std::get<2*I+1>(pack);
                     auto rawName = std::get<2*I>(pack);
-                    std::string memberLabel = "array:" + ippl::detail::sanitize_label(root) + '.' + ippl::detail::sanitize_label(std::string(rawName));
+                    std::string memberLabel = ippl::detail::sanitize_label(root) + '.' + ippl::detail::sanitize_label(std::string(rawName));
                     using MType = std::remove_reference_t<decltype(std::declval<DecayT>().*mptr)>;
                     std::vector<MType> tmp; tmp.reserve(arr.size());
                     for (auto& el : arr) tmp.push_back(el.*mptr);
@@ -337,7 +337,7 @@ void CatalystAdaptor::ForwardSteerChannel( const T& steerableScalarForwardpass, 
 {
         catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: " << typeid(T).name() << endl;
         
-        auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
+        auto steerableChannel = node_m["catalyst/channels/steerable_channel_0D_mesh"];
 
         steerableChannel["type"].set("mesh");
         auto steerableData = steerableChannel["data"];
@@ -350,7 +350,7 @@ void CatalystAdaptor::ForwardSteerChannel( const T& steerableScalarForwardpass, 
         steerableData["topologies/sMesh_topo/elements/connectivity"].set( 0 );
         
 
-        conduit_cpp::Node steerableField = steerableData["fields/steerableField_f_" + steerableSuffix];
+        conduit_cpp::Node steerableField = steerableData["fields/steerable_field_f_" + steerableSuffix];
         steerableField["association"].set("vertex");
         steerableField["topology"].set("sMesh_topo");
         steerableField["volume_dependent"].set("false");
@@ -375,7 +375,7 @@ requires (std::is_enum_v<std::decay_t<E>>)
 void CatalystAdaptor::ForwardSteerChannel( const E& e, const std::string& steerableSuffix )
 {
     catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: Enum" << endl;
-    auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
+    auto steerableChannel = node_m["catalyst/channels/steerable_channel_0D_mesh"];
     steerableChannel["type"].set("mesh");
     auto steerableData = steerableChannel["data"];    
     steerableData["coordsets/coords/type"].set_string("explicit");
@@ -384,7 +384,7 @@ void CatalystAdaptor::ForwardSteerChannel( const E& e, const std::string& steera
     steerableData["topologies/sMesh_topo/coordset"].set("coords");
     steerableData["topologies/sMesh_topo/elements/shape"].set("point");
     steerableData["topologies/sMesh_topo/elements/connectivity"].set( 0 );
-    auto steerableField = steerableData["fields/steerableField_f_" + steerableSuffix];
+    auto steerableField = steerableData["fields/steerable_field_f_" + steerableSuffix];
     steerableField["association"].set("vertex");
     steerableField["topology"].set("sMesh_topo");
     steerableField["volume_dependent"].set("false");
@@ -396,7 +396,7 @@ void CatalystAdaptor::ForwardSteerChannel( const bool& sw, const std::string& st
 {
     catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: bool/Switch" << endl;
     
-    auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
+    auto steerableChannel = node_m["catalyst/channels/steerable_channel_0D_mesh"];
     steerableChannel["type"].set("mesh");
     auto steerableData = steerableChannel["data"];
     steerableData["coordsets/coords/type"].set_string("explicit");
@@ -407,7 +407,7 @@ void CatalystAdaptor::ForwardSteerChannel( const bool& sw, const std::string& st
     steerableData["topologies/sMesh_topo/elements/shape"].set("point");
     steerableData["topologies/sMesh_topo/elements/connectivity"].set( 0 );
 
-    conduit_cpp::Node steerableField = steerableData["fields/steerableField_f_" + steerableSuffix];
+    conduit_cpp::Node steerableField = steerableData["fields/steerable_field_f_" + steerableSuffix];
     steerableField["association"].set("vertex");
     steerableField["topology"].set("sMesh_topo");
     steerableField["volume_dependent"].set("false");
@@ -420,7 +420,7 @@ void CatalystAdaptor::ForwardSteerChannel( const bool& sw, const std::string& st
 void CatalystAdaptor::ForwardSteerChannel( const ippl::Button& btn, const std::string& steerableSuffix )
 {
     catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Type: Button" << endl;
-    auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
+    auto steerableChannel = node_m["catalyst/channels/steerable_channel_0D_mesh"];
     steerableChannel["type"].set("mesh");
     auto steerableData = steerableChannel["data"];
     steerableData["coordsets/coords/type"].set_string("explicit");
@@ -431,7 +431,7 @@ void CatalystAdaptor::ForwardSteerChannel( const ippl::Button& btn, const std::s
     steerableData["topologies/sMesh_topo/elements/shape"].set("point");
     steerableData["topologies/sMesh_topo/elements/connectivity"].set( 0 );
 
-    conduit_cpp::Node steerableField = steerableData["fields/steerableField_f_" + steerableSuffix];
+    conduit_cpp::Node steerableField = steerableData["fields/steerable_field_f_" + steerableSuffix];
     steerableField["association"].set("vertex");
     steerableField["topology"].set("sMesh_topo");
     steerableField["volume_dependent"].set("false");
@@ -450,7 +450,7 @@ void CatalystAdaptor::ForwardSteerChannel( const ippl::Vector<T, Dim_v>& steerab
 {
     catalystInfo_m << "::Execute()::ForwardSteerChannel(" << steerableSuffix << ");  | Vector<" << typeid(T).name() << "," << Dim_v << ">" << endl;
 
-    auto steerableChannel = node_m["catalyst/channels/steerableChannel_0D_mesh"];
+    auto steerableChannel = node_m["catalyst/channels/steerable_channel_0D_mesh"];
     steerableChannel["type"].set("mesh");
     auto steerableData = steerableChannel["data"];
     steerableData["coordsets/coords/type"].set_string("explicit");
@@ -461,7 +461,7 @@ void CatalystAdaptor::ForwardSteerChannel( const ippl::Vector<T, Dim_v>& steerab
     steerableData["topologies/sMesh_topo/elements/shape"].set("point");
     steerableData["topologies/sMesh_topo/elements/connectivity"].set(0);
 
-    const std::string base = std::string("fields/steerableField_f_") + steerableSuffix;
+    const std::string base = std::string("fields/steerable_field_f_") + steerableSuffix;
     auto fnode = steerableData[base];
     fnode["association"].set_string("vertex");
     fnode["topology"].set_string("sMesh_topo");
@@ -504,7 +504,7 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<Elem>& arr, const s
     std::string prefix = alabel;
     auto us_pos = prefix.find('.');
     if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
-    std::string mesh_name = std::string("steerableChannel_1D_mesh_") + prefix;
+    std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
     auto steerableChannel = node_m[std::string("catalyst/channels/") + mesh_name];
     steerableChannel["type"].set("mesh");
     auto steerableData = steerableChannel["data"];
@@ -524,7 +524,7 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<Elem>& arr, const s
         steerableData["topologies/sMesh_topo/elements/connectivity"].set(conn);
     }
 
-    auto f = steerableData[std::string("fields/steerableField_f_") + alabel];
+    auto f = steerableData[std::string("fields/steerable_field_f_") + alabel];
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
@@ -561,7 +561,7 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<ippl::Vector<T, Dim
     std::string prefix = alabel;
     auto us_pos = prefix.find('.');
     if(us_pos != std::string::npos) prefix = prefix.substr(0, us_pos);
-    std::string mesh_name = std::string("steerableChannel_1D_mesh_") + prefix;
+    std::string mesh_name = std::string("steerable_channel_1D_mesh_") + prefix;
     auto steerableChannel = node_m[std::string("catalyst/channels/") + mesh_name];
     steerableChannel["type"].set("mesh");
     auto steerableData = steerableChannel["data"];
@@ -581,7 +581,7 @@ void CatalystAdaptor::ForwardSteerChannel( const std::vector<ippl::Vector<T, Dim
         steerableData["topologies/sMesh_topo/elements/connectivity"].set(conn);
     }
 
-    auto f = steerableData[std::string("fields/steerableField_f_") + alabel];
+    auto f = steerableData[std::string("fields/steerable_field_f_") + alabel];
     f["association"].set("vertex");
     f["topology"].set("sMesh_topo");
     f["volume_dependent"].set("false");
@@ -628,8 +628,8 @@ template<typename T>
 requires (!std::is_enum_v<std::decay_t<T>>)
 void CatalystAdaptor::FetchSteerChannel( T& steerableScalarBackwardpass, const std::string& label) {
 
-    std::string unified_path = std::string("catalyst/steerableChannel_backward_all/fields/") +
-                               "steerableField_b_" + label + "/values";
+    std::string unified_path = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                               "steerable_field_b_" + label + "/values";
 
     const std::string* chosen = nullptr;
     if (results_m.has_path(unified_path)) {
@@ -670,8 +670,8 @@ template<typename E>
 requires (std::is_enum_v<std::decay_t<E>>)
 void CatalystAdaptor::FetchSteerChannel( E& e, const std::string& label)
 {
-    std::string unified_path = std::string("catalyst/steerableChannel_backward_all/fields/") +
-                               "steerableField_b_" + label + "/values";
+    std::string unified_path = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                               "steerable_field_b_" + label + "/values";
     if (!results_m.has_path(unified_path)) {
         catalystInfo_m << "  no backward enum found for label '" << label << "'" << endl;
         return;
@@ -695,8 +695,8 @@ void CatalystAdaptor::FetchSteerChannel( ippl::Vector<T, Dim_v>& steerableVecBac
 {
     const unsigned comps = Dim_v > 3 ? 3u : Dim_v;
     
-    std::string unified_vec_values = std::string("catalyst/steerableChannel_backward_all/fields/") +
-                                     "steerableField_b_" + label + "/values";
+    std::string unified_vec_values = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                                     "steerable_field_b_" + label + "/values";
     const std::string* chosen = nullptr;
     if (results_m.has_path(unified_vec_values)) chosen = &unified_vec_values;
     
@@ -753,8 +753,8 @@ void CatalystAdaptor::FetchSteerChannel( std::vector<Elem>& out, const std::stri
 {
     // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
-    const std::string path = std::string("catalyst/steerableChannel_backward_all/fields/") +
-                             "steerableField_b_" + alabel + "/values";
+    const std::string path = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                             "steerable_field_b_" + alabel + "/values";
     if (!results_m.has_path(path)) {
         catalystInfo_m << "  no backward array for '" << alabel << "'" << endl;
         return;
@@ -842,8 +842,8 @@ void CatalystAdaptor::FetchSteerChannel( std::vector<ippl::Vector<T, Dim_v>>& ou
 {
     // Normalize: ensure 'array:' prefix matches fields created in proxies/pipeline
     const std::string alabel = (label.rfind("array:", 0) == 0) ? label : std::string("array:") + label;
-    const std::string root = std::string("catalyst/steerableChannel_backward_all/fields/") +
-                             "steerableField_b_" + alabel + "/values";
+    const std::string root = std::string("catalyst/steerable_channel_backward_all/fields/") +
+                             "steerable_field_b_" + alabel + "/values";
     
     // Handle 1D vector array appearing as flat array
     if constexpr (Dim_v == 1) {
