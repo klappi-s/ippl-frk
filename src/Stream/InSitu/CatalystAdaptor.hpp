@@ -299,13 +299,13 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         viewRegistry_m.set(label + "_rank_id_cells", rank_id_view_cells);
 
 
-        auto print_ranked_mesh_info = [&](){
-            catalystWarn_m << "[  rank="          << ippl::Comm->rank() << "]"
-                    << " | dims(points)="  << nx << "x" << ny << "x" << nz
-                    << " | ghost: "        << nGhost 
-                    << " | origin=("       << Ox << "," << Oy << "," << Oz << ")"
-                    << " | spacing=("      << Spacing_[0] << "," << (Dim>=2?Spacing_[1]:0)<< "," << (Dim>=3?Spacing_[2]:0) << ")" << endl;
-        };
+        // auto print_ranked_mesh_info = [&](){
+        //     catalystWarn_m << "[  rank="          << ippl::Comm->rank() << "]"
+        //             << " | dims(points)="  << nx << "x" << ny << "x" << nz
+        //             << " | ghost: "        << nGhost 
+        //             << " | origin=("       << Ox << "," << Oy << "," << Oz << ")"
+        //             << " | spacing=("      << Spacing_[0] << "," << (Dim>=2?Spacing_[1]:0)<< "," << (Dim>=3?Spacing_[2]:0) << ")" << endl;
+        // };
 
         // #if defined(MPI_VERSION)
         // MPI_Barrier(MPI_COMM_WORLD);
@@ -698,19 +698,19 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
                 data_help["coordsets/bound_helper_coords/dims/i"].set(2);
                 data_help["coordsets/bound_helper_coords/spacing/dx"].set( ndr[0].max()  - ndr[0].min() );
                 data_help["coordsets/bound_helper_coords/origin/x"].set(   ndr[0].min() );
-                // data["topologies/bound_helper_topo/origin/x"].set(    ndr[0].min() );
+                // data_help["topologies/bound_helper_topo/origin/x"].set(    ndr[0].min() );
             }
             if constexpr(dim_ >= 2){
                 data_help["coordsets/bound_helper_coords/dims/j"].set(2);
                 data_help["coordsets/bound_helper_coords/spacing/dy"].set( ndr[1].max()- ndr[1].min() );
                 data_help["coordsets/bound_helper_coords/origin/y"].set(   ndr[1].min()               );
-                // data["topologies/bound_helper_topo/origin/y"].set(    ndr[1].min()               );
+                // data_help["topologies/bound_helper_topo/origin/y"].set(    ndr[1].min()               );
             }
             if constexpr(dim_ >= 3){
                 data_help["coordsets/bound_helper_coords/dims/k"].set(2);
                 data_help["coordsets/bound_helper_coords/spacing/dz"].set( ndr[2].max()- ndr[1].min() );
                 data_help["coordsets/bound_helper_coords/origin/z"].set(   ndr[2].min()               );
-                // data["topologies/bound_helper_topo/origin/z"].set(    ndr[2].min()               );
+                // data_help["topologies/bound_helper_topo/origin/z"].set(    ndr[2].min()               );
             }
     } 
     // else {
@@ -719,7 +719,7 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
         
         
         /* ATTRIBUTES HARDCODED IN PARTICELBASE are identity ID and position R */
-        /* EXPLICIT COORDINATES -> EACH PARTICLE POSITION */
+        /* EXPLICIT COORDINATES -> EACH PARTICLE'S POSITION */
 
         const size_t localNum = particleContainer->getLocalNum();
         const int rank = ippl::Comm->rank(); 
