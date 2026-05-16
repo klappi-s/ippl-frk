@@ -117,8 +117,9 @@ void CatalystAdaptor::RegisterStructMembers(Args&&... args) {
             
             [&]<std::size_t... I>(std::index_sequence<I...>){
                 ( [&](){
-                    using MemberPtrT = std::tuple_element_t<2*I+1, decltype(pack)>;
-                    MemberPtrT mptr = std::get<2*I+1>(pack);
+                    // using MemberPtrT = std::tuple_element_t<2*I+1, decltype(pack)>;
+                    // MemberPtrT = // causese problems with "older" compilers...
+                    auto mptr = std::get<2*I+1>(pack);
                     auto rawName = std::get<2*I>(pack);
                     std::string memberLabel = ippl::detail::sanitize_label(root) + '.' + ippl::detail::sanitize_label(std::string(rawName));
                     using MType = std::remove_reference_t<decltype(std::declval<DecayT>().*mptr)>;
