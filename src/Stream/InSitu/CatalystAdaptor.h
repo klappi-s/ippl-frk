@@ -243,13 +243,13 @@ public:
         
         catalystInfo_m.setOutputLevel(outputLevel_m);
         
-        #if defined(MPI_VERSION)
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(ippl::Comm->rank()==0) catalystWarn_m << "[rank = 0 size=" << ippl::Comm->size() << "]" << endl;
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(ippl::Comm->rank()==1) catalystWarn_m << "[rank= 1 size=" << ippl::Comm->size() << "]" << endl;
-        MPI_Barrier(MPI_COMM_WORLD);
-        #endif
+        // #if defined(MPI_VERSION)
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // if(ippl::Comm->rank()==0) catalystWarn_m << "[rank = 0 size=" << ippl::Comm->size() << "]" << endl;
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // if(ippl::Comm->rank()==1) catalystWarn_m << "[rank= 1 size=" << ippl::Comm->size() << "]" << endl;
+        // MPI_Barrier(MPI_COMM_WORLD);
+        // #endif
 
         catalystInfo_m << "::CatalystAdaptor()   Global        Output  Level setting: " << ippl::Info->getOutputLevel() << endl;
         catalystInfo_m << "::CatalystAdaptor()   Catalyst Info Output  Level setting: " << catalystInfo_m.getOutputLevel() << endl;

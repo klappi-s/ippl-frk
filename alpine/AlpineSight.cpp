@@ -1,6 +1,6 @@
 // Penning Trap
 //   Usage:
-//     srun ./PenningTrap
+//     srun ./AlpineSight
 //                  <nx> [<ny>...] <Np> <Nt> <stype> <lbthres>
 //                  <t_method> --overallocate <ovfactor> --info 10
 //     nx       = No. cell-centered points in the x-direction
@@ -95,9 +95,8 @@ int main(int argc, char* argv[]) {
                                            preconditioner_params);
 
         
-        // try{
 
-            // Perform pre-run operations, including creating mesh, particles,...
+        // Perform pre-run operations, including creating mesh, particles,...
         msg << "manager.pre_run();" << endl;
         manager.pre_run();
 
@@ -106,13 +105,10 @@ int main(int argc, char* argv[]) {
         msg << "Starting iterations ..." << endl;
         
         manager.run(manager.getNt());
-        // }catch(){
-
-        // }                            
+                       
 
         msg << "End." << endl;
         #ifdef IPPL_ENABLE_CATALYST
-        // CatalystAdaptor::Finalize();
         manager.cat_vis.Finalize();
         #endif
         IpplTimings::stopTimer(mainTimer);

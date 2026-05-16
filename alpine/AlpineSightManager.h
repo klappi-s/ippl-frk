@@ -600,7 +600,7 @@ public:
         ippl::AscentAdaptor::Execute(it, this->time_m ,  particles_asc, fields_asc);
 #endif
 
-        // Field solve: charge density -(insitu)->  potential -> EField
+        // Field solve: charge density -(in place)->  potential -> EField
         IpplTimings::startTimer(SolveTimer);
         this->fsolver_m->runSolver();
         IpplTimings::stopTimer(SolveTimer); 
@@ -643,14 +643,6 @@ public:
         Kokkos::fence();
         ippl::Comm->barrier();
         IpplTimings::stopTimer(PTimer);
-
-
-
-        // std::cout << "PTManager: sleeping a second..." << std::endl;
-        // sleep(1);
-        // std::cout << "PTManager: sleeping a quarter second..." << std::endl;
-        // sleep(1); only takes int
-        // std::this_thread::sleep_for(250ms);
 
     }
 
