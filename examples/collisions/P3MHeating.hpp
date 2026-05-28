@@ -284,7 +284,7 @@ public:
         m << "L2-Norm of Temperature: " << temperature << endl;
     }
 
-    void dump() {
+    void dump() override {
         computeBeamStatistics();
         computeTemperature();
     }
