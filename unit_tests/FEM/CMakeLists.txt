@@ -15,3 +15,8 @@ add_ippl_test(FEMVector)
 add_ippl_test(LocateElement)
 add_ippl_test(AssembleRHS)
 add_ippl_test(InterpolateDiracs)
+
+add_ippl_test(FEMContainerHalo)
+add_ippl_test(DOFHandler)
+add_ippl_test(FEMContainer)
+add_ippl_test(LagrangeSpace_wFEMContainer)

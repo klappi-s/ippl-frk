@@ -204,6 +204,11 @@ namespace ippl {
         // Intersect with another Index.
         KOKKOS_INLINE_FUNCTION Index grow(int ncells) const;
 
+        // ====== FEMContainer : begin ======
+        // Cut the last n cells of the Index off
+        KOKKOS_INLINE_FUNCTION Index cut(unsigned int ncells) const;
+        // ====== FEMContainer : end ======
+
         // Test to see if there is any overlap between two Indexes.
         KOKKOS_INLINE_FUNCTION bool touches(const Index& a) const;
         // Test to see if one contains another (endpoints only)

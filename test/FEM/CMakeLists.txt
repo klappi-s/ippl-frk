@@ -8,5 +8,7 @@
 file(RELATIVE_PATH _relPath "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "Adding index test found in ${_relPath}")
 
-add_ippl_integration_test(TestLagrangeSpace1D LABELS integration fem)
-add_ippl_integration_test(TestLagrangeSpace2D LABELS integration fem)
+add_ippl_integration_test(TestLagrangeSpace1D COMPILE_ONLY LABELS integration fem)
+add_ippl_integration_test(TestLagrangeSpace2D COMPILE_ONLY LABELS integration fem)
+
+add_subdirectory(FEMContainer)

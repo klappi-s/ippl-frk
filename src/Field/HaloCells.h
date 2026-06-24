@@ -77,6 +77,43 @@ namespace ippl {
              */
             void fillHalo(view_type&, Layout_t* layout);
 
+
+            // ====== FEMContainer : begin ======
+    
+            /*!
+             * Send halo data to internal cells with directional filtering.
+             * Only exchanges halos in directions where exchangeDir[d] is true.
+             * This operation uses assign_plus functor to assign the data.
+             * @param view the original field data
+             * @param layout the field layout storing the domain decomposition
+             * @param exchangeDir array indicating which directions to exchange
+             */
+            void accumulateHalo(view_type& view, Layout_t* layout, const std::array<bool, Dim>& exchangeDir);
+
+            /*!
+             * Send halo data to internal cells with directional filtering, excluding corner ghost cells.
+             * Only exchanges halos in directions where exchangeDir[d] is true.
+             * The halo cells on the corners are not sent.
+             * This operation uses assign_plus functor to assign the data.
+             * @param view the original field data
+             * @param layout the field layout storing the domain decomposition
+             * @param exchangeDir array indicating which directions to exchange
+             * @param nghost the number of ghost cells
+             */
+            void accumulateHalo_noghost(view_type& view, Layout_t* layout, const std::array<bool, Dim>& exchangeDir, int nghost);
+
+            /*!
+             * Send internal data to halo cells with directional filtering.
+             * Only exchanges halos in directions where exchangeDir[d] is true.
+             * This operation uses assign functor to assign the data.
+             * @param view the original field data
+             * @param layout the field layout storing the domain decomposition
+             * @param exchangeDir array indicating which directions to exchange
+             */
+            void fillHalo(view_type& view, Layout_t* layout, const std::array<bool, Dim>& exchangeDir);
+
+            // ====== FEMContainer : end ======
+    
             /*!
              * Pack the field data to be sent into a contiguous array.
              * @param range the bounds of the subdomain to be sent
@@ -141,6 +178,32 @@ namespace ippl {
             template <class Op>
             void exchangeBoundaries(view_type& view, Layout_t* layout, SendOrder order, int nghost = 1);
 
+
+            // ====== FEMContainer : begin ======
+    
+            /*!
+             * Exchange the data of halo cells with directional filtering.
+             * @param view is the original field data
+             * @param layout the field layout storing the domain decomposition
+             * @param order the data send orientation
+             * @param exchangeDir array indicating which directions to exchange
+             * @tparam Op the data assigment operator of the unpack function call
+             */
+            template <class Op>
+            void exchangeBoundaries(view_type& view, Layout_t* layout, SendOrder order,
+                                  const std::array<bool, Dim>& exchangeDir, int nghost = 1);
+
+            /*!
+             * Check if a neighbor index should be included in halo exchange
+             * based on the exchange direction mask.
+             * @param neighborIndex the hypercube index of the neighbor
+             * @param exchangeDir array indicating which directions to exchange
+             * @return true if this neighbor should be included in the exchange
+             */
+            bool shouldExchangeWithNeighbor(size_t neighborIndex, const std::array<bool, Dim>& exchangeDir) const;
+
+            // ====== FEMContainer : end ======
+    
             /*!
              * Extract the subview of the original data. This does not copy.
              * A subview points to the same memory.

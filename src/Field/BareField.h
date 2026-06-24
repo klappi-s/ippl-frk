@@ -128,6 +128,33 @@ namespace ippl {
         void accumulateHalo();
         void accumulateHalo_noghost(int nghost = 1);
 
+
+        // ====== FEMContainer : begin ======
+        /*!
+         * Fill halo cells with directional filtering.
+         * Only exchanges halos in directions where exchangeDir[d] is true.
+         * @param exchangeDir array indicating which directions to exchange
+         */
+        void fillHalo(const std::array<bool, Dim>& exchangeDir);
+
+        /*!
+         * Accumulate halo cells with directional filtering.
+         * Only exchanges halos in directions where exchangeDir[d] is true.
+         * @param exchangeDir array indicating which directions to exchange
+         */
+        void accumulateHalo(const std::array<bool, Dim>& exchangeDir);
+
+        /*!
+         * Accumulate halo cells with directional filtering, excluding corner ghost cells.
+         * Only exchanges halos in directions where exchangeDir[d] is true.
+         * @param exchangeDir array indicating which directions to exchange
+         * @param nghost number of ghost cells
+         */
+        void accumulateHalo_noghost(const std::array<bool, Dim>& exchangeDir, int nghost = 1);
+
+        // ====== FEMContainer : end ======
+
+
         auto& getCommunicator() const { return getLayout().comm; }
 
         // Access to the layout.

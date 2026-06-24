@@ -267,6 +267,20 @@ namespace ippl {
 
         return index;
     }
+    
+    // ====== FEMContainer : begin ======
+    KOKKOS_INLINE_FUNCTION Index Index::cut(unsigned int ncells) const {
+        PAssert_GT(length_m, ncells);
+
+        Index index;
+
+        index.first_m  = this->first_m;
+        index.length_m = this->length_m - ncells;
+        index.stride_m = this->stride_m;
+
+        return index;
+    }
+    // ====== FEMContainer : begin ======
 
     KOKKOS_INLINE_FUNCTION static Index do_intersect(const Index& a, const Index& b) {
         PAssert_GT(a.stride(), 0);  // This should be assured by the

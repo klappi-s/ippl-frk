@@ -168,6 +168,44 @@ namespace ippl {
         }
     }
 
+    // ====== FEMContainer : begin ======
+
+    template <typename T, unsigned Dim, class... ViewArgs>
+    void BareField<T, Dim, ViewArgs...>::fillHalo(const std::array<bool, Dim>& exchangeDir) {
+        if (layout_m->comm.size() > 1) {
+            halo_m.fillHalo(dview_m, layout_m, exchangeDir);
+        }
+        if (layout_m->isAllPeriodic_m) {
+            // For periodic BCs, only apply in directions where we're exchanging
+            // TODO: This may need refinement for directional periodic BCs
+            using Op = typename detail::HaloCells<T, Dim, ViewArgs...>::assign;
+            halo_m.template applyPeriodicSerialDim<Op>(dview_m, layout_m, nghost_m);
+        }
+    }
+
+    template <typename T, unsigned Dim, class... ViewArgs>
+    void BareField<T, Dim, ViewArgs...>::accumulateHalo(const std::array<bool, Dim>& exchangeDir) {
+        if (layout_m->comm.size() > 1) {
+            halo_m.accumulateHalo(dview_m, layout_m, exchangeDir);
+        }
+        if (layout_m->isAllPeriodic_m) {
+            // For periodic BCs, only apply in directions where we're exchanging
+            // TODO: This may need refinement for directional periodic BCs
+            using Op = typename detail::HaloCells<T, Dim, ViewArgs...>::rhs_plus_assign;
+            halo_m.template applyPeriodicSerialDim<Op>(dview_m, layout_m, nghost_m);
+        }
+    }
+
+    template <typename T, unsigned Dim, class... ViewArgs>
+    void BareField<T, Dim, ViewArgs...>::accumulateHalo_noghost(const std::array<bool, Dim>& exchangeDir, int nghost) {
+        if (layout_m->comm.size() > 1) {
+            halo_m.accumulateHalo_noghost(dview_m, layout_m, exchangeDir, nghost);
+        }
+    }
+
+
+    // ====== FEMContainer : end ======
+
     template <typename T, unsigned Dim, class... ViewArgs>
     BareField<T, Dim, ViewArgs...>& BareField<T, Dim, ViewArgs...>::operator=(T x) {
         Kokkos::deep_copy(dview_m, x);

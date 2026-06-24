@@ -103,10 +103,21 @@ function(set_kokkos_options)
     endif()
   endforeach()
 
-  if("CUDA" IN_LIST IPPL_PLATFORMS)
-    set(Kokkos_ENABLE_CUDA_LAMBDA ON)
-  endif()
 
+  # // ====== FEMContainer : before ======
+
+  # if("CUDA" IN_LIST IPPL_PLATFORMS)
+  #   set(Kokkos_ENABLE_CUDA_LAMBDA ON)
+
+  # // ====== FEMContainer : begin ======
+  if("CUDA" IN_LIST IPPL_PLATFORMS)
+    set(Kokkos_ENABLE_CUDA_LAMBDA ON CACHE BOOL "Enable CUDA lambda support" FORCE)
+    # Enable relaxed constexpr (allows calling constexpr __host__ functions from __device__)
+    set(Kokkos_ENABLE_CUDA_CONSTEXPR ON CACHE BOOL "Enable CUDA constexpr support" FORCE)
+    message(STATUS "IPPL: Enabled Kokkos_ENABLE_CUDA_CONSTEXPR for --expt-relaxed-constexpr")
+  endif()
+  # // ====== FEMContainer : end ======
+  
   if("HIP" IN_LIST IPPL_PLATFORMS)
     if(IPPL_ENABLE_HIP_PROFILER)
       set(KOKKOS_ENABLE_PROFILING ON CACHE BOOL "Enable Kokkos Profiling" FORCE)

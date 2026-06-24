@@ -66,7 +66,7 @@ namespace ippl {
          * @return a choose b
          */
         constexpr unsigned int binomialCoefficient(unsigned a, unsigned b) {
-            return factorial(a) / (factorial(b) * factorial(a - b));
+            return b > a ? 0 : factorial(a) / (factorial(b) * factorial(a - b));
         }
 
         /*!

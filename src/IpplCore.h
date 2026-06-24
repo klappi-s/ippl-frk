@@ -38,6 +38,12 @@
 #include "Decomposition/OrthogonalRecursiveBisection.h"
 
 // FEM
+// // FEM Container
+#include "FEM/FEMContainer.h"
+
+// // DOF Handler
+#include "FEM/DOFHandler.h"
+
 // // FEM Elements
 #include "FEM/Elements/EdgeElement.h"
 #include "FEM/Elements/HexahedralElement.h"
@@ -50,6 +56,8 @@
 // // FEM Spaces
 #include "FEM/LagrangeSpace.h"
 #include "FEM/NedelecSpace.h"
+
+#include "FEM/LagrangeSpace_wFEMContainer.h"
 
 // // FEM Vector
 #include "FEM/FEMVector.h"
