@@ -5,7 +5,7 @@
 ////   creates a FEMContainer with DOFs on all element types, and sets the DOFs to 1.0.
 ////
 //// Usage:
-////   srun ./TestFEMContainerSize 10 false --info 10
+////   srun ./TestFEMContainer 10 false --info 5
 ////
 ////
 //
@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
                                                     std::tuple<std::integral_constant<unsigned, 1>>>,
                                                 ippl::FEMContainer<double, dim,
                                                     std::tuple<ippl::Vertex<dim>, ippl::EdgeX<dim>, ippl::EdgeY<dim>, ippl::EdgeZ<dim>,
-                                                            ippl::FaceXY<dim>, ippl::FaceXZ<dim>, ippl::FaceYZ<dim>, ippl::Hexaedron<dim>
+                                                            ippl::FaceXY<dim>, ippl::FaceXZ<dim>, ippl::FaceYZ<dim>, ippl::Hexahedron<dim>
                                                     >,
                                                     std::tuple<std::integral_constant<unsigned, 1>,
                                                             std::integral_constant<unsigned, order - 1>,
