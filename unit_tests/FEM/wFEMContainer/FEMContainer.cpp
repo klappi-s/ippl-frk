@@ -1,13 +1,15 @@
+// FEMContainer unit tests.
 //
-// Unit test FEMContainerTest
-//   Test the functionality of the class FEMContainer.
-//
+// Covers container behavior independent of LagrangeSpace assembly:
+// construction on uniform meshes, copy/assignment semantics, scalar/container
+// arithmetic, and norm/reduction-style checks for both vertex-only and
+// full-entity FEMContainer layouts across dimensions.
 #include "Ippl.h"
 
 #include <Kokkos_MathematicalConstants.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
 
-#include "../src/PoissonSolvers/LaplaceHelpers.h"
+#include "PoissonSolvers/LaplaceHelpers.h"
 #include "TestUtils.h"
 #include "gtest/gtest.h"
 

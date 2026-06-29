@@ -196,19 +196,19 @@ TYPED_TEST(DOFHandlerTest, EntityDOFRanges) {
             EXPECT_EQ(faceXYStart, 8u + 12 * (order - 1));
             EXPECT_EQ(faceXYEnd - faceXYStart, 2 * (order - 1) * (order - 1));
 
-            // FaceXZ
-            constexpr size_t faceXZStart = DOFHandler_type::template getEntityDOFStart<ippl::FaceXZ<dim>>();
-            constexpr size_t faceXZEnd = DOFHandler_type::template getEntityDOFEnd<ippl::FaceXZ<dim>>();
-            // Start after FaceXY
-            EXPECT_EQ(faceXZStart, faceXYEnd);
-            EXPECT_EQ(faceXZEnd - faceXZStart, 2 * (order - 1) * (order - 1));
-
             // FaceYZ
             constexpr size_t faceYZStart = DOFHandler_type::template getEntityDOFStart<ippl::FaceYZ<dim>>();
             constexpr size_t faceYZEnd = DOFHandler_type::template getEntityDOFEnd<ippl::FaceYZ<dim>>();
-            // Start after FaceXZ
-            EXPECT_EQ(faceYZStart, faceXZEnd);
+            // Start after FaceXY
+            EXPECT_EQ(faceYZStart, faceXYEnd);
             EXPECT_EQ(faceYZEnd - faceYZStart, 2 * (order - 1) * (order - 1));
+
+            // FaceXZ
+            constexpr size_t faceXZStart = DOFHandler_type::template getEntityDOFStart<ippl::FaceXZ<dim>>();
+            constexpr size_t faceXZEnd = DOFHandler_type::template getEntityDOFEnd<ippl::FaceXZ<dim>>();
+            // Start after FaceYZ
+            EXPECT_EQ(faceXZStart, faceYZEnd);
+            EXPECT_EQ(faceXZEnd - faceXZStart, 2 * (order - 1) * (order - 1));
         }
     }
 }
@@ -389,14 +389,10 @@ TYPED_TEST(DOFHandlerTest, CounterClockwiseEdgeOrdering) {
             }
         }
     } else if constexpr (TestFixture::dim == 3 && order >= 2) {
-        // Expected counter-clockwise edge positions
-        // EdgeX: (0,0,0), (0,1,0), (0,1,1), (0,0,1)
-        // EdgeY: (0,0,0), (1,0,0), (1,0,1), (0,0,1)
-        // EdgeZ: (0,0,0), (1,0,0), (1,1,0), (0,1,0)
-
+        // EdgeX: BFront, BBack, TFront, TBack; EdgeY: BLeft, BRight, TLeft, TRight; EdgeZ: CCW
         std::array<std::array<size_t, 3>, 12> expectedOffsets = {{
-            {0, 0, 0}, {0, 1, 0}, {0, 1, 1}, {0, 0, 1},  // EdgeX
-            {0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1},  // EdgeY
+            {0, 0, 0}, {0, 1, 0}, {0, 0, 1}, {0, 1, 1},  // EdgeX
+            {0, 0, 0}, {1, 0, 0}, {0, 0, 1}, {1, 0, 1},  // EdgeY
             {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}   // EdgeZ
         }};
 
@@ -434,15 +430,11 @@ TYPED_TEST(DOFHandlerTest, FaceDOFOrdering) {
             EXPECT_EQ(mapping.entityLocalDOF, localDOF);
         }
     } else if constexpr (dim == 3 && order >= 2) {
-        // Expected face positions:
-        // FacesXY: (0,0,0), (0,0,1)
-        // FacesXZ: (0,0,0), (0,1,0)
-        // FacesYZ: (0,0,0), (1,0,0)
-
+        // FacesXY: (0,0,0), (0,0,1); FacesYZ: (0,0,0), (1,0,0); FacesXZ: (0,0,0), (0,1,0)
         std::array<std::array<size_t, 3>, 6> expectedOffsets = {{
-            {0, 0, 0}, {0, 0, 1},   // FacesXY
-            {0, 0, 0}, {0, 1, 0},   // FacesXZ
-            {0, 0, 0}, {1, 0, 0}    // FacesYZ
+            {0, 0, 0}, {0, 0, 1},   // FacesXY (Z-normal)
+            {0, 0, 0}, {1, 0, 0},   // FacesYZ (X-normal)
+            {0, 0, 0}, {0, 1, 0}    // FacesXZ (Y-normal)
         }};
 
         size_t faceStartIndex = 8 + 12 * (order - 1);  // After vertices and edges

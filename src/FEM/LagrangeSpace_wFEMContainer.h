@@ -247,6 +247,13 @@ namespace ippl {
          */
         void evaluateLoadVector(FieldRHS& field) const;
 
+        /**
+         * @brief Fill FEMContainer DOFs from a global coefficient vector (device scatter).
+         *        Used by validation / initialization; caller should fillHalo() afterward.
+         */
+        void fillFromGlobalCoefficients(FieldRHS& field,
+                                        const Kokkos::View<const double*>& globalCoeffs) const;
+
         ///////////////////////////////////////////////////////////////////////
         /// Error norm computations ///////////////////////////////////////////
         ///////////////////////////////////////////////////////////////////////
@@ -296,7 +303,10 @@ namespace ippl {
                 const point_t& localPoint) const;
         };
 
-        DeviceStruct getDeviceMirror() const; 
+        DeviceStruct getDeviceMirror() const;
+
+        /** @brief DOF mapping / boundary helpers (host validation, tests). */
+        const DOFHandler_t& getDOFHandler() const { return dofHandler_m; }
 
     private:
         /**

@@ -211,7 +211,7 @@ namespace ippl {
     struct FiniteElementSpaceTraits<LagrangeSpaceTag, 3, Order>
         : FiniteElementSpaceTraitsBase<LagrangeSpaceTag,
                                         std::tuple<Vertex<3>, EdgeX<3>, EdgeY<3>, EdgeZ<3>,
-                                                  FaceXY<3>, FaceXZ<3>, FaceYZ<3>, Hexahedron<3>>,
+                                                  FaceXY<3>, FaceYZ<3>, FaceXZ<3>, Hexahedron<3>>,
                                         std::tuple<std::integral_constant<unsigned, 1>,
                                                    std::integral_constant<unsigned, Order-1>,
                                                    std::integral_constant<unsigned, Order-1>,
@@ -223,7 +223,7 @@ namespace ippl {
                                         3, Order> {
         static_assert(Order >= 2, "Use Order 1 specialization for first-Order elements");
         // 8 vertices * 1 DOF + 4 EdgesX * (Order-1) + 4 EdgesY * (Order-1) + 4 EdgesZ * (Order-1)
-        // + 2 FacesXY * (Order-1)^2 + 2 FacesXZ * (Order-1)^2 + 2 FacesYZ * (Order-1)^2 + 1 volume * (Order-1)^3
+        // + 2 FacesXY * (Order-1)^2 + 2 FacesYZ * (Order-1)^2 + 2 FacesXZ * (Order-1)^2 + 1 volume * (Order-1)^3
         static constexpr unsigned dofsPerElement = 8 * 1 + 4 * (Order-1) + 4 * (Order-1) + 4 * (Order-1)
                                                    + 2 * (Order-1) * (Order-1) + 2 * (Order-1) * (Order-1) + 2 * (Order-1) * (Order-1)
                                                    + 1 * (Order-1) * (Order-1) * (Order-1);

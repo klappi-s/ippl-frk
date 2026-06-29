@@ -1,3 +1,4 @@
+#include "FEM/LagrangeGlobalDOFIndices.hpp"
 
 namespace ippl {
 
@@ -121,6 +122,41 @@ namespace ippl {
                             contrib);
                     }
                 }
+            }
+        }
+    };
+
+    // Functor for fillFromGlobalCoefficients
+    template <typename T, unsigned Dim, unsigned Order, typename DOFHandlerType, typename PatternView,
+              typename ViewA, typename IndicesType, typename ElemIndicesView, std::size_t DofStartA,
+              std::size_t DofEndA, std::size_t NumElementDOFs>
+    struct LagrangeFillFromGlobalCoeffsFunctor {
+        DOFHandlerType dofHandler;
+        ElemIndicesView elemIndices;
+        ViewA resultView_a;
+        PatternView globalCoeffs;
+        IndicesType nr_m;
+        int nghost;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
+            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
+
+            const size_t elementIndex = elemIndices(index);
+            const IndicesType elementNDIndex =
+                dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+            const IndicesType elementPos = dofHandler.getElementNDIndex(elementIndex);
+
+            Vector<size_t, NumElementDOFs> g_dofs(0);
+            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos,
+                                                                             nr_m);
+
+            for (size_t i = DofStartA; i < DofEndA; ++i) {
+                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
+                const T val           = globalCoeffs(g_dofs[i]);
+                Kokkos::atomic_store(
+                    &apply(resultView_a,
+                           elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                    val);
             }
         }
     };
@@ -365,9 +401,8 @@ namespace ippl {
                                          FieldRHS>::numGlobalDOFs() const {
         size_t num_global_dofs = 1;
         for (size_t d = 0; d < Dim; ++d) {
-            num_global_dofs *= this->nr_m[d] * Order;
+            num_global_dofs *= (this->nr_m[d] - 1) * Order + 1;
         }
-
         return num_global_dofs;
     }
 
@@ -432,72 +467,9 @@ namespace ippl {
     LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
                   FieldRHS>::getGlobalDOFIndices(const size_t& elementIndex) const {
         Vector<size_t, numElementDOFs> globalDOFs(0);
-
-        // get element pos
-        indices_t elementPos = this->getElementNDIndex(elementIndex);
-
-        // Compute the vector to multiply the ndindex with
-        ippl::Vector<size_t, Dim> vec(1);
-        for (size_t d = 1; d < dim; ++d) {
-            for (size_t d2 = d; d2 < Dim; ++d2) {
-                vec[d2] *= this->nr_m[d - 1];
-            }
-        }
-        vec *= Order;  // Multiply each dimension by the order
-        size_t smallestGlobalDOF = elementPos.dot(vec);
-
-        // Add the vertex DOFs
-        globalDOFs[0] = smallestGlobalDOF;
-        globalDOFs[1] = smallestGlobalDOF + Order;
-
-        if constexpr (Dim >= 2) {
-            globalDOFs[2] = globalDOFs[1] + this->nr_m[0] * Order;
-            globalDOFs[3] = globalDOFs[0] + this->nr_m[0] * Order;
-        }
-        if constexpr (Dim >= 3) {
-            globalDOFs[4] = globalDOFs[0] + this->nr_m[1] * this->nr_m[0] * Order;
-            globalDOFs[5] = globalDOFs[1] + this->nr_m[1] * this->nr_m[0] * Order;
-            globalDOFs[6] = globalDOFs[2] + this->nr_m[1] * this->nr_m[0] * Order;
-            globalDOFs[7] = globalDOFs[3] + this->nr_m[1] * this->nr_m[0] * Order;
-        }
-
-        if constexpr (Order > 1) {
-            // If the order is greater than 1, there are edge and face DOFs, otherwise the work is
-            // done
-
-            // Add the edge DOFs
-            if constexpr (Dim >= 2) {
-                for (size_t i = 0; i < Order - 1; ++i) {
-                    globalDOFs[8 + i]                   = globalDOFs[0] + i + 1;
-                    globalDOFs[8 + Order - 1 + i]       = globalDOFs[1] + (i + 1) * this->nr_m[1];
-                    globalDOFs[8 + 2 * (Order - 1) + i] = globalDOFs[2] - (i + 1);
-                    globalDOFs[8 + 3 * (Order - 1) + i] = globalDOFs[3] - (i + 1) * this->nr_m[1];
-                }
-            }
-            if constexpr (Dim >= 3) {
-                // TODO
-            }
-
-            // Add the face DOFs
-            if constexpr (Dim >= 2) {
-                for (size_t i = 0; i < Order - 1; ++i) {
-                    for (size_t j = 0; j < Order - 1; ++j) {
-                        // TODO CHECK
-                        globalDOFs[8 + 4 * (Order - 1) + i * (Order - 1) + j] =
-                            globalDOFs[0] + (i + 1) + (j + 1) * this->nr_m[1];
-                        globalDOFs[8 + 4 * (Order - 1) + (Order - 1) * (Order - 1) + i * (Order - 1)
-                                   + j] = globalDOFs[1] + (i + 1) + (j + 1) * this->nr_m[1];
-                        globalDOFs[8 + 4 * (Order - 1) + 2 * (Order - 1) * (Order - 1)
-                                   + i * (Order - 1) + j] =
-                            globalDOFs[2] - (i + 1) + (j + 1) * this->nr_m[1];
-                        globalDOFs[8 + 4 * (Order - 1) + 3 * (Order - 1) * (Order - 1)
-                                   + i * (Order - 1) + j] =
-                            globalDOFs[3] - (i + 1) + (j + 1) * this->nr_m[1];
-                    }
-                }
-            }
-        }
-
+        const indices_t elementPos = this->getElementNDIndex(elementIndex);
+        detail::fillLagrangeGlobalDOFIndices<Dim, Order, numElementDOFs>(globalDOFs, elementPos,
+                                                                         this->nr_m);
         return globalDOFs;
     }
 
@@ -770,7 +742,7 @@ namespace ippl {
             resultField.applyBC();
             resultField.assignGhostToPhysical();
         } else {
-            resultField.accumulateHalo_noghost();
+            resultField.accumulateHalo();
         }
 
         IpplTimings::stopTimer(evalAx);
@@ -898,6 +870,48 @@ namespace ippl {
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,
               typename QuadratureType, typename FieldLHS, typename FieldRHS>
     void LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                       FieldRHS>::fillFromGlobalCoefficients(
+        FieldRHS& field, const Kokkos::View<const double*>& globalCoeffs) const {
+        const int nghost = field.getNghost();
+
+        auto dofHandler  = dofHandler_m;
+        auto elemIndices = elementIndices;
+        const indices_t nr = this->nr_m;
+
+        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
+
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            (
+                [&] {
+                    using EntityTypeA = std::tuple_element_t<Is, typename DOFHandler_t::EntityTypes>;
+                    constexpr size_t dofStart_a =
+                        DOFHandler_t::template getEntityDOFStart<EntityTypeA>();
+                    constexpr size_t dofEnd_a =
+                        DOFHandler_t::template getEntityDOFEnd<EntityTypeA>();
+
+                    using ViewType_a = std::remove_cv_t<
+                        std::remove_reference_t<decltype(field.template getView<EntityTypeA>())>>;
+                    ViewType_a resultView_a = field.template getView<EntityTypeA>();
+
+                    using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
+                    using policy_type = Kokkos::RangePolicy<exec_space>;
+                    using functor_t   = LagrangeFillFromGlobalCoeffsFunctor<
+                        T, Dim, Order, decltype(dofHandler), Kokkos::View<const double*>, ViewType_a,
+                        indices_t, decltype(elemIndices), dofStart_a, dofEnd_a, numElementDOFs>;
+
+                    Kokkos::parallel_for(
+                        "fillFromGlobalCoefficients", policy_type(0, elemIndices.extent(0)),
+                        functor_t{dofHandler, elemIndices, resultView_a, globalCoeffs, nr, nghost});
+                }(),
+                ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        Kokkos::fence();
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    void LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
                        FieldRHS>::evaluateLoadVector(FieldRHS& field) const {
         Inform m("");
 
@@ -1005,12 +1019,14 @@ namespace ippl {
 
         IpplTimings::stopTimer(outer_loop);
 
-        // temp_field.accumulateHalo();
-
-        // TODO add Periodic BC handling for entity type views
+        // Sum duplicate contributions at partition / entity halos (same as evaluateAx).
         if (bcTypes[0] == PERIODIC_FACE) {
             temp_field.accumulateHalo();
             temp_field.applyBC();
+        } else {
+            // Full accumulate (all exchange dirs per entity); noghost omits corners and
+            // leaves P>=2 edge/face DOFs under-summed on multi-rank cuts.
+            temp_field.accumulateHalo();
         }
 
         field = temp_field;
@@ -1403,69 +1419,8 @@ namespace ippl {
                   FieldRHS>::DeviceStruct::getGlobalDOFIndices(const indices_t& elementNDIndex)
         const {
         Vector<size_t, numElementDOFs> globalDOFs(0);
-
-        // Compute the vector to multiply the ndindex with
-        ippl::Vector<size_t, Dim> vec(1);
-        for (size_t d = 1; d < dim; ++d) {
-            for (size_t d2 = d; d2 < Dim; ++d2) {
-                vec[d2] *= this->nr_m[d - 1];
-            }
-        }
-        vec *= Order;  // Multiply each dimension by the order
-        size_t smallestGlobalDOF = elementNDIndex.dot(vec);
-
-        // Add the vertex DOFs
-        globalDOFs[0] = smallestGlobalDOF;
-        globalDOFs[1] = smallestGlobalDOF + Order;
-
-        if constexpr (Dim >= 2) {
-            globalDOFs[2] = globalDOFs[1] + this->nr_m[0] * Order;
-            globalDOFs[3] = globalDOFs[0] + this->nr_m[0] * Order;
-        }
-        if constexpr (Dim >= 3) {
-            globalDOFs[4] = globalDOFs[0] + this->nr_m[1] * this->nr_m[0] * Order;
-            globalDOFs[5] = globalDOFs[1] + this->nr_m[1] * this->nr_m[0] * Order;
-            globalDOFs[6] = globalDOFs[2] + this->nr_m[1] * this->nr_m[0] * Order;
-            globalDOFs[7] = globalDOFs[3] + this->nr_m[1] * this->nr_m[0] * Order;
-        }
-
-        if constexpr (Order > 1) {
-            // If the order is greater than 1, there are edge and face DOFs, otherwise the work is
-            // done
-
-            // Add the edge DOFs
-            if constexpr (Dim >= 2) {
-                for (size_t i = 0; i < Order - 1; ++i) {
-                    globalDOFs[8 + i]                   = globalDOFs[0] + i + 1;
-                    globalDOFs[8 + Order - 1 + i]       = globalDOFs[1] + (i + 1) * this->nr_m[1];
-                    globalDOFs[8 + 2 * (Order - 1) + i] = globalDOFs[2] - (i + 1);
-                    globalDOFs[8 + 3 * (Order - 1) + i] = globalDOFs[3] - (i + 1) * this->nr_m[1];
-                }
-            }
-            if constexpr (Dim >= 3) {
-                // TODO
-            }
-
-            // Add the face DOFs
-            if constexpr (Dim >= 2) {
-                for (size_t i = 0; i < Order - 1; ++i) {
-                    for (size_t j = 0; j < Order - 1; ++j) {
-                        // TODO CHECK
-                        globalDOFs[8 + 4 * (Order - 1) + i * (Order - 1) + j] =
-                            globalDOFs[0] + (i + 1) + (j + 1) * this->nr_m[1];
-                        globalDOFs[8 + 4 * (Order - 1) + (Order - 1) * (Order - 1) + i * (Order - 1)
-                                   + j] = globalDOFs[1] + (i + 1) + (j + 1) * this->nr_m[1];
-                        globalDOFs[8 + 4 * (Order - 1) + 2 * (Order - 1) * (Order - 1)
-                                   + i * (Order - 1) + j] =
-                            globalDOFs[2] - (i + 1) + (j + 1) * this->nr_m[1];
-                        globalDOFs[8 + 4 * (Order - 1) + 3 * (Order - 1) * (Order - 1)
-                                   + i * (Order - 1) + j] =
-                            globalDOFs[3] - (i + 1) + (j + 1) * this->nr_m[1];
-                    }
-                }
-            }
-        }
-
+        detail::fillLagrangeGlobalDOFIndices<Dim, Order, numElementDOFs>(globalDOFs, elementNDIndex,
+                                                                         this->nr_m);
         return globalDOFs;
     }
 

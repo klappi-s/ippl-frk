@@ -82,14 +82,14 @@ namespace ippl {
             {0, 0}, {1, 0}
         }};
 
-        // 3D EdgeX (parallel to X, counter-clockwise in YZ): 0:[0,0,0], 1:[0,1,0], 2:[0,1,1], 3:[0,0,1]
+        // 3D EdgeX (parallel to X): BFront, BBack, TFront, TBack (SCHEMA / _ippl_local_permutation)
         constexpr Kokkos::Array<Kokkos::Array<size_t, 3>, 4> edge3DXOffsets = {{
-            {0, 0, 0}, {0, 1, 0}, {0, 1, 1}, {0, 0, 1}
+            {0, 0, 0}, {0, 1, 0}, {0, 0, 1}, {0, 1, 1}
         }};
 
-        // 3D EdgeY (parallel to Y, counter-clockwise in XZ): 0:[0,0,0], 1:[1,0,0], 2:[1,0,1], 3:[0,0,1]
+        // 3D EdgeY (parallel to Y): BLeft, BRight, TLeft, TRight
         constexpr Kokkos::Array<Kokkos::Array<size_t, 3>, 4> edge3DYOffsets = {{
-            {0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}
+            {0, 0, 0}, {1, 0, 0}, {0, 0, 1}, {1, 0, 1}
         }};
 
         // 3D EdgeZ (parallel to Z, counter-clockwise in XY): 0:[0,0,0], 1:[1,0,0], 2:[1,1,0], 3:[0,1,0]
@@ -217,26 +217,7 @@ namespace ippl {
                 }
             }
 
-            // FaceXZ (3D only)
-            if constexpr (Dim == 3) {
-                if constexpr (TagIndex<EntityTypes>::template contains<FaceXZ<Dim>>()) {
-                    constexpr size_t faceXZTypeIndex = TagIndex<EntityTypes>::template index<FaceXZ<Dim>>();
-                    constexpr size_t faceXZDOFCount = SpaceTraits::template entityDOFCount<FaceXZ<Dim>>();
-
-                    for (size_t f = 0; f < 2; ++f) {
-                        indices_t offset;
-                        offset[0] = 0;
-                        offset[1] = f; // FaceXZ 0:[0,0,0], FaceXZ 1:[0,1,0]
-                        offset[2] = 0;
-                        for (size_t localDOF = 0; localDOF < faceXZDOFCount; ++localDOF) {
-                            hostTable(dofIndex) = {faceXZTypeIndex, offset, localDOF};
-                            ++dofIndex;
-                        }
-                    }
-                }
-            }
-
-            // FaceYZ (3D only)
+            // FaceYZ (X-normal left/right) — SCHEMA: after Z-normal, before Y-normal
             if constexpr (Dim == 3) {
                 if constexpr (TagIndex<EntityTypes>::template contains<FaceYZ<Dim>>()) {
                     constexpr size_t faceYZTypeIndex = TagIndex<EntityTypes>::template index<FaceYZ<Dim>>();
@@ -249,6 +230,25 @@ namespace ippl {
                         offset[2] = 0;
                         for (size_t localDOF = 0; localDOF < faceYZDOFCount; ++localDOF) {
                             hostTable(dofIndex) = {faceYZTypeIndex, offset, localDOF};
+                            ++dofIndex;
+                        }
+                    }
+                }
+            }
+
+            // FaceXZ (Y-normal front/back)
+            if constexpr (Dim == 3) {
+                if constexpr (TagIndex<EntityTypes>::template contains<FaceXZ<Dim>>()) {
+                    constexpr size_t faceXZTypeIndex = TagIndex<EntityTypes>::template index<FaceXZ<Dim>>();
+                    constexpr size_t faceXZDOFCount = SpaceTraits::template entityDOFCount<FaceXZ<Dim>>();
+
+                    for (size_t f = 0; f < 2; ++f) {
+                        indices_t offset;
+                        offset[0] = 0;
+                        offset[1] = f; // FaceXZ 0:[0,0,0], FaceXZ 1:[0,1,0]
+                        offset[2] = 0;
+                        for (size_t localDOF = 0; localDOF < faceXZDOFCount; ++localDOF) {
+                            hostTable(dofIndex) = {faceXZTypeIndex, offset, localDOF};
                             ++dofIndex;
                         }
                     }

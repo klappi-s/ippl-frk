@@ -91,13 +91,13 @@ namespace ippl {
                     for (unsigned i = 1; i < Order; ++i) {
                         locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 1.0, 0.0};
                     }
-                    // Top back edge (y=1, z=1): from vertex 7 to vertex 6
-                    for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 1.0, 1.0};
-                    }
                     // Top front edge (y=0, z=1): from vertex 4 to vertex 5
                     for (unsigned i = 1; i < Order; ++i) {
                         locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 0.0, 1.0};
+                    }
+                    // Top back edge (y=1, z=1): from vertex 7 to vertex 6
+                    for (unsigned i = 1; i < Order; ++i) {
+                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 1.0, 1.0};
                     }
 
                     // 3D: EdgeY DOFs (horizontal edges: x=0, z=0 and x=1, z=0 and x=1, z=1 and x=0, z=1)
@@ -109,13 +109,13 @@ namespace ippl {
                     for (unsigned i = 1; i < Order; ++i) {
                         locations[dofIdx++] = point_t{1.0, static_cast<T>(i) / static_cast<T>(Order), 0.0};
                     }
-                    // Right edge (x=1, z=1): from vertex 5 to vertex 6
-                    for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{1.0, static_cast<T>(i) / static_cast<T>(Order), 1.0};
-                    }
                     // Left edge (x=0, z=1): from vertex 4 to vertex 7
                     for (unsigned i = 1; i < Order; ++i) {
                         locations[dofIdx++] = point_t{0.0, static_cast<T>(i) / static_cast<T>(Order), 1.0};
+                    }
+                    // Right edge (x=1, z=1): from vertex 5 to vertex 6
+                    for (unsigned i = 1; i < Order; ++i) {
+                        locations[dofIdx++] = point_t{1.0, static_cast<T>(i) / static_cast<T>(Order), 1.0};
                     }
 
                     // 3D: EdgeZ DOFs (vertical edges: x=0, y=0 and x=1, y=0 and x=1, y=1 and x=0, y=1)
@@ -152,10 +152,9 @@ namespace ippl {
                         }
                     }
                 } else if constexpr (Dim == 3) {
-                    // 3D face DOFs (6 faces for a hexahedron)
-                    // Ordering matches DOFHandler: FaceXY (2), FaceXZ (2), FaceYZ (2)
+                    // 3D face DOFs — SCHEMA: Z-normal (FaceXY), X-normal (FaceYZ), Y-normal (FaceXZ)
 
-                    // FaceXY (perpendicular to Z-axis)
+                    // FaceXY (perpendicular to Z-axis): bottom, top
                     // Face at z=0 (bottom)
                     for (unsigned j = 1; j < Order; ++j) {
                         for (unsigned i = 1; i < Order; ++i) {
@@ -177,29 +176,7 @@ namespace ippl {
                         }
                     }
 
-                    // FaceXZ (perpendicular to Y-axis)
-                    // Face at y=0 (front)
-                    for (unsigned k = 1; k < Order; ++k) {
-                        for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                0.0,
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
-                        }
-                    }
-                    // Face at y=1 (back)
-                    for (unsigned k = 1; k < Order; ++k) {
-                        for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                1.0,
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
-                        }
-                    }
-
-                    // FaceYZ (perpendicular to X-axis)
+                    // FaceYZ (perpendicular to X-axis): left, right
                     // Face at x=0 (left)
                     for (unsigned k = 1; k < Order; ++k) {
                         for (unsigned j = 1; j < Order; ++j) {
@@ -216,6 +193,28 @@ namespace ippl {
                             locations[dofIdx++] = point_t{
                                 1.0,
                                 static_cast<T>(j) / static_cast<T>(Order),
+                                static_cast<T>(k) / static_cast<T>(Order)
+                            };
+                        }
+                    }
+
+                    // FaceXZ (perpendicular to Y-axis): front, back
+                    // Face at y=0 (front)
+                    for (unsigned k = 1; k < Order; ++k) {
+                        for (unsigned i = 1; i < Order; ++i) {
+                            locations[dofIdx++] = point_t{
+                                static_cast<T>(i) / static_cast<T>(Order),
+                                0.0,
+                                static_cast<T>(k) / static_cast<T>(Order)
+                            };
+                        }
+                    }
+                    // Face at y=1 (back)
+                    for (unsigned k = 1; k < Order; ++k) {
+                        for (unsigned i = 1; i < Order; ++i) {
+                            locations[dofIdx++] = point_t{
+                                static_cast<T>(i) / static_cast<T>(Order),
+                                1.0,
                                 static_cast<T>(k) / static_cast<T>(Order)
                             };
                         }

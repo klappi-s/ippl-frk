@@ -11,4 +11,4 @@ message(STATUS "Adding index test found in ${_relPath}")
 add_ippl_integration_test(TestLagrangeSpace1D COMPILE_ONLY LABELS integration fem)
 add_ippl_integration_test(TestLagrangeSpace2D COMPILE_ONLY LABELS integration fem)
 
-add_subdirectory(FEMContainer)
+add_subdirectory(wFEMContainer)

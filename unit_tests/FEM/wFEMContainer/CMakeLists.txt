@@ -1,0 +1,10 @@
+file(RELATIVE_PATH _relPath "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
+message(STATUS "Adding unit tests found in ${_relPath}")
+
+add_ippl_test(DOFHandler)
+add_ippl_test(FEMContainerHalo)
+add_ippl_test(FEMContainer)
+add_ippl_test(LagrangeSpace_firstOrder)
+add_ippl_test(LagrangeSpace_higherOrder)
+# add_ippl_test(MatrixFreeVsExplicit)
+# add_ippl_test(TestCoreGridPoisson_wFEMContainer)

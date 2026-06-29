@@ -247,9 +247,10 @@ namespace ippl {
                 // Use the functor defined at namespace scope
                 using functor_t = FEMContainerNormFunctor<decltype(view), T, numDOFs, index_array_type>;
 
-                // Compute sum of |element|^p for all DOF elements
+                // Owned region only (nghost=0): ghost layers duplicate neighbor-owned
+                // DOFs and must not be summed again after MPI_Allreduce.
                 ippl::parallel_reduce(
-                    "FEMContainer::norm", field.getFieldRangePolicy(),
+                    "FEMContainer::norm", field.getFieldRangePolicy(0),
                     functor_t{view, p},
                     Kokkos::Sum<T>(local_sum));
 
