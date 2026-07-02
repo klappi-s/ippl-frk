@@ -102,6 +102,11 @@ namespace ippl {
             const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) const;
         FEMContainer<T, Dim, EntityTypes, DOFNums> operator-(
             const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) const;
+        // Element-wise multiplication and division between two FEMContainers
+        FEMContainer<T, Dim, EntityTypes, DOFNums> operator*(
+            const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) const;
+        FEMContainer<T, Dim, EntityTypes, DOFNums> operator/(
+            const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) const;
 
         FEMContainer<T, Dim, EntityTypes, DOFNums> operator+(T scalar) const;
         FEMContainer<T, Dim, EntityTypes, DOFNums> operator-(T scalar) const;

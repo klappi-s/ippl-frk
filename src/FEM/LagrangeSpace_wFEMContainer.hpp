@@ -126,7 +126,48 @@ namespace ippl {
         }
     };
 
-    // Functor for fillFromGlobalCoefficients
+    // Functor for evaluateAx_diag: accumulates only the diagonal A_K[i][i] per DOF.
+    template <typename T, typename DOFHandlerType, typename ViewA,
+              typename IndicesType, typename ElemIndicesView, typename MatrixType,
+              typename BCTypesArray, std::size_t DofStart, std::size_t DofEnd>
+    struct LagrangeEvaluateAxDiagFunctor {
+        DOFHandlerType dofHandler;
+        ElemIndicesView elemIndices;
+        ViewA resultView;
+        MatrixType A_K;
+        BCTypesArray bcTypes;
+        int nghost;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
+            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
+
+            const size_t elementIndex = elemIndices(index);
+            const IndicesType elementNDIndex =
+                dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+
+            for (size_t i = DofStart; i < DofEnd; ++i) {
+                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
+
+                if ((bcTypes[0] == ZERO_FACE || bcTypes[0] == CONSTANT_FACE)
+                    && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    // Boundary DOFs: set diagonal to 1 (safe for division)
+                    Kokkos::atomic_store(
+                        &apply(resultView,
+                               elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                        T(1));
+                    continue;
+                }
+
+                // Accumulate only the diagonal contribution A_K[i][i]
+                Kokkos::atomic_add(
+                    &apply(resultView,
+                           elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                    A_K[i][i]);
+            }
+        }
+    };
+
+
     template <typename T, unsigned Dim, unsigned Order, typename DOFHandlerType, typename PatternView,
               typename ViewA, typename IndicesType, typename ElemIndicesView, std::size_t DofStartA,
               std::size_t DofEndA, std::size_t NumElementDOFs>
@@ -865,6 +906,88 @@ namespace ippl {
         IpplTimings::stopTimer(evalAx_lift);
 
         return resultField;
+    }
+
+    // evaluateAx_diag: computes diagonal of stiffness matrix as a FieldLHS.
+    // Interior DOFs accumulate A_K[i][i]; boundary DOFs are set to 1 (safe for Jacobi division).
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::evaluateAx_diag(FieldLHS& field, F& evalFunction) const {
+
+        static IpplTimings::TimerRef evalAx_diag_timer = IpplTimings::getTimer("evaluateAx_diag");
+        IpplTimings::startTimer(evalAx_diag_timer);
+
+        const int nghost = field.getNghost();
+        FieldLHS diagField(field.get_mesh(), field.getLayout(), nghost);
+        diagField = T(0);
+
+        // Quadrature nodes and weights
+        const Vector<T, QuadratureType::numElementNodes> w =
+            this->quadrature_m.getWeightsForRefElement();
+        const Vector<point_t, QuadratureType::numElementNodes> q =
+            this->quadrature_m.getIntegrationNodesForRefElement();
+
+        // Precompute gradients at quadrature nodes
+        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+            for (size_t i = 0; i < numElementDOFs; ++i) {
+                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+            }
+        }
+
+        // Compute local element stiffness matrix A_K (same as evaluateAx)
+        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
+        for (size_t i = 0; i < numElementDOFs; ++i) {
+            for (size_t j = 0; j < numElementDOFs; ++j) {
+                A_K[i][j] = T(0);
+                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+                    A_K[i][j] += w[k] * evalFunction(i, j, grad_b_q[k]);
+                }
+            }
+        }
+
+        const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
+
+        auto dofHandler  = dofHandler_m;
+        auto elemIndices = elementIndices;
+
+        // For each entity type, scatter the diagonal A_K[i][i] contributions
+        auto processEntityType = [&]<typename EntityType>() {
+            constexpr size_t dofStart = DOFHandler_t::template getEntityDOFStart<EntityType>();
+            constexpr size_t dofEnd   = DOFHandler_t::template getEntityDOFEnd<EntityType>();
+
+            using ViewType_a = std::remove_cv_t<
+                std::remove_reference_t<decltype(diagField.template getView<EntityType>())>>;
+            ViewType_a resultView = diagField.template getView<EntityType>();
+
+            using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
+            using policy_type = Kokkos::RangePolicy<exec_space>;
+
+            using functor_t = LagrangeEvaluateAxDiagFunctor<
+                T, decltype(dofHandler), ViewType_a, indices_t, decltype(elemIndices),
+                decltype(A_K), decltype(bcTypes), dofStart, dofEnd>;
+
+            Kokkos::parallel_for(
+                "evaluateAx_diag: scatter diagonal", policy_type(0, elemIndices.extent(0)),
+                functor_t{dofHandler, elemIndices, resultView, A_K, bcTypes, nghost});
+        };
+
+        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            ([&] {
+                using EntityTypeA = std::tuple_element_t<Is, typename DOFHandler_t::EntityTypes>;
+                processEntityType.template operator()<EntityTypeA>();
+            }(), ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        // Accumulate halo (same pattern as evaluateAx)
+        diagField.accumulateHalo();
+
+        IpplTimings::stopTimer(evalAx_diag_timer);
+
+        return diagField;
     }
 
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,

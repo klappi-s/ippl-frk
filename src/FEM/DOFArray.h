@@ -126,6 +126,16 @@ namespace ippl {
             }
             return result;
         }
+
+        // Element-wise division
+        KOKKOS_INLINE_FUNCTION
+        DOFArray operator/(const DOFArray& other) const {
+            DOFArray result;
+            for (std::size_t i = 0; i < N; ++i) {
+                result.data[i] = data[i] / other.data[i];
+            }
+            return result;
+        }
     };
 
     // Stream output operator

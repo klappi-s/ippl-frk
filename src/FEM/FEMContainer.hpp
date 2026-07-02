@@ -192,6 +192,47 @@ namespace ippl {
         return result;
     }
 
+    // Element-wise multiplication of two FEMContainers (needed for Jacobi preconditioner: s = r * inv_diag)
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    FEMContainer<T, Dim, EntityTypes, DOFNums> FEMContainer<T, Dim, EntityTypes, DOFNums>::operator*(
+        const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) const {
+        FEMContainer<T, Dim, EntityTypes, DOFNums> result(*this);
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (([&]() {
+                auto r_view   = std::get<Is>(result.data_m).getView();
+                auto oth_view = std::get<Is>(other.data_m).getView();
+                Kokkos::parallel_for(
+                    "FEMContainer::operator*",
+                    std::get<Is>(result.data_m).getFieldRangePolicy(0),
+                    KOKKOS_LAMBDA(const auto&... idx) {
+                        r_view(idx...) = r_view(idx...) * oth_view(idx...);
+                    });
+                Kokkos::fence();
+            }()), ...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
+        return result;
+    }
+
+    // Element-wise division of two FEMContainers (needed for Jacobi preconditioner: s = r / diag)
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    FEMContainer<T, Dim, EntityTypes, DOFNums> FEMContainer<T, Dim, EntityTypes, DOFNums>::operator/(
+        const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) const {
+        FEMContainer<T, Dim, EntityTypes, DOFNums> result(*this);
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (([&]() {
+                auto r_view   = std::get<Is>(result.data_m).getView();
+                auto oth_view = std::get<Is>(other.data_m).getView();
+                Kokkos::parallel_for(
+                    "FEMContainer::operator/",
+                    std::get<Is>(result.data_m).getFieldRangePolicy(0),
+                    KOKKOS_LAMBDA(const auto&... idx) {
+                        r_view(idx...) = r_view(idx...) / oth_view(idx...);
+                    });
+                Kokkos::fence();
+            }()), ...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
+        return result;
+    }
 
     // TODO: Only for testing purposes, not efficient
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
