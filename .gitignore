@@ -1,3 +1,4 @@
+ippl-IPPL-1.0.0
 build/
 doc/html
 doc/latex
@@ -22,3 +23,6 @@ build*/
 
 # mac
 .DS_Store
+
+# lsp info
+compile_commands.json
