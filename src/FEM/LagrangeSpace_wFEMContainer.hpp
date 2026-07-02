@@ -1,4 +1,5 @@
 #include "FEM/LagrangeGlobalDOFIndices.hpp"
+#include "FEM/FEMQuadratureData.h"
 
 namespace ippl {
 
@@ -693,9 +694,12 @@ namespace ippl {
         // TODO move outside of evaluateAx (I think it is possible for other problems as well)
         // Gradients of the basis functions for the DOF at the quadrature nodes
         Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        // Values of the basis functions at the quadrature nodes
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
         for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
             for (size_t i = 0; i < numElementDOFs; ++i) {
                 grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
             }
         }
 
@@ -708,10 +712,12 @@ namespace ippl {
             for (size_t j = 0; j < numElementDOFs; ++j) {
                 A_K[i][j] = 0.0;
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(i, j, grad_b_q[k]);
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
+
 
         // Get boundary conditions from field
         // Copy the array by value so it can be safely used in device code
@@ -821,9 +827,12 @@ namespace ippl {
         // TODO move outside of evaluateAx (I think it is possible for other problems as well)
         // Gradients of the basis functions for the DOF at the quadrature nodes
         Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        // Values of the basis functions at the quadrature nodes
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
         for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
             for (size_t i = 0; i < numElementDOFs; ++i) {
                 grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
             }
         }
 
@@ -836,7 +845,8 @@ namespace ippl {
             for (size_t j = 0; j < numElementDOFs; ++j) {
                 A_K[i][j] = 0.0;
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(i, j, grad_b_q[k]);
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -929,11 +939,14 @@ namespace ippl {
         const Vector<point_t, QuadratureType::numElementNodes> q =
             this->quadrature_m.getIntegrationNodesForRefElement();
 
-        // Precompute gradients at quadrature nodes
+        // Precompute gradients at the quadrature nodes
         Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        // Values of the basis functions at the quadrature nodes
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
         for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
             for (size_t i = 0; i < numElementDOFs; ++i) {
                 grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
             }
         }
 
@@ -943,7 +956,8 @@ namespace ippl {
             for (size_t j = 0; j < numElementDOFs; ++j) {
                 A_K[i][j] = T(0);
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(i, j, grad_b_q[k]);
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
