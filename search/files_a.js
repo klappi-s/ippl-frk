@@ -1,11 +1,10 @@
 var searchData=
 [
-  ['mainpage_2emd_0',['MainPage.md',['../MainPage_8md.html',1,'']]],
-  ['maxwell_2eh_1',['Maxwell.h',['../Maxwell_8h.html',1,'']]],
-  ['mesh_2eh_2',['Mesh.h',['../Mesh_8h.html',1,'']]],
-  ['mesh_2ehpp_3',['Mesh.hpp',['../Mesh_8hpp.html',1,'']]],
-  ['midpointquadrature_2eh_4',['MidpointQuadrature.h',['../MidpointQuadrature_8h.html',1,'']]],
-  ['midpointquadrature_2ehpp_5',['MidpointQuadrature.hpp',['../MidpointQuadrature_8hpp.html',1,'']]],
-  ['multigrid_2eh_6',['Multigrid.h',['../Multigrid_8h.html',1,'']]],
-  ['my_5fauto_5fptr_2eh_7',['my_auto_ptr.h',['../my__auto__ptr_8h.html',1,'']]]
+  ['lagrangespace_2eh_0',['LagrangeSpace.h',['../LagrangeSpace_8h.html',1,'']]],
+  ['lagrangespace_2ehpp_1',['LagrangeSpace.hpp',['../LagrangeSpace_8hpp.html',1,'']]],
+  ['laplacehelpers_2eh_2',['LaplaceHelpers.h',['../LaplaceHelpers_8h.html',1,'']]],
+  ['logentry_2ecpp_3',['LogEntry.cpp',['../LogEntry_8cpp.html',1,'']]],
+  ['logentry_2eh_4',['LogEntry.h',['../LogEntry_8h.html',1,'']]],
+  ['loggingbufferhandler_2eh_5',['LoggingBufferHandler.h',['../LoggingBufferHandler_8h.html',1,'']]],
+  ['loggingbufferhandler_2ehpp_6',['LoggingBufferHandler.hpp',['../LoggingBufferHandler_8hpp.html',1,'']]]
 ];
