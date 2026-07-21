@@ -8,6 +8,16 @@
 #include <iostream>
 
 namespace ippl {
+
+template<class T>
+struct is_vector : std::false_type {};
+
+template<class V, unsigned Dim>
+struct is_vector<ippl::Vector<V, Dim>> : std::true_type {};
+
+template<class T>
+inline constexpr bool is_vector_v = is_vector<typename std::decay<T>::type>::value;
+
     namespace detail {
         template <typename T, unsigned Dim>
         struct isExpression<Vector<T, Dim>> : std::true_type {};
