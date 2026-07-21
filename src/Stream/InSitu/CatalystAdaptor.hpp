@@ -669,13 +669,15 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
 
         using hostMirror_ID_t = typename std::remove_reference_t<decltype(particleContainer->ID)>::host_mirror_type;
         hostMirror_ID_t ID_hostMirror;
-        if (forceHostCopy_m[label]) {
-            ID_hostMirror = particleContainer->ID.getHostMirror();
-            Kokkos::deep_copy(ID_hostMirror, particleContainer->ID.getView());
-            viewRegistry_m.set(label, ID_hostMirror);
-        } else {
-            ID_hostMirror = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particleContainer->ID.getView());
-            viewRegistry_m.set(label, ID_hostMirror);
+        if constexpr (T::EnableIDs) {
+            if (forceHostCopy_m[label]) {
+                ID_hostMirror = particleContainer->ID.getHostMirror();
+                Kokkos::deep_copy(ID_hostMirror, particleContainer->ID.getView());
+                viewRegistry_m.set(label, ID_hostMirror);
+            } else {
+                ID_hostMirror = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particleContainer->ID.getView());
+                viewRegistry_m.set(label, ID_hostMirror);
+            }
         }
 
         using PLayout_t = T::Layout_t;
@@ -754,13 +756,20 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
             rank_field["values"].set_external(rank_id_view.data(), localNum);
             data["metadata/vtk_fields/RankID/attribute_type"].set_string("ProcessIds");
 
-            /* Global ID ATTRIBUTE */
-            auto id_field = fields["ParticleIDs"];
-            id_field["association"].set_string("vertex");
-            id_field["topology"].set_string("p_unstructured_topo");
-            id_field["volume_dependent"].set_string("false");
-            id_field["values"].set_external(ID_hostMirror.data(), localNum);
-            data["metadata/vtk_fields/ParticleIDs/attribute_type"].set_string("GlobalIds");
+            /* Global ID ATTRIBUTE (only when particle IDs are enabled in ParticleBase) */
+            if constexpr (T::EnableIDs) {
+                auto id_field = fields["ParticleIDs"];
+                id_field["association"].set_string("vertex");
+                id_field["topology"].set_string("p_unstructured_topo");
+                id_field["volume_dependent"].set_string("false");
+                if (localNum > 0) {
+                    id_field["values"].set_external(ID_hostMirror.data(), localNum);
+                } else {
+                    using id_value_t = typename hostMirror_ID_t::value_type;
+                    id_field["values"].set_external(static_cast<id_value_t*>(nullptr), 0);
+                }
+                data["metadata/vtk_fields/ParticleIDs/attribute_type"].set_string("GlobalIds");
+            }
 
             /* POSITION ATTRIBUTE */
             auto R_field = fields["position"];
@@ -798,7 +807,7 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
         // Skip built-in attributes (ID and/or R) and call signConduitBlueprintNode
         // on every remaining user-defined attribute.
         //
-        // NOTE: getAttributeNum() counts across ALL memory spaces, while getAttribute(i)
+        // ?NOTE?: getAttributeNum() counts across ALL memory spaces, while getAttribute(i)
         // only indexes into the DefaultExecutionSpace::memory_space vector — a mismatch
         // that causes an out-of-bounds segfault when attributes exist in multiple spaces.
         // forAllAttributes with void MemorySpace passes each per-space *vector* to the
