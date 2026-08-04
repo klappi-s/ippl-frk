@@ -10,6 +10,8 @@
 #include <array>
 
 #include "Multigrid.h"
+#include "MultigridFEMContainer.h"
+#include "MultigridFEMContainer_p.h"
 #include "Preconditioner.h"
 #include "SolverAlgorithm.h"
 
@@ -299,11 +301,19 @@ namespace ippl {
                 5,  // This is a dummy default parameter, actual default parameter should be
             // set in main
             [[maybe_unused]] int outer =
-                1,  // This is a dummy default parameter, actual default parameter should be
+                pcg_preconditioner_defaults::gauss_seidel_outer,
             [[maybe_unused]] double omega =
-                1  // This is a dummy default parameter, actual default parameter should be
-                   // set in main
-        ) {}
+                pcg_preconditioner_defaults::ssor_omega,
+            [[maybe_unused]] int mg_pre =
+                pcg_preconditioner_defaults::mg_pre_smooth,
+            [[maybe_unused]] int mg_post =
+                pcg_preconditioner_defaults::mg_post_smooth,
+            [[maybe_unused]] double mg_omega =
+                pcg_preconditioner_defaults::mg_omega,
+            [[maybe_unused]] unsigned mg_min_cells_per_rank_per_dim =
+                pcg_preconditioner_defaults::mg_min_cells,
+            [[maybe_unused]] bool mg_communication =
+                pcg_preconditioner_defaults::mg_communication) {}
         /*!
          * Query how many iterations were required to obtain the solution
          * the last time this solver was used
@@ -395,6 +405,7 @@ namespace ippl {
         int iterations_m = 0;
     };
     // ====== FEMContainer : end ======
+
 
     template <typename OperatorRet, typename LowerRet, typename UpperRet, typename UpperLowerRet,
               typename InverseDiagRet, typename T>
@@ -767,6 +778,180 @@ namespace ippl {
         lhs_type s;
         lhs_type pcond_out;
     };
+
+    // ====== PCG FEMContainer Specialization : begin ======
+    template <typename OperatorRet, typename LowerRet, typename UpperRet, typename UpperLowerRet,
+              typename InverseDiagRet, typename DiagRet, typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    class PCG<OperatorRet, LowerRet, UpperRet, UpperLowerRet, InverseDiagRet, DiagRet, FEMContainer<T, Dim, EntityTypes, DOFNums>, FEMContainer<T, Dim, EntityTypes, DOFNums>>
+        : public CG<OperatorRet, LowerRet, UpperRet, UpperLowerRet, InverseDiagRet, DiagRet, FEMContainer<T, Dim, EntityTypes, DOFNums>, FEMContainer<T, Dim, EntityTypes, DOFNums>> {
+        using Base = CG<OperatorRet, LowerRet, UpperRet, UpperLowerRet, InverseDiagRet, DiagRet, FEMContainer<T, Dim, EntityTypes, DOFNums>, FEMContainer<T, Dim, EntityTypes, DOFNums>>;
+
+    public:
+        using typename Base::lhs_type, typename Base::rhs_type;
+        using typename Base::OperatorF, typename Base::LowerF, typename Base::UpperF, typename Base::UpperLowerF, typename Base::InverseDiagF, typename Base::DiagF;
+
+        PCG()
+            : Base()
+            , preconditioner_m(nullptr) {}
+
+        void setPreconditioner(
+            OperatorF&& op,                   
+            LowerF&& lower,                   
+            UpperF&& upper,                   
+            UpperLowerF&& upper_and_lower,    
+            InverseDiagF&& inverse_diagonal,  
+            DiagF&& diagonal,                 
+            double alpha,                     
+            double beta,                      
+            std::string preconditioner_type = "", 
+            int level = pcg_preconditioner_defaults::newton_level, 
+            int degree = pcg_preconditioner_defaults::chebyshev_degree, 
+            int richardson_iterations = pcg_preconditioner_defaults::richardson_iterations, 
+            int inner = pcg_preconditioner_defaults::gauss_seidel_inner, 
+            int outer = pcg_preconditioner_defaults::gauss_seidel_outer, 
+            double omega = pcg_preconditioner_defaults::ssor_omega, 
+            int mg_pre = pcg_preconditioner_defaults::mg_pre_smooth, 
+            int mg_post = pcg_preconditioner_defaults::mg_post_smooth, 
+            double mg_omega = pcg_preconditioner_defaults::mg_omega, 
+            unsigned mg_min_cells_per_rank_per_dim = pcg_preconditioner_defaults::mg_min_cells,
+            bool mg_communication = pcg_preconditioner_defaults::mg_communication) override {
+            
+            if (preconditioner_type == "jacobi") {
+                preconditioner_m =
+                    std::move(std::make_unique<jacobi_preconditioner<lhs_type, InverseDiagF>>(
+                        std::move(inverse_diagonal)));
+            } else if (preconditioner_type == "newton") {
+                preconditioner_m = std::move(
+                    std::make_unique<polynomial_newton_preconditioner<lhs_type, OperatorF>>(
+                        std::move(op), alpha, beta, level, 1e-3));
+            } else if (preconditioner_type == "chebyshev") {
+                preconditioner_m = std::move(
+                    std::make_unique<polynomial_chebyshev_preconditioner<lhs_type, OperatorF>>(
+                        std::move(op), alpha, beta, degree, 1e-3));
+            } else if (preconditioner_type == "richardson") {
+                preconditioner_m =
+                    std::move(std::make_unique<
+                              richardson_preconditioner<lhs_type, UpperLowerF, InverseDiagF>>(
+                        std::move(upper_and_lower), std::move(inverse_diagonal),
+                        richardson_iterations));
+            } else if (preconditioner_type == "richardson_alt") {
+                preconditioner_m =
+                    std::move(std::make_unique<
+                              richardson_preconditioner_alt<lhs_type, OperatorF, InverseDiagF>>(
+                        std::move(op), std::move(inverse_diagonal), richardson_iterations));
+            } else if (preconditioner_type == "gauss-seidel") {
+                preconditioner_m = std::move(
+                    std::make_unique<gs_preconditioner<lhs_type, LowerF, UpperF, InverseDiagF>>(
+                        std::move(lower), std::move(upper), std::move(inverse_diagonal), inner,
+                        outer));
+            } else if (preconditioner_type == "ssor") {
+                preconditioner_m =
+                    std::move(std::make_unique<
+                              ssor_preconditioner<lhs_type, LowerF, UpperF, InverseDiagF, DiagF>>(
+                        std::move(lower), std::move(upper), std::move(inverse_diagonal),
+                        std::move(diagonal), inner, outer, omega));
+            } else if (preconditioner_type == "multigrid") {
+                if constexpr (detail::fem_multigrid_is_p1_only<lhs_type, Dim>::value) {
+                    preconditioner_m = std::move(std::make_unique<
+                        fem_multigrid_preconditioner<lhs_type, OperatorF, InverseDiagF>>(
+                        std::move(op), std::move(inverse_diagonal), mg_pre, mg_post, mg_omega,
+                        mg_min_cells_per_rank_per_dim, mg_communication));
+                } else {
+                    throw IpplException(
+                        "PCG::setPreconditioner",
+                        "Higher-order multigrid must be installed via setPreconditionerObject "
+                        "(p-multigrid) from FEMPoissonSolver_wFEMContainer.");
+                }
+            } else {
+                preconditioner_m = std::move(std::make_unique<preconditioner<lhs_type>>());
+            }
+        }
+
+        void setPreconditionerObject(std::unique_ptr<preconditioner<lhs_type>> precon) {
+            preconditioner_m = std::move(precon);
+        }
+
+        void operator()(lhs_type& lhs, rhs_type& rhs, const ParameterList& params) override {
+            if (preconditioner_m == nullptr) {
+                throw IpplException("PCG::operator()",
+                                    "Preconditioner has not been set for PCG solver");
+            }
+            
+            typename lhs_type::Mesh_t mesh     = lhs.get_mesh();
+            typename lhs_type::Layout_t layout = lhs.getLayout();
+
+            this->iterations_m            = 0;
+            const int maxIterations = params.get<int>("max_iterations");
+
+            lhs_type r(mesh, layout);
+            lhs_type d(mesh, layout);
+            lhs_type s(mesh, layout);
+            lhs_type pcond_out(mesh, layout);
+            lhs_type q(mesh, layout);
+
+            // Each preconditioner's init_fields() is responsible for being
+            // cheap on the steady-state path (refreshing layout in-place, not
+            // reallocating).
+            preconditioner_m->init_fields(lhs);
+
+            auto lhsBCs = lhs.getFieldBC();
+            std::array<FieldBC, 2*Dim> bcTypes;
+
+            bool allFacesPeriodic = true;
+            for (unsigned int i = 0; i < 2 * Dim; ++i) {
+                FieldBC bcType = lhsBCs[i]->getBCType();
+                if (bcType == PERIODIC_FACE) {
+                    bcTypes[i] = ippl::PERIODIC_FACE;
+                } else if (bcType & CONSTANT_FACE) {
+                    bcTypes[i]            = ippl::ZERO_FACE;
+                    allFacesPeriodic = false;
+                } else {
+                    throw IpplException("PCG::operator()",
+                                        "Only periodic or constant BCs for LHS supported.");
+                    return;
+                }
+            }
+
+            r = rhs - this->op_m(lhs);
+            (*preconditioner_m)(r, pcond_out);
+            d = T(1) * pcond_out;
+            d.setFieldBC(bcTypes);
+
+            T delta1          = innerProduct(r, d);
+            T delta0          = delta1;
+            this->residueNorm = Kokkos::sqrt(Kokkos::abs(delta1));
+            const T tolerance = params.get<T>("tolerance") * norm(rhs);
+
+            while (this->iterations_m < maxIterations && this->residueNorm > tolerance) {
+                q = this->op_m(d);
+                T alpha = delta1 / innerProduct(d, q);
+                lhs     = lhs + alpha * d;
+
+                r = r - alpha * q;
+                (*preconditioner_m)(r, s);
+
+                delta0 = delta1;
+                delta1 = innerProduct(r, s);
+
+                T beta            = delta1 / delta0;
+                this->residueNorm = Kokkos::sqrt(Kokkos::abs(delta1));
+
+                d = s + beta * d;
+                d.setFieldBC(bcTypes);
+                
+                ++this->iterations_m;
+            }
+
+            if (allFacesPeriodic) {
+                T avg = lhs.getVolumeAverage();
+                lhs   = lhs - avg;
+            }
+        }
+        
+    protected:
+        std::unique_ptr<preconditioner<lhs_type>> preconditioner_m;
+    };
+    // ====== PCG FEMContainer Specialization : end ======
 
 };  // namespace ippl
 

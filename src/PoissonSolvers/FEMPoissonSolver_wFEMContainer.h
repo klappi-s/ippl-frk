@@ -1,12 +1,25 @@
 // Class FEMPoissonSolver_wFEMContainer
-//   Track B Poisson solver: LagrangeSpace_wfc + FEMContainer + matrix-free CG.
-//   Supports plain (unpreconditioned) and Jacobi-preconditioned CG.
+//   Track B Poisson solver: LagrangeSpace_wfc + FEMContainer + matrix-free CG/PCG.
+//
 //   Select via params["preconditioned"] = true|false (default: true).
+//   When preconditioned, uses ippl::PCG<> + Preconditioner.h (jacobi, newton, chebyshev,
+//   richardson, richardson_alt, gauss-seidel, ssor, multigrid (P1 h-MG; P2/P3 p-multigrid).
+//   Default preconditioner_type is "ssor".
+//   Newton/Chebyshev spectral bounds are estimated via powermethod / adapted_powermethod.
 
 #ifndef IPPL_FEMPOISSONSOLVER_WFC_H
 #define IPPL_FEMPOISSONSOLVER_WFC_H
 
+#include <algorithm>
+#include <cctype>
+#include <functional>
+#include <memory>
+#include <string>
+
 #include "LinearSolvers/PCG.h"
+#include "LinearSolvers/Preconditioner.h"
+#include "LinearSolvers/PreconditionerValidation.h"
+#include "LinearSolvers/MultigridFEMContainer_p.h"
 #include "Poisson.h"
 #include "EvalFunctor.h"
 #include "FEM/LagrangeSpace_wFEMContainer.h"
@@ -24,9 +37,11 @@ namespace ippl {
         using typename Base::lhs_type, typename Base::rhs_type;
         using MeshType = typename FieldRHS::Mesh_t;
 
-        // Plain (unpreconditioned) CG, specialised for FEMContainer
         using CGSolverAlgorithm_t =
-            CG<lhs_type, lhs_type, lhs_type, lhs_type, lhs_type, FieldLHS, FieldRHS>;
+            CG<lhs_type, lhs_type, lhs_type, lhs_type, lhs_type, lhs_type, FieldLHS, FieldRHS>;
+
+        using PCGSolverAlgorithm_t =
+            PCG<lhs_type, lhs_type, lhs_type, lhs_type, lhs_type, lhs_type, FieldLHS, FieldRHS>;
 
         using ElementType =
             std::conditional_t<Dim == 1, ippl::EdgeElement<Tlhs>,
@@ -91,6 +106,36 @@ namespace ippl {
                 return lagrangeSpace_m.evaluateAx(field, poissonEquationEval);
             };
 
+            const auto algoOperatorL = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
+                field.setFieldBC(bcTypes);
+                field.fillHalo();
+                return lagrangeSpace_m.evaluateAx_lower(field, poissonEquationEval);
+            };
+
+            const auto algoOperatorU = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
+                field.setFieldBC(bcTypes);
+                field.fillHalo();
+                return lagrangeSpace_m.evaluateAx_upper(field, poissonEquationEval);
+            };
+
+            const auto algoOperatorUL = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
+                field.setFieldBC(bcTypes);
+                field.fillHalo();
+                return lagrangeSpace_m.evaluateAx_upperlower(field, poissonEquationEval);
+            };
+
+            const auto algoOperatorInvD = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
+                field.setFieldBC(bcTypes);
+                field.fillHalo();
+                return lagrangeSpace_m.evaluateAx_inversediag(field, poissonEquationEval);
+            };
+
+            const auto algoOperatorD = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
+                field.setFieldBC(bcTypes);
+                field.fillHalo();
+                return lagrangeSpace_m.evaluateAx_diag(field, poissonEquationEval);
+            };
+
             if (bcType == CONSTANT_FACE) {
                 *(this->rhs_mp) = *(this->rhs_mp) -
                     lagrangeSpace_m.evaluateAx_lift(*(this->rhs_mp), poissonEquationEval);
@@ -98,76 +143,150 @@ namespace ippl {
 
             const bool usePrecon = this->params_m.template get<bool>("preconditioned");
 
-            static IpplTimings::TimerRef solveTimer = IpplTimings::getTimer("pcg");
+            static IpplTimings::TimerRef solveTimer = IpplTimings::getTimer("cg");
             IpplTimings::startTimer(solveTimer);
 
             if (usePrecon) {
-                // ---- Jacobi-preconditioned CG -----------------------------------
-                // Compute diagonal of A; boundary DOFs are pre-set to 1 in evaluateAx_diag
-                lhs_type diag = lagrangeSpace_m.evaluateAx_diag(*(this->lhs_mp), poissonEquationEval);
+                std::string preconditioner_type =
+                    this->params_m.template get<std::string>("preconditioner_type");
+                std::transform(preconditioner_type.begin(), preconditioner_type.end(),
+                               preconditioner_type.begin(), [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
 
-                lhs_type& x = *(this->lhs_mp);
-                rhs_type& b = *(this->rhs_mp);
+                preconditioner_validation::throwIfUnknownType(
+                    preconditioner_type, "FEMPoissonSolver_wFEMContainer::solve");
 
-                const int    maxIter = this->params_m.template get<int>("max_iterations");
-                const Tlhs   tol    = this->params_m.template get<Tlhs>("tolerance");
+                Inform warn("FEMPoissonSolver_wFEMContainer");
+                int level    = this->params_m.template get<int>("newton_level");
+                int degree   = this->params_m.template get<int>("chebyshev_degree");
+                int inner    = this->params_m.template get<int>("gauss_seidel_inner_iterations");
+                int outer    = this->params_m.template get<int>("gauss_seidel_outer_iterations");
+                double omega = this->params_m.template get<double>("ssor_omega");
+                int richardson_iterations =
+                    this->params_m.template get<int>("richardson_iterations");
+                int communication     = pcg_preconditioner_defaults::communication;
+                int mg_pre            = pcg_preconditioner_defaults::mg_pre_smooth;
+                int mg_post           = pcg_preconditioner_defaults::mg_post_smooth;
+                double mg_omega       = pcg_preconditioner_defaults::mg_omega;
+                unsigned mg_min_cells = pcg_preconditioner_defaults::mg_min_cells;
 
-                // r = b - A x
-                lhs_type r = b - algoOperator(x);
-                r.setFieldBC(bcTypes);
+                preconditioner_validation::sanitizeParams(
+                    preconditioner_type, warn, level, degree, richardson_iterations, inner, outer,
+                    omega, &communication, mg_pre, mg_post, mg_omega, mg_min_cells);
 
-                // s = M^{-1} r  (element-wise: s_i = r_i / diag_i)
-                lhs_type s = applyJacobi(r, diag, bcTypes);
-
-                // d = s,  delta = (r, s)
-                lhs_type d = s.deepCopy();
-                d.setFieldBC(bcTypes);
-
-                Tlhs delta    = innerProduct(r, s);
-                const Tlhs delta0 = delta;
-                residue_m         = Kokkos::sqrt(Kokkos::abs(delta));
-                const Tlhs abstol = tol * norm(b);
-
-                lhs_type q(x.get_mesh(), x.getLayout());
-                iteration_count_m = 0;
-
-                while (iteration_count_m < maxIter && residue_m > abstol) {
-                    q = algoOperator(d);
-
-                    Tlhs alpha = delta / innerProduct(d, q);
-                    x         = x + alpha * d;
-                    r         = r - alpha * q;
-                    r.setFieldBC(bcTypes);
-
-                    s = applyJacobi(r, diag, bcTypes);
-
-                    Tlhs delta_new = innerProduct(r, s);
-                    Tlhs beta      = delta_new / delta;
-                    delta          = delta_new;
-
-                    residue_m = Kokkos::sqrt(Kokkos::abs(delta));
-                    d         = s + beta * d;
-                    d.setFieldBC(bcTypes);
-
-                    ++iteration_count_m;
+                double alpha = 0.0;
+                double beta  = 0.0;
+                if (preconditioner_type == "newton" || preconditioner_type == "chebyshev") {
+                    lhs_type x0(*(this->lhs_mp));
+                    x0 = Tlhs(1);
+                    x0.setFieldBC(bcTypes);
+                    // Cap power iterations: FEM operator is expensive vs FD laplace.
+                    beta = powermethod(algoOperator, x0, /*max_iter=*/200, /*tol=*/1e-3);
+                    x0   = Tlhs(1);
+                    x0.setFieldBC(bcTypes);
+                    alpha = adapted_powermethod(algoOperator, x0, beta, /*max_iter=*/200,
+                                                /*tol=*/1e-3);
+                    if (!(alpha > 0.0 && beta > alpha)) {
+                        warn << "Spectral estimate alpha=" << alpha << " beta=" << beta
+                             << " looks invalid; falling back to jacobi-safe bounds." << endl;
+                        // Conservative positive interval so Chebyshev/Newton init_fields
+                        // do not divide by zero; quality may be poor but remains defined.
+                        alpha = 1e-3;
+                        beta  = 1.0;
+                    }
                 }
-                (void)delta0;
-                // -----------------------------------------------------------------
+
+                if (preconditioner_type == "multigrid" && Order > 1) {
+                    // p-multigrid: build Order→…→P1 chain; P1 bottom = geometric h-MG.
+                    auto& mesh   = this->rhs_mp->get_mesh();
+                    auto& layout = this->rhs_mp->getLayout();
+
+                    using P1Traits = FiniteElementSpaceTraits<LagrangeSpaceTag, Dim, 1>;
+                    using P1Cont   = typename DOFHandler<Tlhs, P1Traits>::FEMContainer_t;
+                    using P1Space =
+                        LagrangeSpace_wfc<Tlhs, Dim, 1, ElementType, QuadratureType, P1Cont, P1Cont>;
+                    EvalFunctor<Tlhs, Dim, P1Space::numElementDOFs> eval1(DPhiInvT, absDetDPhi);
+
+                    auto space1 = std::make_shared<P1Space>(mesh, refElement_m, quadrature_m, layout);
+
+                    auto build_p1_bottom = [&]() {
+                        // P1 geometric h-MG as bottom solver (same as standalone P1 multigrid).
+                        std::function<P1Cont(P1Cont)> op1b =
+                            [eval1, bcTypes, space1](P1Cont field) -> P1Cont {
+                            field.setFieldBC(bcTypes);
+                            field.fillHalo();
+                            return space1->evaluateAx(field, eval1);
+                        };
+                        std::function<P1Cont(P1Cont)> invD1b =
+                            [eval1, bcTypes, space1](P1Cont field) -> P1Cont {
+                            field.setFieldBC(bcTypes);
+                            field.fillHalo();
+                            return space1->evaluateAx_inversediag(field, eval1);
+                        };
+                        return std::make_unique<
+                            fem_multigrid_preconditioner<P1Cont, std::function<P1Cont(P1Cont)>,
+                                                         std::function<P1Cont(P1Cont)>>>(
+                            std::move(op1b), std::move(invD1b), mg_pre, mg_post, mg_omega,
+                            mg_min_cells, static_cast<bool>(communication));
+                    };
+
+                    // More smoothing on high-order levels than FD defaults
+                    const unsigned pmg_pre  = static_cast<unsigned>(std::max(mg_pre, 4));
+                    const unsigned pmg_post = static_cast<unsigned>(std::max(mg_post, 4));
+
+                    if constexpr (Order == 2) {
+                        auto bottom = build_p1_bottom();
+                        using Bottom = typename decltype(bottom)::element_type;
+                        auto pmg     = std::make_unique<
+                            fem_pmultigrid_preconditioner<lhs_type, P1Cont, Bottom, 2, 1>>(
+                            algoOperator, algoOperatorInvD, lagrangeSpace_m.getDOFHandler(),
+                            space1->getDOFHandler(),
+                            lagrangeSpace_m.getDOFHandler().getElementIndices(), std::move(bottom),
+                            pmg_pre, pmg_post, mg_omega);
+                        pcg_algo_m.setPreconditionerObject(std::move(pmg));
+                    } else if constexpr (Order == 3) {
+                        auto bottom = build_p1_bottom();
+                        using Bottom = typename decltype(bottom)::element_type;
+                        auto pmg     = std::make_unique<
+                            fem_pmultigrid_preconditioner<lhs_type, P1Cont, Bottom, 3, 1>>(
+                            algoOperator, algoOperatorInvD, lagrangeSpace_m.getDOFHandler(),
+                            space1->getDOFHandler(),
+                            lagrangeSpace_m.getDOFHandler().getElementIndices(), std::move(bottom),
+                            pmg_pre, pmg_post, mg_omega);
+                        pcg_algo_m.setPreconditionerObject(std::move(pmg));
+                    } else {
+                        throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                                            "p-multigrid supports Lagrange Order 2 or 3 only.");
+                    }
+
+                    pcg_algo_m.setOperator(algoOperator);
+                    pcg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
+                } else {
+                    pcg_algo_m.setPreconditioner(algoOperator, algoOperatorL, algoOperatorU,
+                                                 algoOperatorUL, algoOperatorInvD, algoOperatorD,
+                                                 alpha, beta, preconditioner_type, level, degree,
+                                                 richardson_iterations, inner, outer, omega, mg_pre,
+                                                 mg_post, mg_omega, mg_min_cells);
+
+                    pcg_algo_m.setOperator(algoOperator);
+                    pcg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
+                }
+                iteration_count_m = pcg_algo_m.getIterationCount();
+                residue_m         = pcg_algo_m.getResidue();
             } else {
-                // ---- Plain (unpreconditioned) CG --------------------------------
                 cg_algo_m.setOperator(algoOperator);
                 cg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
                 iteration_count_m = cg_algo_m.getIterationCount();
                 residue_m         = cg_algo_m.getResidue();
-                // -----------------------------------------------------------------
             }
 
             (this->lhs_mp)->fillHalo();
             IpplTimings::stopTimer(solveTimer);
         }
 
-        int  getIterationCount() const { return iteration_count_m; }
-        Tlhs getResidue()        const { return residue_m; }
+        int getIterationCount() const { return iteration_count_m; }
+        Tlhs getResidue() const { return residue_m; }
 
         template <typename F>
         Tlhs getL2Error(const F& analytic) {
@@ -178,7 +297,7 @@ namespace ippl {
             Tlhs avg = this->lagrangeSpace_m.computeAvg(*(this->lhs_mp));
             if (Vol) {
                 lhs_type unit((this->lhs_mp)->get_mesh(), (this->lhs_mp)->getLayout());
-                unit = 1.0;
+                unit     = 1.0;
                 Tlhs vol = this->lagrangeSpace_m.computeAvg(unit);
                 return avg / vol;
             }
@@ -186,56 +305,30 @@ namespace ippl {
         }
 
     protected:
-        // Plain CG (used when preconditioned == false)
         CGSolverAlgorithm_t cg_algo_m;
+        PCGSolverAlgorithm_t pcg_algo_m;
 
-        // Stats (populated by both paths)
-        int  iteration_count_m = 0;
-        Tlhs residue_m         = 0;
+        int iteration_count_m = 0;
+        Tlhs residue_m        = 0;
 
         virtual void setDefaultParameters() override {
             this->params_m.add("max_iterations", 1000);
             this->params_m.add("tolerance", (Tlhs)1e-13);
-            // Default: use Jacobi preconditioner (mirrors alpine FEM_PRECON behaviour)
             this->params_m.add("preconditioned", true);
+            this->params_m.add("preconditioner_type", "ssor");
+            // Milder than FD/alpine defaults: spectral types use estimated eigenvalues.
+            this->params_m.add("newton_level", 2);
+            this->params_m.add("chebyshev_degree", 5);
+            this->params_m.add("richardson_iterations",
+                               pcg_preconditioner_defaults::richardson_iterations);
+            this->params_m.add("gauss_seidel_inner_iterations",
+                               pcg_preconditioner_defaults::gauss_seidel_inner);
+            this->params_m.add("gauss_seidel_outer_iterations",
+                               pcg_preconditioner_defaults::gauss_seidel_outer);
+            this->params_m.add("ssor_omega", pcg_preconditioner_defaults::ssor_omega);
         }
 
-        // Apply Jacobi preconditioner: s = r / diag  (element-wise DOFArray division per entity view).
-        // Boundary DOFs in diag are 1 (set by evaluateAx_diag), so s[boundary] = r[boundary].
-        lhs_type applyJacobi(const lhs_type& r, const lhs_type& diag,
-                             const std::array<FieldBC, 2 * Dim>& bcTypes) const {
-            lhs_type s = r.deepCopy();
-
-            using DOFHandler_t = typename LagrangeType::DOFHandler_t;
-            constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
-
-            [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ([&] {
-                    using EntityType = std::tuple_element_t<Is, typename DOFHandler_t::EntityTypes>;
-                    auto s_view    = s.template getView<EntityType>();
-                    auto diag_view = diag.template getView<EntityType>();
-
-                    // Use the entity-type-specific field range policy (owned cells only, nghost=0)
-                    auto policy = s.template getFieldRangePolicy<EntityType>(0);
-
-                    Kokkos::parallel_for(
-                        "Jacobi::applyJacobi",
-                        policy,
-                        KOKKOS_LAMBDA(const auto&... idx) {
-                            auto& sv       = s_view(idx...);
-                            const auto& dv = diag_view(idx...);
-                            // DOFArray element-wise division (DOFArray::operator/(DOFArray))
-                            sv = sv / dv;
-                        });
-                }(), ...);
-            }(std::make_index_sequence<numTypes>{});
-
-            Kokkos::fence();
-            s.setFieldBC(bcTypes);
-            return s;
-        }
-
-        ElementType  refElement_m;
+        ElementType refElement_m;
         QuadratureType quadrature_m;
         LagrangeType lagrangeSpace_m;
     };
