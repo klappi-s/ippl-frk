@@ -483,6 +483,7 @@ namespace ippl {
         unsigned min_cells_per_rank_per_dim_;
         bool communication_;
         bool is_all_periodic_ = false;
+        size_t active_level_ = 0;
 
         // --- DEBUGGING ---
 
@@ -579,7 +580,7 @@ namespace ippl {
             IpplTimings::startTimer(resi);
 
             Field res = f.deepCopy();
-            res       = f - op_(u);
+            res       = f - apply_operator(u);
 
             IpplTimings::stopTimer(resi);
 
@@ -595,6 +596,7 @@ namespace ippl {
          * @param level The current level index in the V-cycle.
          */
         void vcycle(size_t level) {
+            active_level_ = level;
             if (level == L_.size() - 1) {
                 // Coarsest grid: just smooth a lot (or use a direct solver)
                 smooth_jacobi(level, 50);
@@ -614,6 +616,23 @@ namespace ippl {
          * @param iters The number of smoothing iterations to perform.
          */
         void smooth_jacobi(const size_t level, const unsigned iters) {
+            active_level_ = level;
+            perform_jacobi_smooth(level, iters);
+        }
+
+        /**
+         * @brief Hook for level-dependent operator application (default: stored op_).
+         */
+        virtual Field apply_operator(Field& u) {
+            Field ax(u.get_mesh(), u.getLayout(), u.getNghost());
+            ax = op_(u);
+            return ax;
+        }
+
+        /**
+         * @brief Hook for Jacobi smoothing; override for non-FD diagonals on the fine level.
+         */
+        virtual void perform_jacobi_smooth(const size_t level, const unsigned iters) {
             IpplTimings::TimerRef jacobi = IpplTimings::getTimer("smooth_jacobi");
             IpplTimings::startTimer(jacobi);
 
