@@ -9,11 +9,15 @@
 // Usage:
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence [--info 5]
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --max-nodes 1024
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --min-nodes 2 --max-nodes 2
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver plain        # unpreconditioned CG
-//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver preconditioned  # Jacobi PCG (default)
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver preconditioned  # SSOR PCG (default)
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --preconditioner_type jacobi
 
 #include "Ippl.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -38,7 +42,7 @@ static constexpr double domain_start  = 0.0;
 static constexpr double domain_end    = 1.0;
 
 template <unsigned Order, SourceCase Src>
-ConvergenceRow runCase(unsigned num_nodes, bool preconditioned) {
+ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::string& precon_type) {
     using T = double;
 
     using DOFHandler_t =
@@ -76,6 +80,7 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned) {
     params.add("tolerance", 1e-13);
     params.add("max_iterations", 150000);
     params.add("preconditioned", preconditioned);
+    params.add("preconditioner_type", precon_type);
     solver.mergeParameters(params);
     solver.solve();
 
@@ -94,16 +99,16 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned) {
 }
 
 template <unsigned Order>
-ConvergenceRow runCaseSource(unsigned num_nodes, SourceCase src, bool preconditioned) {
+ConvergenceRow runCaseSource(unsigned num_nodes, SourceCase src, bool preconditioned, const std::string& precon_type) {
     switch (src) {
         case SourceCase::LowOrderPolynomial:
-            return runCase<Order, SourceCase::LowOrderPolynomial>(num_nodes, preconditioned);
+            return runCase<Order, SourceCase::LowOrderPolynomial>(num_nodes, preconditioned, precon_type);
         case SourceCase::HighOrderPolynomial:
-            return runCase<Order, SourceCase::HighOrderPolynomial>(num_nodes, preconditioned);
+            return runCase<Order, SourceCase::HighOrderPolynomial>(num_nodes, preconditioned, precon_type);
         case SourceCase::ShiftedExponential:
-            return runCase<Order, SourceCase::ShiftedExponential>(num_nodes, preconditioned);
+            return runCase<Order, SourceCase::ShiftedExponential>(num_nodes, preconditioned, precon_type);
         case SourceCase::Sines:
-            return runCase<Order, SourceCase::Sines>(num_nodes, preconditioned);
+            return runCase<Order, SourceCase::Sines>(num_nodes, preconditioned, precon_type);
         default:
             throw std::runtime_error("unknown source");
     }
@@ -118,7 +123,16 @@ unsigned parseMaxNodes(int argc, char* argv[], unsigned default_max) {
     return default_max;
 }
 
-// Parse --solver plain|preconditioned (default: preconditioned = true = Jacobi PCG)
+unsigned parseMinNodes(int argc, char* argv[], unsigned default_min = 4) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--min-nodes") {
+            return static_cast<unsigned>(std::stoul(argv[i + 1]));
+        }
+    }
+    return default_min;
+}
+
+// Parse --solver plain|preconditioned (default: preconditioned = SSOR PCG)
 bool parsePreconditioned(int argc, char* argv[]) {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--solver") {
@@ -129,7 +143,19 @@ bool parsePreconditioned(int argc, char* argv[]) {
                                      + "'. Use 'plain' or 'preconditioned'.");
         }
     }
-    return true;  // default: Jacobi-preconditioned CG
+    return true;  // default: preconditioned CG
+}
+
+std::string parsePreconditioner(int argc, char* argv[]) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--preconditioner_type") {
+            std::string type = argv[i + 1];
+            std::transform(type.begin(), type.end(), type.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return type;
+        }
+    }
+    return "ssor";
 }
 
 double observedRate(const ConvergenceRow& coarse, const ConvergenceRow& fine) {
@@ -165,17 +191,23 @@ int main(int argc, char* argv[]) {
     ippl::initialize(argc, argv);
     int rc = 0;
     try {
-        constexpr unsigned min_nodes = 1u << 2;
+        const unsigned min_nodes   = parseMinNodes(argc, argv);
         const unsigned max_nodes   = parseMaxNodes(argc, argv, 1u << 10);
+        if (min_nodes < 2 || min_nodes > max_nodes) {
+            throw std::runtime_error("--min-nodes must be >= 2 and <= --max-nodes");
+        }
         const bool preconditioned  = parsePreconditioned(argc, argv);
+        const std::string precon_type = parsePreconditioner(argc, argv);
+        const unsigned max_order   = maxLagrangeOrderForPreconditioner(precon_type);
 
         const auto out_path =
             std::filesystem::current_path() / "convergence_FEMPoissonSolver1D.dat";
 
         constexpr const char* domain_note = "[0,1] (homogeneous Dirichlet)";
-        logStudyBanner(Dim, QuadNodes, min_nodes, max_nodes, out_path.string(), domain_note);
+        logStudyBanner(Dim, QuadNodes, min_nodes, max_nodes, out_path.string(), domain_note,
+                       max_order);
         if (ippl::Comm->rank() == 0) {
-            std::cout << "Solver mode: " << (preconditioned ? "preconditioned (Jacobi)" : "plain (unpreconditioned)") << '\n';
+            std::cout << "Solver mode: " << (preconditioned ? "preconditioned (" + precon_type + ")" : "plain (unpreconditioned)") << '\n';
         }
 
         std::unique_ptr<std::ofstream> dat_out;
@@ -187,23 +219,23 @@ int main(int argc, char* argv[]) {
             writeDatHeader(*dat_out, Dim, domain_note);
         }
 
-        ConvergenceProgressLog progress(totalConvergenceCases(min_nodes, max_nodes), Dim);
+        ConvergenceProgressLog progress(totalConvergenceCases(min_nodes, max_nodes, max_order), Dim);
         std::vector<std::vector<ConvergenceRow>> studies;
 
         for (SourceCase src :
              {SourceCase::LowOrderPolynomial, SourceCase::HighOrderPolynomial, SourceCase::ShiftedExponential, SourceCase::Sines}) {
-            for (unsigned order : {1u, 2u, 3u}) {
+            for (unsigned order = 1u; order <= max_order; ++order) {
                 std::vector<ConvergenceRow> rows;
                 for (unsigned n = min_nodes; n <= max_nodes; n <<= 1) {
                     progress.beginCase(sourceTag(src), order, n);
                     ConvergenceRow row = [&]() {
                         switch (order) {
                             case 1:
-                                return runCaseSource<1>(n, src, preconditioned);
+                                return runCaseSource<1>(n, src, preconditioned, precon_type);
                             case 2:
-                                return runCaseSource<2>(n, src, preconditioned);
+                                return runCaseSource<2>(n, src, preconditioned, precon_type);
                             default:
-                                return runCaseSource<3>(n, src, preconditioned);
+                                return runCaseSource<3>(n, src, preconditioned, precon_type);
                         }
                     }();
                     progress.endCase(row);

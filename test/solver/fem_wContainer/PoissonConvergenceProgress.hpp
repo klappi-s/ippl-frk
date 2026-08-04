@@ -25,25 +25,29 @@ inline unsigned countRefinementLevels(unsigned min_nodes, unsigned max_nodes) {
     return levels;
 }
 
-inline unsigned totalConvergenceCases(unsigned min_nodes, unsigned max_nodes) {
+inline unsigned totalConvergenceCases(unsigned min_nodes, unsigned max_nodes,
+                                      unsigned num_orders = 3) {
     constexpr unsigned num_sources = 4;
-    constexpr unsigned num_orders  = 3;
     return num_sources * num_orders * countRefinementLevels(min_nodes, max_nodes);
+}
+
+inline unsigned maxLagrangeOrderForPreconditioner(const std::string& /*precon_type*/) {
+    return 3u;
 }
 
 inline void logStudyBanner(unsigned dim, unsigned quad_nodes, unsigned min_nodes,
                            unsigned max_nodes, const std::string& out_path,
-                           const char* domain_note) {
+                           const char* domain_note, unsigned num_orders = 3) {
     if (Comm->rank() != 0) {
         return;
     }
-    const unsigned total = totalConvergenceCases(min_nodes, max_nodes);
+    const unsigned total = totalConvergenceCases(min_nodes, max_nodes, num_orders);
     std::cout << "FEMPoissonSolver_wFEMContainer — " << dim << "D convergence study\n"
               << "  domain: " << domain_note << "\n"
               << "  GL quadrature order " << quad_nodes << ", nodes/axis " << min_nodes << " … "
               << max_nodes << " (" << countRefinementLevels(min_nodes, max_nodes)
               << " levels)\n"
-              << "  cases: " << total << " (= 4 sources × 3 orders × "
+              << "  cases: " << total << " (= 4 sources × " << num_orders << " orders × "
               << countRefinementLevels(min_nodes, max_nodes) << " meshes)\n"
               << "  output: " << out_path << "\n"
               << std::flush;
