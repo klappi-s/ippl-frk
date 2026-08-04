@@ -181,6 +181,28 @@ namespace ippl {
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    FEMContainer<T, Dim, EntityTypes, DOFNums> FEMContainer<T, Dim, EntityTypes, DOFNums>::operator/(T scalar) const {
+        FEMContainer<T, Dim, EntityTypes, DOFNums> result(*this);
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (([&]() {
+                std::get<Is>(result.data_m) = std::get<Is>(data_m) / scalar;
+            }()), ...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
+        return result;
+    }
+
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    FEMContainer<T, Dim, EntityTypes, DOFNums> FEMContainer<T, Dim, EntityTypes, DOFNums>::operator+(T scalar) const {
+        FEMContainer<T, Dim, EntityTypes, DOFNums> result(*this);
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (([&]() {
+                std::get<Is>(result.data_m) = std::get<Is>(data_m) + scalar;
+            }()), ...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
+        return result;
+    }
+
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     FEMContainer<T, Dim, EntityTypes, DOFNums> FEMContainer<T, Dim, EntityTypes, DOFNums>::operator-(T scalar) const {
         FEMContainer<T, Dim, EntityTypes, DOFNums> result(*this);
         // Subtract scalar from each field in the tuple

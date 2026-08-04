@@ -73,6 +73,154 @@ namespace ippl {
     // Functors for LagrangeSpace_wfc parallel operations
     // Must be defined at namespace scope for CUDA compatibility
 
+    template <typename T, unsigned Dim, unsigned Order, typename DOFHandlerType, typename ViewB, typename ViewA,
+              typename IndicesType, typename ElemIndicesView, typename MatrixType,
+              typename BCTypesArray, std::size_t DofStartA, std::size_t DofEndA,
+              std::size_t DofStartB, std::size_t DofEndB, std::size_t NumElementDOFs>
+    struct LagrangeEvaluateAxLowerFunctor {
+        DOFHandlerType dofHandler;
+        ElemIndicesView elemIndices;
+        ViewA viewBC;
+        ViewB view;
+        ViewA resultView;
+        MatrixType A_K;
+        BCTypesArray bcTypes;
+        IndicesType nr_m;
+        int nghost;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
+            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
+            const size_t elementIndex = elemIndices(index);
+            const IndicesType elementNDIndex = dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+            const IndicesType elementPos = dofHandler.getElementNDIndex(elementIndex);
+
+            Vector<size_t, NumElementDOFs> g_dofs(0);
+            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos, nr_m);
+
+            for (size_t i = DofStartA; i < DofEndA; ++i) {
+                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
+
+                if (bcTypes[0] == CONSTANT_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    Kokkos::atomic_store(
+                        &apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                        apply(viewBC, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF]);
+                    continue;
+                } else if (bcTypes[0] == ZERO_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    continue;
+                }
+
+                for (size_t j = DofStartB; j < DofEndB; ++j) {
+                    if (g_dofs[i] >= g_dofs[j]) continue;
+
+                    DOFMapping_t dofMap_j = dofHandler.getElementDOFMapping(j);
+                    if (((bcTypes[0] == CONSTANT_FACE) || (bcTypes[0] == ZERO_FACE)) && dofHandler.isDOFOnBoundary(elementIndex, j)) {
+                        continue;
+                    }
+
+                    T contrib = A_K[i][j] * apply(view, elementNDIndex + dofMap_j.entityLocalIndex)[dofMap_j.entityLocalDOF];
+                    Kokkos::atomic_add(&apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF], contrib);
+                }
+            }
+        }
+    };
+
+    template <typename T, unsigned Dim, unsigned Order, typename DOFHandlerType, typename ViewB, typename ViewA,
+              typename IndicesType, typename ElemIndicesView, typename MatrixType,
+              typename BCTypesArray, std::size_t DofStartA, std::size_t DofEndA,
+              std::size_t DofStartB, std::size_t DofEndB, std::size_t NumElementDOFs>
+    struct LagrangeEvaluateAxUpperFunctor {
+        DOFHandlerType dofHandler;
+        ElemIndicesView elemIndices;
+        ViewA viewBC;
+        ViewB view;
+        ViewA resultView;
+        MatrixType A_K;
+        BCTypesArray bcTypes;
+        IndicesType nr_m;
+        int nghost;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
+            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
+            const size_t elementIndex = elemIndices(index);
+            const IndicesType elementNDIndex = dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+            const IndicesType elementPos = dofHandler.getElementNDIndex(elementIndex);
+
+            Vector<size_t, NumElementDOFs> g_dofs(0);
+            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos, nr_m);
+
+            for (size_t i = DofStartA; i < DofEndA; ++i) {
+                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
+
+                if (bcTypes[0] == CONSTANT_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    Kokkos::atomic_store(
+                        &apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                        apply(viewBC, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF]);
+                    continue;
+                } else if (bcTypes[0] == ZERO_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    continue;
+                }
+
+                for (size_t j = DofStartB; j < DofEndB; ++j) {
+                    if (g_dofs[i] <= g_dofs[j]) continue;
+
+                    DOFMapping_t dofMap_j = dofHandler.getElementDOFMapping(j);
+                    if (((bcTypes[0] == CONSTANT_FACE) || (bcTypes[0] == ZERO_FACE)) && dofHandler.isDOFOnBoundary(elementIndex, j)) {
+                        continue;
+                    }
+
+                    T contrib = A_K[i][j] * apply(view, elementNDIndex + dofMap_j.entityLocalIndex)[dofMap_j.entityLocalDOF];
+                    Kokkos::atomic_add(&apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF], contrib);
+                }
+            }
+        }
+    };
+
+    template <typename T, typename DOFHandlerType, typename ViewB, typename ViewA,
+              typename IndicesType, typename ElemIndicesView, typename MatrixType,
+              typename BCTypesArray, std::size_t DofStartA, std::size_t DofEndA,
+              std::size_t DofStartB, std::size_t DofEndB>
+    struct LagrangeEvaluateAxUpperLowerFunctor {
+        DOFHandlerType dofHandler;
+        ElemIndicesView elemIndices;
+        ViewA viewBC;
+        ViewB view;
+        ViewA resultView;
+        MatrixType A_K;
+        BCTypesArray bcTypes;
+        int nghost;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
+            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
+            const size_t elementIndex = elemIndices(index);
+            const IndicesType elementNDIndex = dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+
+            for (size_t i = DofStartA; i < DofEndA; ++i) {
+                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
+
+                if (bcTypes[0] == CONSTANT_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    Kokkos::atomic_store(
+                        &apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                        apply(viewBC, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF]);
+                    continue;
+                } else if (bcTypes[0] == ZERO_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    continue;
+                }
+
+                for (size_t j = DofStartB; j < DofEndB; ++j) {
+                    if (i == j) continue;
+
+                    DOFMapping_t dofMap_j = dofHandler.getElementDOFMapping(j);
+                    if (((bcTypes[0] == CONSTANT_FACE) || (bcTypes[0] == ZERO_FACE)) && dofHandler.isDOFOnBoundary(elementIndex, j)) {
+                        continue;
+                    }
+
+                    T contrib = A_K[i][j] * apply(view, elementNDIndex + dofMap_j.entityLocalIndex)[dofMap_j.entityLocalDOF];
+                    Kokkos::atomic_add(&apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF], contrib);
+                }
+            }
+        }
+    };
+
     // Functor for evaluateAx_lift parallel_for loops
     template <typename T, typename DOFHandlerType, typename ViewB, typename ViewA,
               typename IndicesType, typename ElemIndicesView, typename MatrixType,
@@ -127,11 +275,60 @@ namespace ippl {
         }
     };
 
-    // Functor for evaluateAx_diag: accumulates only the diagonal A_K[i][i] per DOF.
-    template <typename T, typename DOFHandlerType, typename ViewA,
+    // Functor for evaluateAx_diag: accumulates A_K[i][i] * x_i (D*x), matching Track A.
+    template <typename T, typename DOFHandlerType, typename ViewA, typename ViewIn,
               typename IndicesType, typename ElemIndicesView, typename MatrixType,
               typename BCTypesArray, std::size_t DofStart, std::size_t DofEnd>
     struct LagrangeEvaluateAxDiagFunctor {
+        DOFHandlerType dofHandler;
+        ElemIndicesView elemIndices;
+        ViewA resultView;
+        ViewIn inputView;
+        MatrixType A_K;
+        BCTypesArray bcTypes;
+        int nghost;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
+            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
+
+            const size_t elementIndex = elemIndices(index);
+            const IndicesType elementNDIndex =
+                dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+
+            for (size_t i = DofStart; i < DofEnd; ++i) {
+                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
+
+                if ((bcTypes[0] == ZERO_FACE || bcTypes[0] == CONSTANT_FACE)
+                    && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    // Boundary: identity contribution (D=1) * x for CONSTANT; skip ZERO
+                    if (bcTypes[0] == CONSTANT_FACE) {
+                        Kokkos::atomic_store(
+                            &apply(resultView,
+                                   elementNDIndex
+                                       + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                            apply(inputView,
+                                  elementNDIndex
+                                      + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF]);
+                    }
+                    continue;
+                }
+
+                const T x_i = apply(inputView,
+                                    elementNDIndex
+                                        + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF];
+                Kokkos::atomic_add(
+                    &apply(resultView,
+                           elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
+                    A_K[i][i] * x_i);
+            }
+        }
+    };
+
+    // Functor for assembling the pure diagonal entries A_ii (used by evaluateAx_inversediag).
+    template <typename T, typename DOFHandlerType, typename ViewA,
+              typename IndicesType, typename ElemIndicesView, typename MatrixType,
+              typename BCTypesArray, std::size_t DofStart, std::size_t DofEnd>
+    struct LagrangeEvaluateAxDiagEntriesFunctor {
         DOFHandlerType dofHandler;
         ElemIndicesView elemIndices;
         ViewA resultView;
@@ -151,7 +348,6 @@ namespace ippl {
 
                 if ((bcTypes[0] == ZERO_FACE || bcTypes[0] == CONSTANT_FACE)
                     && dofHandler.isDOFOnBoundary(elementIndex, i)) {
-                    // Boundary DOFs: set diagonal to 1 (safe for division)
                     Kokkos::atomic_store(
                         &apply(resultView,
                                elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
@@ -159,7 +355,6 @@ namespace ippl {
                     continue;
                 }
 
-                // Accumulate only the diagonal contribution A_K[i][i]
                 Kokkos::atomic_add(
                     &apply(resultView,
                            elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
@@ -918,8 +1113,8 @@ namespace ippl {
         return resultField;
     }
 
-    // evaluateAx_diag: computes diagonal of stiffness matrix as a FieldLHS.
-    // Interior DOFs accumulate A_K[i][i]; boundary DOFs are set to 1 (safe for Jacobi division).
+    // evaluateAx_diag: computes D*x (diagonal of stiffness applied to field), matching Track A.
+    // Interior DOFs accumulate A_K[i][i]*x_i; CONSTANT boundary uses identity; ZERO skips.
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,
               typename QuadratureType, typename FieldLHS, typename FieldRHS>
     template <typename F>
@@ -967,7 +1162,7 @@ namespace ippl {
         auto dofHandler  = dofHandler_m;
         auto elemIndices = elementIndices;
 
-        // For each entity type, scatter the diagonal A_K[i][i] contributions
+        // For each entity type, scatter A_K[i][i] * x_i (D*x)
         auto processEntityType = [&]<typename EntityType>() {
             constexpr size_t dofStart = DOFHandler_t::template getEntityDOFStart<EntityType>();
             constexpr size_t dofEnd   = DOFHandler_t::template getEntityDOFEnd<EntityType>();
@@ -975,17 +1170,18 @@ namespace ippl {
             using ViewType_a = std::remove_cv_t<
                 std::remove_reference_t<decltype(diagField.template getView<EntityType>())>>;
             ViewType_a resultView = diagField.template getView<EntityType>();
+            ViewType_a inputView  = field.template getView<EntityType>();
 
             using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
             using policy_type = Kokkos::RangePolicy<exec_space>;
 
             using functor_t = LagrangeEvaluateAxDiagFunctor<
-                T, decltype(dofHandler), ViewType_a, indices_t, decltype(elemIndices),
+                T, decltype(dofHandler), ViewType_a, ViewType_a, indices_t, decltype(elemIndices),
                 decltype(A_K), decltype(bcTypes), dofStart, dofEnd>;
 
             Kokkos::parallel_for(
-                "evaluateAx_diag: scatter diagonal", policy_type(0, elemIndices.extent(0)),
-                functor_t{dofHandler, elemIndices, resultView, A_K, bcTypes, nghost});
+                "evaluateAx_diag: scatter D*x", policy_type(0, elemIndices.extent(0)),
+                functor_t{dofHandler, elemIndices, resultView, inputView, A_K, bcTypes, nghost});
         };
 
         constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
@@ -1649,5 +1845,392 @@ namespace ippl {
 
         return vertex_indices;
     };
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::evaluateAx_lower(FieldLHS& field, F& evalFunction) const {
+        static IpplTimings::TimerRef evalAx_lower_timer = IpplTimings::getTimer("evaluateAx_lower");
+        IpplTimings::startTimer(evalAx_lower_timer);
+
+        const int nghost = field.getNghost();
+        FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
+        resultField = T(0);
+
+        const Vector<T, QuadratureType::numElementNodes> w = this->quadrature_m.getWeightsForRefElement();
+        const Vector<point_t, QuadratureType::numElementNodes> q = this->quadrature_m.getIntegrationNodesForRefElement();
+
+        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
+        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+            for (size_t i = 0; i < numElementDOFs; ++i) {
+                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
+            }
+        }
+
+        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
+        for (size_t i = 0; i < numElementDOFs; ++i) {
+            for (size_t j = 0; j < numElementDOFs; ++j) {
+                A_K[i][j] = T(0);
+                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                }
+            }
+        }
+
+        const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
+        FieldBC bcType = bcTypes[0];
+
+        auto dofHandler  = dofHandler_m;
+        auto elemIndices = elementIndices;
+        auto nr          = this->nr_m;
+
+        auto processEntityTypes = [&]<typename EntityTypeA, typename EntityTypeB>() {
+            constexpr size_t dofStartA = DOFHandler_t::template getEntityDOFStart<EntityTypeA>();
+            constexpr size_t dofEndA   = DOFHandler_t::template getEntityDOFEnd<EntityTypeA>();
+            constexpr size_t dofStartB = DOFHandler_t::template getEntityDOFStart<EntityTypeB>();
+            constexpr size_t dofEndB   = DOFHandler_t::template getEntityDOFEnd<EntityTypeB>();
+
+            using ViewType_a = std::remove_cv_t<std::remove_reference_t<decltype(resultField.template getView<EntityTypeA>())>>;
+            using ViewType_b = std::remove_cv_t<std::remove_reference_t<decltype(field.template getView<EntityTypeB>())>>;
+            ViewType_a resultView_a = resultField.template getView<EntityTypeA>();
+            ViewType_a viewBC_a     = field.template getView<EntityTypeA>();
+            ViewType_b inputView_b  = field.template getView<EntityTypeB>();
+
+            using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
+            using policy_type = Kokkos::RangePolicy<exec_space>;
+
+            using functor_t = LagrangeEvaluateAxLowerFunctor<
+                T, Dim, Order, decltype(dofHandler), ViewType_b, ViewType_a, indices_t, decltype(elemIndices),
+                decltype(A_K), decltype(bcTypes), dofStartA, dofEndA, dofStartB, dofEndB, numElementDOFs>;
+
+            Kokkos::parallel_for(
+                "evaluateAx_lower: compute", policy_type(0, elemIndices.extent(0)),
+                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nr, nghost});
+        };
+
+        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            ([&]<size_t I_idx>() {
+                [&]<size_t... Js>(std::index_sequence<Js...>) {
+                    ([&]() {
+                        using EntityTypeA = std::tuple_element_t<I_idx, typename DOFHandler_t::EntityTypes>;
+                        using EntityTypeB = std::tuple_element_t<Js, typename DOFHandler_t::EntityTypes>;
+                        processEntityTypes.template operator()<EntityTypeA, EntityTypeB>();
+                    }(), ...);
+                }(std::make_index_sequence<numTypes>{});
+            }.template operator()<Is>(), ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        if (bcType == PERIODIC_FACE) {
+            resultField.accumulateHalo();
+            resultField.applyBC();
+            resultField.assignGhostToPhysical();
+        } else {
+            resultField.accumulateHalo_noghost();
+        }
+
+        IpplTimings::stopTimer(evalAx_lower_timer);
+        return resultField;
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::evaluateAx_upper(FieldLHS& field, F& evalFunction) const {
+        static IpplTimings::TimerRef evalAx_upper_timer = IpplTimings::getTimer("evaluateAx_upper");
+        IpplTimings::startTimer(evalAx_upper_timer);
+
+        const int nghost = field.getNghost();
+        FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
+        resultField = T(0);
+
+        const Vector<T, QuadratureType::numElementNodes> w = this->quadrature_m.getWeightsForRefElement();
+        const Vector<point_t, QuadratureType::numElementNodes> q = this->quadrature_m.getIntegrationNodesForRefElement();
+
+        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
+        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+            for (size_t i = 0; i < numElementDOFs; ++i) {
+                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
+            }
+        }
+
+        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
+        for (size_t i = 0; i < numElementDOFs; ++i) {
+            for (size_t j = 0; j < numElementDOFs; ++j) {
+                A_K[i][j] = T(0);
+                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                }
+            }
+        }
+
+        const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
+        FieldBC bcType = bcTypes[0];
+
+        auto dofHandler  = dofHandler_m;
+        auto elemIndices = elementIndices;
+        auto nr          = this->nr_m;
+
+        auto processEntityTypes = [&]<typename EntityTypeA, typename EntityTypeB>() {
+            constexpr size_t dofStartA = DOFHandler_t::template getEntityDOFStart<EntityTypeA>();
+            constexpr size_t dofEndA   = DOFHandler_t::template getEntityDOFEnd<EntityTypeA>();
+            constexpr size_t dofStartB = DOFHandler_t::template getEntityDOFStart<EntityTypeB>();
+            constexpr size_t dofEndB   = DOFHandler_t::template getEntityDOFEnd<EntityTypeB>();
+
+            using ViewType_a = std::remove_cv_t<std::remove_reference_t<decltype(resultField.template getView<EntityTypeA>())>>;
+            using ViewType_b = std::remove_cv_t<std::remove_reference_t<decltype(field.template getView<EntityTypeB>())>>;
+            ViewType_a resultView_a = resultField.template getView<EntityTypeA>();
+            ViewType_a viewBC_a     = field.template getView<EntityTypeA>();
+            ViewType_b inputView_b  = field.template getView<EntityTypeB>();
+
+            using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
+            using policy_type = Kokkos::RangePolicy<exec_space>;
+
+            using functor_t = LagrangeEvaluateAxUpperFunctor<
+                T, Dim, Order, decltype(dofHandler), ViewType_b, ViewType_a, indices_t, decltype(elemIndices),
+                decltype(A_K), decltype(bcTypes), dofStartA, dofEndA, dofStartB, dofEndB, numElementDOFs>;
+
+            Kokkos::parallel_for(
+                "evaluateAx_upper: compute", policy_type(0, elemIndices.extent(0)),
+                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nr, nghost});
+        };
+
+        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            ([&]<size_t I_idx>() {
+                [&]<size_t... Js>(std::index_sequence<Js...>) {
+                    ([&]() {
+                        using EntityTypeA = std::tuple_element_t<I_idx, typename DOFHandler_t::EntityTypes>;
+                        using EntityTypeB = std::tuple_element_t<Js, typename DOFHandler_t::EntityTypes>;
+                        processEntityTypes.template operator()<EntityTypeA, EntityTypeB>();
+                    }(), ...);
+                }(std::make_index_sequence<numTypes>{});
+            }.template operator()<Is>(), ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        if (bcType == PERIODIC_FACE) {
+            resultField.accumulateHalo();
+            resultField.applyBC();
+            resultField.assignGhostToPhysical();
+        } else {
+            resultField.accumulateHalo_noghost();
+        }
+
+        IpplTimings::stopTimer(evalAx_upper_timer);
+        return resultField;
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::evaluateAx_upperlower(FieldLHS& field, F& evalFunction) const {
+        static IpplTimings::TimerRef evalAx_upperlower_timer = IpplTimings::getTimer("evaluateAx_upperlower");
+        IpplTimings::startTimer(evalAx_upperlower_timer);
+
+        const int nghost = field.getNghost();
+        FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
+        resultField = T(0);
+
+        const Vector<T, QuadratureType::numElementNodes> w = this->quadrature_m.getWeightsForRefElement();
+        const Vector<point_t, QuadratureType::numElementNodes> q = this->quadrature_m.getIntegrationNodesForRefElement();
+
+        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
+        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+            for (size_t i = 0; i < numElementDOFs; ++i) {
+                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
+            }
+        }
+
+        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
+        for (size_t i = 0; i < numElementDOFs; ++i) {
+            for (size_t j = 0; j < numElementDOFs; ++j) {
+                A_K[i][j] = T(0);
+                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                }
+            }
+        }
+
+        const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
+        FieldBC bcType = bcTypes[0];
+
+        auto dofHandler  = dofHandler_m;
+        auto elemIndices = elementIndices;
+
+        auto processEntityTypes = [&]<typename EntityTypeA, typename EntityTypeB>() {
+            constexpr size_t dofStartA = DOFHandler_t::template getEntityDOFStart<EntityTypeA>();
+            constexpr size_t dofEndA   = DOFHandler_t::template getEntityDOFEnd<EntityTypeA>();
+            constexpr size_t dofStartB = DOFHandler_t::template getEntityDOFStart<EntityTypeB>();
+            constexpr size_t dofEndB   = DOFHandler_t::template getEntityDOFEnd<EntityTypeB>();
+
+            using ViewType_a = std::remove_cv_t<std::remove_reference_t<decltype(resultField.template getView<EntityTypeA>())>>;
+            using ViewType_b = std::remove_cv_t<std::remove_reference_t<decltype(field.template getView<EntityTypeB>())>>;
+            ViewType_a resultView_a = resultField.template getView<EntityTypeA>();
+            ViewType_a viewBC_a     = field.template getView<EntityTypeA>();
+            ViewType_b inputView_b  = field.template getView<EntityTypeB>();
+
+            using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
+            using policy_type = Kokkos::RangePolicy<exec_space>;
+
+            using functor_t = LagrangeEvaluateAxUpperLowerFunctor<
+                T, decltype(dofHandler), ViewType_b, ViewType_a, indices_t, decltype(elemIndices),
+                decltype(A_K), decltype(bcTypes), dofStartA, dofEndA, dofStartB, dofEndB>;
+
+            Kokkos::parallel_for(
+                "evaluateAx_upperlower: compute", policy_type(0, elemIndices.extent(0)),
+                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nghost});
+        };
+
+        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            ([&]<size_t I_idx>() {
+                [&]<size_t... Js>(std::index_sequence<Js...>) {
+                    ([&]() {
+                        using EntityTypeA = std::tuple_element_t<I_idx, typename DOFHandler_t::EntityTypes>;
+                        using EntityTypeB = std::tuple_element_t<Js, typename DOFHandler_t::EntityTypes>;
+                        processEntityTypes.template operator()<EntityTypeA, EntityTypeB>();
+                    }(), ...);
+                }(std::make_index_sequence<numTypes>{});
+            }.template operator()<Is>(), ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        if (bcType == PERIODIC_FACE) {
+            resultField.accumulateHalo();
+            resultField.applyBC();
+            resultField.assignGhostToPhysical();
+        } else {
+            resultField.accumulateHalo_noghost();
+        }
+
+        IpplTimings::stopTimer(evalAx_upperlower_timer);
+        return resultField;
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::evaluateAx_inversediag(FieldLHS& field, F& evalFunction) const {
+        static IpplTimings::TimerRef evalAx_inversediag_timer = IpplTimings::getTimer("evaluateAx_inversediag");
+        IpplTimings::startTimer(evalAx_inversediag_timer);
+
+        // Assemble pure diagonal entries A_ii (not D*x), then apply D^{-1}*x.
+        const int nghost = field.getNghost();
+        FieldLHS diagField(field.get_mesh(), field.getLayout(), nghost);
+        diagField = T(0);
+
+        const Vector<T, QuadratureType::numElementNodes> w =
+            this->quadrature_m.getWeightsForRefElement();
+        const Vector<point_t, QuadratureType::numElementNodes> q =
+            this->quadrature_m.getIntegrationNodesForRefElement();
+
+        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
+        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
+        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+            for (size_t i = 0; i < numElementDOFs; ++i) {
+                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
+                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
+            }
+        }
+
+        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
+        for (size_t i = 0; i < numElementDOFs; ++i) {
+            for (size_t j = 0; j < numElementDOFs; ++j) {
+                A_K[i][j] = T(0);
+                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
+                    A_K[i][j] += w[k] * evalFunction(
+                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                }
+            }
+        }
+
+        const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
+        auto dofHandler  = dofHandler_m;
+        auto elemIndices = elementIndices;
+
+        auto assembleDiagEntries = [&]<typename EntityType>() {
+            constexpr size_t dofStart = DOFHandler_t::template getEntityDOFStart<EntityType>();
+            constexpr size_t dofEnd   = DOFHandler_t::template getEntityDOFEnd<EntityType>();
+
+            using ViewType_a = std::remove_cv_t<
+                std::remove_reference_t<decltype(diagField.template getView<EntityType>())>>;
+            ViewType_a resultView = diagField.template getView<EntityType>();
+
+            using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
+            using policy_type = Kokkos::RangePolicy<exec_space>;
+
+            using functor_t = LagrangeEvaluateAxDiagEntriesFunctor<
+                T, decltype(dofHandler), ViewType_a, indices_t, decltype(elemIndices),
+                decltype(A_K), decltype(bcTypes), dofStart, dofEnd>;
+
+            Kokkos::parallel_for(
+                "evaluateAx_inversediag: assemble A_ii", policy_type(0, elemIndices.extent(0)),
+                functor_t{dofHandler, elemIndices, resultView, A_K, bcTypes, nghost});
+        };
+
+        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            ([&] {
+                using EntityTypeA = std::tuple_element_t<Is, typename DOFHandler_t::EntityTypes>;
+                assembleDiagEntries.template operator()<EntityTypeA>();
+            }(), ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        diagField.accumulateHalo();
+
+        FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
+        resultField = T(0);
+
+        auto applyInvDiag = [&]<typename EntityTypeA>() {
+            using ViewType_a = std::remove_cv_t<
+                std::remove_reference_t<decltype(resultField.template getView<EntityTypeA>())>>;
+            ViewType_a resultView_a = resultField.template getView<EntityTypeA>();
+            ViewType_a diagView_a   = diagField.template getView<EntityTypeA>();
+            ViewType_a inputView_a  = field.template getView<EntityTypeA>();
+
+            constexpr unsigned numDOFs =
+                DOFHandler_t::SpaceTraits::template entityDOFCount<EntityTypeA>();
+
+            using exec_space  = typename ViewType_a::execution_space;
+            using policy_type = Kokkos::RangePolicy<exec_space>;
+            size_t size       = resultView_a.size();
+
+            Kokkos::parallel_for(
+                "evaluateAx_inversediag: apply D^{-1}*x", policy_type(0, size),
+                KOKKOS_LAMBDA(const size_t idx) {
+                    for (unsigned i = 0; i < numDOFs; ++i) {
+                        T d    = inputView_a.data()[idx][i];
+                        T diag = diagView_a.data()[idx][i];
+                        if (diag != T(0)) {
+                            resultView_a.data()[idx][i] = (T(1) / diag) * d;
+                        } else {
+                            resultView_a.data()[idx][i] = T(0);
+                        }
+                    }
+                });
+        };
+
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            ([&]<size_t I_idx>() {
+                using EntityTypeA = std::tuple_element_t<I_idx, typename DOFHandler_t::EntityTypes>;
+                applyInvDiag.template operator()<EntityTypeA>();
+            }.template operator()<Is>(), ...);
+        }(std::make_index_sequence<numTypes>{});
+
+        IpplTimings::stopTimer(evalAx_inversediag_timer);
+        return resultField;
+    }
 
 }  // namespace ippl

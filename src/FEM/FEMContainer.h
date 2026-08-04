@@ -86,9 +86,18 @@ namespace ippl {
 
         FEMContainer<T, Dim, EntityTypes, DOFNums> deepCopy() const;
 
+        void deepCopyFrom(const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) {
+            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                ((Kokkos::deep_copy(std::get<Is>(this->data_m).getView(), std::get<Is>(other.data_m).getView())), ...);
+            }(std::make_index_sequence<NEntitys>{});
+        }
+
         FEMContainer<T, Dim, EntityTypes, DOFNums>& operator=(T value);
         FEMContainer<T, Dim, EntityTypes, DOFNums>& operator=(
             const FEMContainer<T, Dim, EntityTypes, DOFNums>& other);
+
+        // Required by preconditioners but typically a no-op for statically partitioned FEMContainers
+        void updateLayout(const Layout_t& /*layout*/) {}
 
         FEMContainer<T, Dim, EntityTypes, DOFNums>& operator+=(T value);
         FEMContainer<T, Dim, EntityTypes, DOFNums>& operator+=(
