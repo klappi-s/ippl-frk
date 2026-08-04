@@ -4,16 +4,15 @@
 // It ensures that the sub-region is partitioned in the same way as the original FieldLayout,
 // maintaining consistent parallel decomposition and neighbor relationships within the sub-region.
 //
-#include "Ippl.h"
+#ifndef IPPL_SUB_FIELD_LAYOUT_HPP
+#define IPPL_SUB_FIELD_LAYOUT_HPP
 
-#include <cstdlib>
-#include <limits>
-
-#include "Utility/IpplException.h"
-#include "Utility/IpplTimings.h"
-#include "Utility/PAssert.h"
-
+// clang-format off
+#ifndef IPPL_SUB_FIELD_LAYOUT_H
+// HACK: cyclic anitpattern, but necessary for proper LSP markup
 #include "FieldLayout/SubFieldLayout.h"
+#endif
+// clang-format on
 
 namespace ippl {
 
@@ -107,7 +106,7 @@ namespace ippl {
             this->hLocalDomains_m(rank) = this->hLocalDomains_m(rank).intersect(this->gDomain_m);
         }
 
-        this->findNeighbors();
+        this->findNeighbors(this->nghost_m);
 
         Kokkos::deep_copy(this->dLocalDomains_m, this->hLocalDomains_m);
 
@@ -132,3 +131,5 @@ namespace ippl {
     }
 
 }  // namespace ippl
+
+#endif  // IPPL_SUB_FIELD_LAYOUT_HPP

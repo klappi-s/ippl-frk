@@ -57,7 +57,7 @@ namespace ippl {
              * @param view the original field data
              * @param layout the field layout storing the domain decomposition
              */
-            void accumulateHalo(view_type& view, Layout_t* layout);
+            void accumulateHalo(view_type& view, Layout_t* layout, int nghost);
 
             /*!
              * Send halo data to internal cells for only the physical cells
@@ -75,7 +75,7 @@ namespace ippl {
              * @param view the original field data
              * @param layout the field layout storing the domain decomposition
              */
-            void fillHalo(view_type&, Layout_t* layout);
+            void fillHalo(view_type&, Layout_t* layout, int nghost);
 
 
             // ====== FEMContainer : begin ======
@@ -176,7 +176,8 @@ namespace ippl {
              * unpack function call
              */
             template <class Op>
-            void exchangeBoundaries(view_type& view, Layout_t* layout, SendOrder order, int nghost = 1);
+            void exchangeBoundaries(view_type& view, Layout_t* layout, SendOrder order,
+                                    int nghost);
 
 
             // ====== FEMContainer : begin ======
