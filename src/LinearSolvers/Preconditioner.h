@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Expression/IpplOperations.h"  // get the function apply()
+#include "Utility/ViewUtils.h"
 
 // Expands to a lambda that acts as a wrapper for a differential operator
 // fun: the function for which to create the wrapper, such as ippl::laplace
