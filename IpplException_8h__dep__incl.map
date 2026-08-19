@@ -1,52 +1,52 @@
 <map id="IpplException.h" name="IpplException.h">
-<area shape="rect" id="node1" title=" " alt="" coords="1643,5,1752,31"/>
-<area shape="rect" id="node2" href="$BcTypes_8hpp.html" title=" " alt="" coords="2041,592,2138,617"/>
-<area shape="rect" id="node4" href="$CuFFTMp_8h.html" title="Multi&#45;node cuFFTMp wrappers for IPPL FFT transforms." alt="" coords="5,665,96,691"/>
-<area shape="rect" id="node5" href="$DataTypes_8h.html" title=" " alt="" coords="1383,79,1478,104"/>
-<area shape="rect" id="node11" href="$FFTOpenPoissonSolver_8h.html" title=" " alt="" coords="1817,819,1988,845"/>
-<area shape="rect" id="node15" href="$NUFFT_8h.html" title="Non&#45;uniform FFT specialization (NUFFTransform tag)." alt="" coords="1067,819,1143,845"/>
-<area shape="rect" id="node24" href="$HaloCells_8hpp.html" title=" " alt="" coords="1697,445,1799,471"/>
-<area shape="rect" id="node27" href="$ParallelDispatch_8h.html" title=" " alt="" coords="1443,372,1570,397"/>
-<area shape="rect" id="node36" href="$FieldLayout_8cpp.html" title=" " alt="" coords="1641,79,1754,104"/>
-<area shape="rect" id="node37" href="$FiniteElementSpace_8h.html" title=" " alt="" coords="2001,152,2149,177"/>
-<area shape="rect" id="node40" href="$Gather_8h.html" title="Public Gather facade dispatching to AtomicGather (sorted/unsorted)." alt="" coords="1315,665,1386,691"/>
-<area shape="rect" id="node41" href="$ParameterList_8h.html" title=" " alt="" coords="827,592,941,617"/>
-<area shape="rect" id="node44" href="$PreconditionerValidation_8h.html" title=" " alt="" coords="1454,739,1626,764"/>
-<area shape="rect" id="node45" href="$Quadrature_8h.html" title=" " alt="" coords="2147,79,2243,104"/>
-<area shape="rect" id="node48" href="$TypeUtils_8h.html" title=" " alt="" coords="1825,152,1911,177"/>
-<area shape="rect" id="node50" href="$Window_8hpp.html" title=" " alt="" coords="2590,79,2682,104"/>
-<area shape="rect" id="node3" href="$BcTypes_8h.html" title=" " alt="" coords="2048,665,2131,691"/>
-<area shape="rect" id="node6" href="$BareField_8hpp.html" title=" " alt="" coords="1595,519,1696,544"/>
-<area shape="rect" id="node21" href="$Collectives_8hpp.html" title=" " alt="" coords="1195,152,1306,177"/>
-<area shape="rect" id="node35" href="$ParticleAttrib_8hpp.html" title=" " alt="" coords="1195,372,1317,397"/>
-<area shape="rect" id="node7" href="$BareField_8h.html" title=" " alt="" coords="1602,592,1689,617"/>
-<area shape="rect" id="node8" href="$BareFieldOperations_8hpp.html" title=" " alt="" coords="1563,665,1727,691"/>
-<area shape="rect" id="node9" href="$Field_8h.html" title=" " alt="" coords="1751,665,1811,691"/>
-<area shape="rect" id="node20" href="$Heffte_8h.html" title=" " alt="" coords="1123,665,1189,691"/>
-<area shape="rect" id="node10" href="$AutoTune_8cpp.html" title="Width&#45;2 (CIC) scatter / gather auto&#45;tuner implementation." alt="" coords="1753,739,1855,764"/>
-<area shape="rect" id="node13" href="$Maxwell_8h.html" title=" " alt="" coords="1066,739,1145,764"/>
-<area shape="rect" id="node14" href="$NativeNUFFT_8h.html" title=" " alt="" coords="1315,739,1429,764"/>
-<area shape="rect" id="node17" href="$Poisson_8h.html" title=" " alt="" coords="1650,739,1729,764"/>
-<area shape="rect" id="node12" href="$datatypes_8h.html" title=" " alt="" coords="1657,900,1745,925"/>
-<area shape="rect" id="node16" href="$Transform_8h.html" title="Aggregate include of all IPPL FFT transform specializations." alt="" coords="343,900,433,925"/>
-<area shape="rect" id="node18" href="$PoissonCG_8h.html" title=" " alt="" coords="1487,819,1585,845"/>
-<area shape="rect" id="node19" href="$PreconditionedFEMPoissonSolver_8h.html" title=" " alt="" coords="1610,812,1793,852"/>
-<area shape="rect" id="node22" href="$Communicator_8h.html" title=" " alt="" coords="943,225,1059,251"/>
-<area shape="rect" id="node23" href="$CC_8h.html" title="Complex&#45;to&#45;complex FFT specialization (CCTransform tag)." alt="" coords="440,665,491,691"/>
-<area shape="rect" id="node26" href="$Ippl_8h.html" title=" " alt="" coords="1381,299,1435,324"/>
-<area shape="rect" id="node29" href="$PrunedCC_8h.html" title="Pruned complex&#45;to&#45;complex FFT (PrunedCCTransform tag)." alt="" coords="275,665,365,691"/>
-<area shape="rect" id="node30" href="$PrunedRC_8h.html" title="Pruned real&#45;to&#45;complex FFT (PrunedRCTransform tag)." alt="" coords="707,665,797,691"/>
-<area shape="rect" id="node31" href="$RC_8h.html" title="Real&#45;to&#45;complex FFT specialization (RCTransform tag)." alt="" coords="120,665,171,691"/>
-<area shape="rect" id="node32" href="$Trig_8h.html" title="Trigonometric (sine / cosine / cosine&#45;Type&#45;I) FFT specializations." alt="" coords="195,665,250,691"/>
-<area shape="rect" id="node25" href="$HaloCells_8h.html" title=" " alt="" coords="1976,519,2064,544"/>
-<area shape="rect" id="node34" href="$ParticleSpatialLayout_8hpp.html" title=" " alt="" coords="1249,445,1418,471"/>
-<area shape="rect" id="node28" href="$Common_8h.html" title="Helpers shared by the FFT transform wrappers." alt="" coords="667,592,751,617"/>
-<area shape="rect" id="node33" href="$Correction_8h.html" title="Deconvolution / pre&#45;correction kernels for the native NUFFT engine." alt="" coords="1379,519,1469,544"/>
-<area shape="rect" id="node38" href="$LagrangeSpace_8h.html" title=" " alt="" coords="2027,225,2149,251"/>
-<area shape="rect" id="node39" href="$NedelecSpace_8h.html" title=" " alt="" coords="2173,225,2291,251"/>
-<area shape="rect" id="node42" href="$ParticleInteractionBase_8h.html" title=" " alt="" coords="515,665,682,691"/>
-<area shape="rect" id="node43" href="$SolverAlgorithm_8h.html" title=" " alt="" coords="822,665,946,691"/>
-<area shape="rect" id="node46" href="$GaussJacobiQuadrature_8h.html" title=" " alt="" coords="2173,152,2345,177"/>
-<area shape="rect" id="node47" href="$MidpointQuadrature_8h.html" title=" " alt="" coords="2369,152,2514,177"/>
-<area shape="rect" id="node49" href="$ParticleBase_8h.html" title=" " alt="" coords="1925,299,2032,324"/>
+<area shape="rect" id="node1" title=" " alt="" coords="1620,5,1729,31"/>
+<area shape="rect" id="node2" href="$BcTypes_8hpp.html" title=" " alt="" coords="603,599,701,625"/>
+<area shape="rect" id="node4" href="$CuFFTMp_8h.html" title="Multi&#45;node cuFFTMp wrappers for IPPL FFT transforms." alt="" coords="504,519,595,544"/>
+<area shape="rect" id="node5" href="$DataTypes_8h.html" title=" " alt="" coords="1499,79,1594,104"/>
+<area shape="rect" id="node14" href="$HaloCells_8hpp.html" title=" " alt="" coords="1002,445,1105,471"/>
+<area shape="rect" id="node16" href="$FFTOpenPoissonSolver_8h.html" title=" " alt="" coords="387,599,557,625"/>
+<area shape="rect" id="node21" href="$ParallelDispatch_8h.html" title=" " alt="" coords="1782,372,1909,397"/>
+<area shape="rect" id="node23" href="$NUFFT_8h.html" title="Non&#45;uniform FFT specialization (NUFFTransform tag)." alt="" coords="1910,599,1986,625"/>
+<area shape="rect" id="node32" href="$FieldLayout_8cpp.html" title=" " alt="" coords="1618,79,1731,104"/>
+<area shape="rect" id="node33" href="$FiniteElementSpace_8h.html" title=" " alt="" coords="2837,152,2985,177"/>
+<area shape="rect" id="node36" href="$Gather_8h.html" title="Public Gather facade dispatching to AtomicGather (sorted/unsorted)." alt="" coords="2090,299,2161,324"/>
+<area shape="rect" id="node37" href="$ParameterList_8h.html" title=" " alt="" coords="1129,445,1244,471"/>
+<area shape="rect" id="node44" href="$PreconditionerValidation_8h.html" title=" " alt="" coords="103,519,275,544"/>
+<area shape="rect" id="node45" href="$Quadrature_8h.html" title=" " alt="" coords="2401,79,2497,104"/>
+<area shape="rect" id="node49" href="$TypeUtils_8h.html" title=" " alt="" coords="1726,152,1813,177"/>
+<area shape="rect" id="node50" href="$Window_8hpp.html" title=" " alt="" coords="2573,79,2665,104"/>
+<area shape="rect" id="node3" href="$BcTypes_8h.html" title=" " alt="" coords="611,687,693,713"/>
+<area shape="rect" id="node6" href="$BareField_8hpp.html" title=" " alt="" coords="1683,519,1784,544"/>
+<area shape="rect" id="node10" href="$Collectives_8hpp.html" title=" " alt="" coords="1393,152,1503,177"/>
+<area shape="rect" id="node31" href="$ParticleAttrib_8hpp.html" title=" " alt="" coords="1585,372,1706,397"/>
+<area shape="rect" id="node7" href="$BareField_8h.html" title=" " alt="" coords="1690,599,1777,625"/>
+<area shape="rect" id="node8" href="$BareFieldOperations_8hpp.html" title=" " alt="" coords="1866,687,2030,713"/>
+<area shape="rect" id="node9" href="$Heffte_8h.html" title=" " alt="" coords="1259,687,1325,713"/>
+<area shape="rect" id="node11" href="$Communicator_8h.html" title=" " alt="" coords="1385,225,1501,251"/>
+<area shape="rect" id="node12" href="$CC_8h.html" title="Complex&#45;to&#45;complex FFT specialization (CCTransform tag)." alt="" coords="1339,519,1389,544"/>
+<area shape="rect" id="node19" href="$Ippl_8h.html" title=" " alt="" coords="1768,299,1821,324"/>
+<area shape="rect" id="node24" href="$PrunedCC_8h.html" title="Pruned complex&#45;to&#45;complex FFT (PrunedCCTransform tag)." alt="" coords="1224,519,1315,544"/>
+<area shape="rect" id="node25" href="$PrunedRC_8h.html" title="Pruned real&#45;to&#45;complex FFT (PrunedRCTransform tag)." alt="" coords="1488,519,1579,544"/>
+<area shape="rect" id="node26" href="$RC_8h.html" title="Real&#45;to&#45;complex FFT specialization (RCTransform tag)." alt="" coords="1413,519,1464,544"/>
+<area shape="rect" id="node27" href="$Trig_8h.html" title="Trigonometric (sine / cosine / cosine&#45;Type&#45;I) FFT specializations." alt="" coords="1603,519,1658,544"/>
+<area shape="rect" id="node13" href="$Transform_8h.html" title="Aggregate include of all IPPL FFT transform specializations." alt="" coords="1449,687,1540,713"/>
+<area shape="rect" id="node15" href="$HaloCells_8h.html" title=" " alt="" coords="619,519,707,544"/>
+<area shape="rect" id="node17" href="$FFTTruncatedGreenPeriodicPoissonSolver_8h.html" title=" " alt="" coords="256,680,443,720"/>
+<area shape="rect" id="node18" href="$datatypes_8h.html" title=" " alt="" coords="240,768,328,793"/>
+<area shape="rect" id="node20" href="$AutoTune_8cpp.html" title="Width&#45;2 (CIC) scatter / gather auto&#45;tuner implementation." alt="" coords="1985,372,2087,397"/>
+<area shape="rect" id="node30" href="$ParticleSpatialLayout_8hpp.html" title=" " alt="" coords="1682,445,1851,471"/>
+<area shape="rect" id="node22" href="$Common_8h.html" title="Helpers shared by the FFT transform wrappers." alt="" coords="1471,445,1555,471"/>
+<area shape="rect" id="node28" href="$Correction_8h.html" title="Deconvolution / pre&#45;correction kernels for the native NUFFT engine." alt="" coords="1984,445,2075,471"/>
+<area shape="rect" id="node29" href="$NativeNUFFT_8h.html" title=" " alt="" coords="2011,519,2125,544"/>
+<area shape="rect" id="node34" href="$LagrangeSpace_8h.html" title=" " alt="" coords="2921,225,3044,251"/>
+<area shape="rect" id="node35" href="$NedelecSpace_8h.html" title=" " alt="" coords="2780,225,2897,251"/>
+<area shape="rect" id="node38" href="$Maxwell_8h.html" title=" " alt="" coords="731,519,810,544"/>
+<area shape="rect" id="node39" href="$ParticleInteractionBase_8h.html" title=" " alt="" coords="834,519,1001,544"/>
+<area shape="rect" id="node40" href="$Poisson_8h.html" title=" " alt="" coords="299,519,378,544"/>
+<area shape="rect" id="node43" href="$SolverAlgorithm_8h.html" title=" " alt="" coords="1025,519,1149,544"/>
+<area shape="rect" id="node41" href="$PoissonCG_8h.html" title=" " alt="" coords="5,599,104,625"/>
+<area shape="rect" id="node42" href="$PreconditionedFEMPoissonSolver_8h.html" title=" " alt="" coords="129,592,311,632"/>
+<area shape="rect" id="node46" href="$GaussLegendreQuadrature_8h.html" title=" " alt="" coords="2251,152,2439,177"/>
+<area shape="rect" id="node47" href="$GaussLobattoQuadrature_8h.html" title=" " alt="" coords="2464,152,2643,177"/>
+<area shape="rect" id="node48" href="$MidpointQuadrature_8h.html" title=" " alt="" coords="2667,152,2813,177"/>
 </map>

@@ -1,7 +1,7 @@
 var searchData=
 [
-  ['r_0',['r',['../classippl_1_1CG.html#ac38e371539660a4b63fa6026bc31ca2a',1,'ippl::CG']]],
-  ['r_1',['R',['../classippl_1_1ParticleBase.html#af28b1c693f7fb69f12ccd65e507ef22a',1,'ippl::ParticleBase']]],
+  ['r_0',['R',['../classippl_1_1ParticleBase.html#af28b1c693f7fb69f12ccd65e507ef22a',1,'ippl::ParticleBase']]],
+  ['r_1',['r',['../classippl_1_1CG.html#ac38e371539660a4b63fa6026bc31ca2a',1,'ippl::CG']]],
   ['r2c_5fdir_5f_2',['r2c_dir_',['../classippl_1_1FFT_3_01PrunedRCTransform_00_01RealField_01_4.html#ab08eea5e0042dc45cedb1077473595f8',1,'ippl::FFT&lt; PrunedRCTransform, RealField &gt;']]],
   ['r2cdir_5fm_3',['r2cDir_m',['../classippl_1_1FFT_3_01NUFFTransform_00_01RealField_01_4.html#a28c6f7dbdce7c2462e89c13f180e5489',1,'ippl::FFT&lt; NUFFTransform, RealField &gt;']]],
   ['r_5fm_4',['R_m',['../classippl_1_1TruncatedGreenParticleInteraction.html#a999a5df169104fe31813cbb4562b6b37',1,'ippl::TruncatedGreenParticleInteraction']]],
