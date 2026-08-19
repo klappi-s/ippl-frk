@@ -53,7 +53,8 @@ namespace ippl {
     }
     
     template <typename T, typename SpaceTraits_>
-    void DOFHandler<T, SpaceTraits_>::fillLagrangeDOFMappingTable(typename Kokkos::View<DOFMapping*>::HostMirror& hostTable) const {
+    void DOFHandler<T, SpaceTraits_>::fillLagrangeDOFMappingTable(
+        typename DOFMappingView_t::host_mirror_type& hostTable) const {
         size_t dofIndex = 0;
 
         // For Lagrange elements, DOFs are ordered as:
@@ -275,7 +276,8 @@ namespace ippl {
     }
         
     template <typename T, typename SpaceTraits_>
-    void DOFHandler<T, SpaceTraits_>::fillNedelecDOFMappingTable(typename Kokkos::View<DOFMapping*>::HostMirror& hostTable) const {
+    void DOFHandler<T, SpaceTraits_>::fillNedelecDOFMappingTable(
+        typename DOFMappingView_t::host_mirror_type& hostTable) const {
         // TODO implement Nedelec DOF mapping table filling
     }
 

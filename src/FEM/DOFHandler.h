@@ -196,10 +196,12 @@ namespace ippl {
         NDIndex<Dim> lElemDom_m;
 
         // DOF mapping table (device view)
-        Kokkos::View<DOFMapping*> dofMappingTable_m;
+        using DOFMappingView_t = Kokkos::View<DOFMapping*>;
+        DOFMappingView_t dofMappingTable_m;
 
         // DOF mapping table (host mirror for host access)
-        typename Kokkos::View<DOFMapping*>::HostMirror dofMappingTable_h;
+        // Kokkos 5: use host_mirror_type (HostMirror requires DEPRECATED_CODE_4).
+        typename DOFMappingView_t::host_mirror_type dofMappingTable_h;
 
         ///////////////////////////////////////////////////////////////////////
         // Space-Specific DOF Mapping Table Filling ///////////////////////////
@@ -208,12 +210,12 @@ namespace ippl {
         /**
          * @brief Fill DOF mapping table for Lagrange elements
          */
-        void fillLagrangeDOFMappingTable(typename Kokkos::View<DOFMapping*>::HostMirror& hostTable) const;
+        void fillLagrangeDOFMappingTable(typename DOFMappingView_t::host_mirror_type& hostTable) const;
 
         /**
          * @brief Fill DOF mapping table for Nédélec elements
          */
-        void fillNedelecDOFMappingTable(typename Kokkos::View<DOFMapping*>::HostMirror& hostTable) const;
+        void fillNedelecDOFMappingTable(typename DOFMappingView_t::host_mirror_type& hostTable) const;
     };
 
     ///////////////////////////////////////////////////////////////////////

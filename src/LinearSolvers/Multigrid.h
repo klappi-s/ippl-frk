@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstddef>
+#include <deque>
 #include <iostream>
 #include <memory>
 #include <ostream>
@@ -242,9 +243,10 @@ namespace ippl {
                 ++nlevels;
             }
 
-            // reserve full vector to avoid implicit copying when adding new elements
+            // Field / Level are not noexcept-movable (Field copy is effectively unavailable
+            // for vector reallocation under libstdc++). Prefer deque: emplace_back does not
+            // relocate existing Levels. Avoid vector::reserve which still instantiates moves.
             L_.clear();
-            L_.reserve(nlevels);
 
             // 2. Build the hierarchy (Meshes, Layouts, and Levels)
             for (int ell = 0; ell < nlevels; ++ell) {
@@ -476,7 +478,7 @@ namespace ippl {
         }
 
     protected:
-        std::vector<multigrid::Level<Field>> L_;
+        std::deque<multigrid::Level<Field>> L_;
         OperatorF op_;
         unsigned nu1_, nu2_;
         double omega_;

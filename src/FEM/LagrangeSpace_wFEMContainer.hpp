@@ -1,5 +1,5 @@
 #include "FEM/LagrangeGlobalDOFIndices.hpp"
-#include "FEM/FEMQuadratureData.h"
+#include "FEM/RefShapeFunctionData.h"
 
 namespace ippl {
 
@@ -908,7 +908,7 @@ namespace ippl {
                 A_K[i][j] = 0.0;
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -1041,7 +1041,7 @@ namespace ippl {
                 A_K[i][j] = 0.0;
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -1152,7 +1152,7 @@ namespace ippl {
                 A_K[i][j] = T(0);
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -1876,7 +1876,7 @@ namespace ippl {
                 A_K[i][j] = T(0);
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -1967,7 +1967,7 @@ namespace ippl {
                 A_K[i][j] = T(0);
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -2058,7 +2058,7 @@ namespace ippl {
                 A_K[i][j] = T(0);
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
@@ -2151,7 +2151,7 @@ namespace ippl {
                 A_K[i][j] = T(0);
                 for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
                     A_K[i][j] += w[k] * evalFunction(
-                        i, j, QuadratureData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
+                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
                 }
             }
         }
