@@ -53,6 +53,7 @@
 #include "FEM/Quadrature/GaussLegendreQuadrature.h"
 #include "FEM/Quadrature/GaussLobattoQuadrature.h"
 #include "FEM/Quadrature/MidpointQuadrature.h"
+#include "FEM/Quadrature/SelectableQuadrature.h"
 
 // // FEM Spaces
 #include "FEM/LagrangeSpace.h"

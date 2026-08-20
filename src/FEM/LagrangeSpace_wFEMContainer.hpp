@@ -596,6 +596,14 @@ namespace ippl {
         elementIndices = dofHandler_m.getElementIndices();
     }
 
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    void LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS, FieldRHS>::
+        setInterpolationNodes(LagrangeNodeFamily family) {
+        interpolationFamily_m = family;
+        dofLocations_m.setFromFamily(family);
+    }
+
     // LagrangeSpace_wfc constructor, which calls the FiniteElementSpace constructor.
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,
               typename QuadratureType, typename FieldLHS, typename FieldRHS>
@@ -754,7 +762,7 @@ namespace ippl {
 
             // Loop over all nodes in this dimension to construct Lagrange polynomial
             for (unsigned k = 0; k <= Order; ++k) {
-                T node_k = static_cast<T>(k) / static_cast<T>(Order);
+                T node_k = dofLocations_m.nodes1d_m[k];
 
                 // Skip if this is the node corresponding to ref_element_point[d]
                 if (Kokkos::abs(ref_element_point[d] - node_k) < 1e-10) {
@@ -804,7 +812,7 @@ namespace ippl {
 
                     // Loop over all nodes to construct derivative
                     for (unsigned k = 0; k <= Order; ++k) {
-                        T node_k = static_cast<T>(k) / static_cast<T>(Order);
+                        T node_k = dofLocations_m.nodes1d_m[k];
 
                         // Skip if this is the node corresponding to ref_element_point[d]
                         if (Kokkos::abs(ref_element_point[d] - node_k) < 1e-10) {
@@ -815,7 +823,7 @@ namespace ippl {
                         T term = 1.0 / (ref_element_point[d] - node_k);
 
                         for (unsigned j = 0; j <= Order; ++j) {
-                            T node_j = static_cast<T>(j) / static_cast<T>(Order);
+                            T node_j = dofLocations_m.nodes1d_m[j];
 
                             if (Kokkos::abs(ref_element_point[d] - node_j) < 1e-10 || j == k) {
                                 continue;
@@ -833,7 +841,7 @@ namespace ippl {
                     T basis_1d = 1.0;
 
                     for (unsigned k = 0; k <= Order; ++k) {
-                        T node_k = static_cast<T>(k) / static_cast<T>(Order);
+                        T node_k = dofLocations_m.nodes1d_m[k];
 
                         if (Kokkos::abs(ref_element_point[d2] - node_k) < 1e-10) {
                             continue;
@@ -1796,7 +1804,7 @@ namespace ippl {
 
             // Loop over all nodes in this dimension to construct Lagrange polynomial
             for (unsigned k = 0; k <= Order; ++k) {
-                T node_k = static_cast<T>(k) / static_cast<T>(Order);
+                T node_k = dofLocations_m.nodes1d_m[k];
 
                 // Skip if this is the node corresponding to ref_element_point[d]
                 if (Kokkos::abs(ref_element_point[d] - node_k) < 1e-10) {

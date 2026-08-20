@@ -25,7 +25,7 @@ namespace ippl {
             for (unsigned d = 0; d < Dim; ++d) {
                 T basis_1d = T(1);
                 for (unsigned k = 0; k <= Order; ++k) {
-                    const T node_k = static_cast<T>(k) / static_cast<T>(Order);
+                    const T node_k = locs.nodes1d_m[k];
                     if (Kokkos::abs(ref[d] - node_k) < T(1e-10)) {
                         continue;
                     }

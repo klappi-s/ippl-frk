@@ -1,248 +1,193 @@
 // DOF Locations for Finite Element Spaces
-//   Provides compile-time computation of DOF locations on reference elements
-//   for different finite element spaces.
+//   Provides DOF locations on reference elements for Lagrange spaces.
 //
 //   IMPORTANT: The DOF ordering in this file MUST match the ordering convention
 //   defined in DOFHandler::fillLagrangeDOFMappingTable() (see DOFHandler.hpp).
 //   Both use counter-clockwise ordering for edges, faces, and volume entities.
+//
+//   1D coordinates along each axis come from a node family (equispaced or GLL on [0,1]).
 
 #ifndef IPPL_DOFLOCATIONS_H
 #define IPPL_DOFLOCATIONS_H
 
 #include "FEM/FiniteElementSpaceTraits.h"
+#include "FEM/InterpolationNodeFamilies.h"
+#include "Nodes1D/Nodes1D.h"
 #include "Types/Vector.h"
 
 namespace ippl {
 
-    // Helper to compute DOF locations for Lagrange elements at compile time
-    // Ordering convention: vertices, then edges (X, Y, Z), then faces (XY, XZ, YZ), then volume
-    // All entities follow counter-clockwise numbering (see DOFHandler.hpp for details)
     template <typename T, unsigned Dim, unsigned Order>
     struct LagrangeDOFLocations {
         using point_t = Vector<T, Dim>;
-        using Traits = FiniteElementSpaceTraits<LagrangeSpaceTag, Dim, Order>;
-        static constexpr unsigned NumDOFs = Traits::dofsPerElement;
+        using Traits  = FiniteElementSpaceTraits<LagrangeSpaceTag, Dim, Order>;
+        static constexpr unsigned NumDOFs   = Traits::dofsPerElement;
+        static constexpr unsigned NumNodes1D = Order + 1;
 
-        // Storage for all DOF locations on the reference element [0,1]^Dim
         point_t locations[NumDOFs];
+        Vector<T, NumNodes1D> nodes1d_m{};
 
-        KOKKOS_FUNCTION LagrangeDOFLocations() : locations{} {
-            // Initialize all locations
+        LagrangeDOFLocations()
+            : locations{} {
+            setFromFamily(LagrangeNodeFamily::GLL);
+        }
+
+        /**
+         * @brief Rebuild tensor-product DOF locations from @ref nodes1d_m (on [0, 1]).
+         */
+        KOKKOS_FUNCTION void fillFromNodes1D() {
             size_t dofIdx = 0;
 
-            // Vertex DOFs (at corners of the reference element)
             if constexpr (Dim == 1) {
-                // 2 vertices: x=0, x=1
-                locations[dofIdx++] = point_t{0.0};
-                locations[dofIdx++] = point_t{1.0};
+                locations[dofIdx++] = point_t{nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order]};
             } else if constexpr (Dim == 2) {
-                // 4 vertices: (0,0), (1,0), (1,1), (0,1)
-                locations[dofIdx++] = point_t{0.0, 0.0};
-                locations[dofIdx++] = point_t{1.0, 0.0};
-                locations[dofIdx++] = point_t{1.0, 1.0};
-                locations[dofIdx++] = point_t{0.0, 1.0};
+                locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[Order]};
+                locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[Order]};
             } else if constexpr (Dim == 3) {
-                // 8 vertices: standard cube corners
-                locations[dofIdx++] = point_t{0.0, 0.0, 0.0};
-                locations[dofIdx++] = point_t{1.0, 0.0, 0.0};
-                locations[dofIdx++] = point_t{1.0, 1.0, 0.0};
-                locations[dofIdx++] = point_t{0.0, 1.0, 0.0};
-                locations[dofIdx++] = point_t{0.0, 0.0, 1.0};
-                locations[dofIdx++] = point_t{1.0, 0.0, 1.0};
-                locations[dofIdx++] = point_t{1.0, 1.0, 1.0};
-                locations[dofIdx++] = point_t{0.0, 1.0, 1.0};
+                locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[0], nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[0], nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[Order], nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[Order], nodes1d_m[0]};
+                locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[0], nodes1d_m[Order]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[0], nodes1d_m[Order]};
+                locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[Order], nodes1d_m[Order]};
+                locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[Order], nodes1d_m[Order]};
             }
 
-            // Edge DOFs (for Order > 1)
-            // These are equally spaced interior points along element edges
             if constexpr (Order > 1) {
                 if constexpr (Dim == 1) {
-                    // 1D: Interior points along the single edge
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[i]};
                     }
                 } else if constexpr (Dim == 2) {
-                    // 2D: EdgeX DOFs (horizontal edges: y=0 and y=1)
-                    // Bottom edge (y=0): from vertex 0 to vertex 1
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 0.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[0]};
                     }
-                    // Top edge (y=1): from vertex 3 to vertex 2
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 1.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[Order]};
                     }
-
-                    // 2D: EdgeY DOFs (vertical edges: x=0 and x=1)
-                    // Left edge (x=0): from vertex 0 to vertex 3
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{0.0, static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[i]};
                     }
-                    // Right edge (x=1): from vertex 1 to vertex 2
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{1.0, static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[i]};
                     }
                 } else if constexpr (Dim == 3) {
-                    // 3D: EdgeX DOFs (horizontal edges: y=0, z=0 and y=1, z=0 and y=1, z=1 and y=0, z=1)
-                    // Bottom front edge (y=0, z=0): from vertex 0 to vertex 1
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 0.0, 0.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[0], nodes1d_m[0]};
                     }
-                    // Bottom back edge (y=1, z=0): from vertex 3 to vertex 2
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 1.0, 0.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[Order], nodes1d_m[0]};
                     }
-                    // Top front edge (y=0, z=1): from vertex 4 to vertex 5
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 0.0, 1.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[0], nodes1d_m[Order]};
                     }
-                    // Top back edge (y=1, z=1): from vertex 7 to vertex 6
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{static_cast<T>(i) / static_cast<T>(Order), 1.0, 1.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[Order], nodes1d_m[Order]};
                     }
-
-                    // 3D: EdgeY DOFs (horizontal edges: x=0, z=0 and x=1, z=0 and x=1, z=1 and x=0, z=1)
-                    // Left edge (x=0, z=0): from vertex 0 to vertex 3
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{0.0, static_cast<T>(i) / static_cast<T>(Order), 0.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[i], nodes1d_m[0]};
                     }
-                    // Right edge (x=1, z=0): from vertex 1 to vertex 2
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{1.0, static_cast<T>(i) / static_cast<T>(Order), 0.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[i], nodes1d_m[0]};
                     }
-                    // Left edge (x=0, z=1): from vertex 4 to vertex 7
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{0.0, static_cast<T>(i) / static_cast<T>(Order), 1.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[i], nodes1d_m[Order]};
                     }
-                    // Right edge (x=1, z=1): from vertex 5 to vertex 6
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{1.0, static_cast<T>(i) / static_cast<T>(Order), 1.0};
+                        locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[i], nodes1d_m[Order]};
                     }
-
-                    // 3D: EdgeZ DOFs (vertical edges: x=0, y=0 and x=1, y=0 and x=1, y=1 and x=0, y=1)
-                    // Front left edge (x=0, y=0): from vertex 0 to vertex 4
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{0.0, 0.0, static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[0], nodes1d_m[i]};
                     }
-                    // Front right edge (x=1, y=0): from vertex 1 to vertex 5
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{1.0, 0.0, static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[0], nodes1d_m[i]};
                     }
-                    // Back right edge (x=1, y=1): from vertex 2 to vertex 6
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{1.0, 1.0, static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[Order], nodes1d_m[i]};
                     }
-                    // Back left edge (x=0, y=1): from vertex 3 to vertex 7
                     for (unsigned i = 1; i < Order; ++i) {
-                        locations[dofIdx++] = point_t{0.0, 1.0, static_cast<T>(i) / static_cast<T>(Order)};
+                        locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[Order], nodes1d_m[i]};
                     }
                 }
             }
 
-            // Face DOFs (for Order > 1 and Dim >= 2)
-            // These are interior points on element faces
             if constexpr (Order > 1 && Dim >= 2) {
                 if constexpr (Dim == 2) {
-                    // 2D: Interior face DOFs (the face is the element itself)
                     for (unsigned j = 1; j < Order; ++j) {
                         for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                static_cast<T>(j) / static_cast<T>(Order)
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[j]};
                         }
                     }
                 } else if constexpr (Dim == 3) {
-                    // 3D face DOFs — SCHEMA: Z-normal (FaceXY), X-normal (FaceYZ), Y-normal (FaceXZ)
-
-                    // FaceXY (perpendicular to Z-axis): bottom, top
-                    // Face at z=0 (bottom)
                     for (unsigned j = 1; j < Order; ++j) {
                         for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                static_cast<T>(j) / static_cast<T>(Order),
-                                0.0
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[j], nodes1d_m[0]};
                         }
                     }
-                    // Face at z=1 (top)
                     for (unsigned j = 1; j < Order; ++j) {
                         for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                static_cast<T>(j) / static_cast<T>(Order),
-                                1.0
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[j], nodes1d_m[Order]};
                         }
                     }
-
-                    // FaceYZ (perpendicular to X-axis): left, right
-                    // Face at x=0 (left)
                     for (unsigned k = 1; k < Order; ++k) {
                         for (unsigned j = 1; j < Order; ++j) {
-                            locations[dofIdx++] = point_t{
-                                0.0,
-                                static_cast<T>(j) / static_cast<T>(Order),
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[0], nodes1d_m[j], nodes1d_m[k]};
                         }
                     }
-                    // Face at x=1 (right)
                     for (unsigned k = 1; k < Order; ++k) {
                         for (unsigned j = 1; j < Order; ++j) {
-                            locations[dofIdx++] = point_t{
-                                1.0,
-                                static_cast<T>(j) / static_cast<T>(Order),
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[Order], nodes1d_m[j], nodes1d_m[k]};
                         }
                     }
-
-                    // FaceXZ (perpendicular to Y-axis): front, back
-                    // Face at y=0 (front)
                     for (unsigned k = 1; k < Order; ++k) {
                         for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                0.0,
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[0], nodes1d_m[k]};
                         }
                     }
-                    // Face at y=1 (back)
                     for (unsigned k = 1; k < Order; ++k) {
                         for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                1.0,
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[Order], nodes1d_m[k]};
                         }
                     }
                 }
             }
 
-            // Volume DOFs (for Order > 1 and Dim == 3)
             if constexpr (Order > 1 && Dim == 3) {
-                // 3D volume DOFs (interior points within the hexahedron)
                 for (unsigned k = 1; k < Order; ++k) {
                     for (unsigned j = 1; j < Order; ++j) {
                         for (unsigned i = 1; i < Order; ++i) {
-                            locations[dofIdx++] = point_t{
-                                static_cast<T>(i) / static_cast<T>(Order),
-                                static_cast<T>(j) / static_cast<T>(Order),
-                                static_cast<T>(k) / static_cast<T>(Order)
-                            };
+                            locations[dofIdx++] = point_t{nodes1d_m[i], nodes1d_m[j], nodes1d_m[k]};
                         }
                     }
                 }
             }
         }
 
-        // Access operator
-        KOKKOS_FUNCTION const point_t& operator[](size_t idx) const {
-            return locations[idx];
+        /**
+         * @brief Rebuild 1D nodes on [0, 1] from a Lagrange interpolation family, then
+         * tensor-product DOF locations. Host-only (GLL uses Nodes1D). Endpoints are 0 and 1.
+         */
+        void setFromFamily(LagrangeNodeFamily family) {
+            static_assert(NumNodes1D >= 2, "Lagrange 1D nodes require N >= 2 (Order >= 1)");
+            if (family == LagrangeNodeFamily::Equispaced) {
+                for (unsigned i = 0; i < NumNodes1D; ++i) {
+                    nodes1d_m[i] = static_cast<T>(i) / static_cast<T>(NumNodes1D - 1);
+                }
+            } else {
+                Vector<T, NumNodes1D> weights;
+                nodes1d::computeGaussLobatto(nodes1d_m, weights);
+                nodes1d_m = nodes1d::affineMapPoint(nodes1d_m, T(-1), T(1), T(0), T(1));
+                nodes1d_m[0]              = T(0);
+                nodes1d_m[NumNodes1D - 1] = T(1);
+            }
+            fillFromNodes1D();
         }
+
+        KOKKOS_FUNCTION const point_t& operator[](size_t idx) const { return locations[idx]; }
     };
 
 }  // namespace ippl

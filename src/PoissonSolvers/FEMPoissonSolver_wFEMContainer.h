@@ -23,6 +23,7 @@
 #include "Poisson.h"
 #include "EvalFunctor.h"
 #include "FEM/LagrangeSpace_wFEMContainer.h"
+#include "FEM/Quadrature/SelectableQuadrature.h"
 
 namespace ippl {
 
@@ -48,7 +49,7 @@ namespace ippl {
                                std::conditional_t<Dim == 2, ippl::QuadrilateralElement<Tlhs>,
                                                    ippl::HexahedralElement<Tlhs>>>;
 
-        using QuadratureType = GaussLegendreQuadrature<Tlhs, QuadNumNodes, ElementType>;
+        using QuadratureType = SelectableQuadrature<Tlhs, QuadNumNodes, ElementType>;
 
         using LagrangeType =
             LagrangeSpace_wfc<Tlhs, Dim, Order, ElementType, QuadratureType, FieldLHS, FieldRHS>;
@@ -56,7 +57,7 @@ namespace ippl {
         FEMPoissonSolver_wFEMContainer()
             : Base()
             , refElement_m()
-            , quadrature_m(refElement_m)
+            , quadrature_m(refElement_m, QuadratureNodeFamily::GaussLegendre)
             , lagrangeSpace_m(*(new MeshType(NDIndex<Dim>(Vector<unsigned, Dim>(0)),
                                              Vector<Tlhs, Dim>(0), Vector<Tlhs, Dim>(0))),
                               refElement_m, quadrature_m) {
@@ -66,7 +67,7 @@ namespace ippl {
         FEMPoissonSolver_wFEMContainer(lhs_type& lhs, rhs_type& rhs)
             : Base(lhs, rhs)
             , refElement_m()
-            , quadrature_m(refElement_m)
+            , quadrature_m(refElement_m, QuadratureNodeFamily::GaussLegendre)
             , lagrangeSpace_m(rhs.get_mesh(), refElement_m, quadrature_m, rhs.getLayout()) {
             static_assert(std::is_floating_point<Tlhs>::value, "Not a floating point type");
             setDefaultParameters();
@@ -79,7 +80,14 @@ namespace ippl {
 
         LagrangeType& getSpace() { return lagrangeSpace_m; }
 
+        /** Apply interpolation/quadrature ParameterList keys (also invoked at start of solve). */
+        void configureNodeFamilies() { applyNodeFamilyParameters(); }
+
+        // bool usesGllMassShortcut() const { return gllMassShortcutActive_m; }
+
         void solve() override {
+            applyNodeFamilyParameters();
+
             this->rhs_mp->fillHalo();
             lagrangeSpace_m.evaluateLoadVector(*(this->rhs_mp));
 
@@ -326,11 +334,42 @@ namespace ippl {
             this->params_m.add("gauss_seidel_outer_iterations",
                                pcg_preconditioner_defaults::gauss_seidel_outer);
             this->params_m.add("ssor_omega", pcg_preconditioner_defaults::ssor_omega);
+            this->params_m.add("interpolation_nodes", std::string("gll"));
+            this->params_m.add("quadrature_nodes", std::string("gauss_legendre"));
+        }
+
+        /**
+         * @brief Apply ParameterList interpolation/quadrature node families before assembly.
+         */
+        void applyNodeFamilyParameters() {
+            const auto interp = parseLagrangeNodeFamily(
+                this->params_m.template get<std::string>("interpolation_nodes"));
+            const auto quad = parseQuadratureNodeFamily(
+                this->params_m.template get<std::string>("quadrature_nodes"));
+
+            lagrangeSpace_m.setInterpolationNodes(interp);
+            quadrature_m.setFamily(quad);
+
+            // Mass-matrix underintegration shortcut (GLL interp + GLL quad,
+            // QuadNumNodes == Order+1) is deferred until a mass/reaction term exists.
+            // Pure Poisson is stiffness-only, so this hook would only set a flag.
+            // Restore when mass assembly is added.
+            //
+            // inline bool gllMassShortcutApplicable(LagrangeNodeFamily interp,
+            //                                       QuadratureNodeFamily quad,
+            //                                       unsigned order, unsigned quadNumNodes) {
+            //     return interp == LagrangeNodeFamily::GLL
+            //            && quad == QuadratureNodeFamily::GaussLobatto
+            //            && quadNumNodes == order + 1;
+            // }
+            // gllMassShortcutActive_m =
+            //     gllMassShortcutApplicable(interp, quad, Order, QuadNumNodes);
         }
 
         ElementType refElement_m;
         QuadratureType quadrature_m;
         LagrangeType lagrangeSpace_m;
+        // bool gllMassShortcutActive_m = false;
     };
 
 }  // namespace ippl

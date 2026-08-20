@@ -333,6 +333,18 @@ namespace ippl {
         /** @brief DOF mapping / boundary helpers (host validation, tests). */
         const DOFHandler_t& getDOFHandler() const { return dofHandler_m; }
 
+        /**
+         * @brief Set 1D Lagrange interpolation node family (equispaced or GLL on [0,1]).
+         * Rebuilds DOF locations used by shape functions / load evaluation.
+         */
+        void setInterpolationNodes(LagrangeNodeFamily family);
+
+        LagrangeNodeFamily getInterpolationNodes() const { return interpolationFamily_m; }
+
+        const LagrangeDOFLocations<T, Dim, Order>& getDOFLocations() const {
+            return dofLocations_m;
+        }
+
     private:
         /**
          * @brief Check if a DOF is on the boundary of the mesh
@@ -366,6 +378,7 @@ namespace ippl {
 
         /// Precomputed DOF locations on reference element ////////////////////
         LagrangeDOFLocations<T, Dim, Order> dofLocations_m;
+        LagrangeNodeFamily interpolationFamily_m = LagrangeNodeFamily::GLL;
     };
 
 }  // namespace ippl
