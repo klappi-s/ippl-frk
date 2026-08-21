@@ -3,7 +3,7 @@
 // Four TASK3 §11.2 sources on [0,1]^3: sine, nonsymmetric, polynomial, affine.
 // Lagrange orders P1–P3, Gauss–Legendre quadrature order 9 (all orders).
 //
-// Writes: convergence_FEMPoissonSolver3D.dat
+// Writes: convergence_FEMPoissonSolver3D_{gll|equispaced}.dat
 //
 // Usage:
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence [--info 5]
@@ -12,6 +12,10 @@
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --solver plain        # unpreconditioned CG
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --solver preconditioned  # SSOR PCG (default)
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --preconditioner_type jacobi
+//   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --interpolation_nodes gll
+//   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --interpolation_nodes equispaced
+//   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --quadrature_nodes gauss_legendre
+
 
 #include "Ippl.h"
 
@@ -41,7 +45,8 @@ static constexpr double domain_start = 0.0;
 static constexpr double domain_end   = 1.0;
 
 template <unsigned Order, SourceCase Src>
-ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const std::string& precon_type) {
+ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const std::string& precon_type,
+                       const std::string& interp_nodes, const std::string& quad_family) {
     using T = double;
 
     using DOFHandler_t =
@@ -71,7 +76,8 @@ ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const st
     lhs.setFieldBC(bc);
     rhs.setFieldBC(bc);
 
-    assignSourceToField<T, Dim, Order, Src>(rhs, mesh, layout);
+    assignSourceToField<T, Dim, Order, Src>(rhs, mesh, layout,
+                                            ippl::parseLagrangeNodeFamily(interp_nodes));
 
     ippl::FEMPoissonSolver_wFEMContainer<Field_t, Field_t, Order, QuadNodes> solver(lhs, rhs);
 
@@ -80,16 +86,20 @@ ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const st
     params.add("max_iterations", 20000);
     params.add("preconditioned", preconditioned);
     params.add("preconditioner_type", precon_type);
+    params.add("interpolation_nodes", interp_nodes);
+    params.add("quadrature_nodes", quad_family);
     solver.mergeParameters(params);
     solver.solve();
 
     AnalyticSolutionFunctor<Src, Dim, T> analytic;
 
     ConvergenceRow row;
-    row.source        = sourceTag(Src);
-    row.order         = Order;
-    row.quad_nodes    = QuadNodes;
-    row.num_nodes     = num_nodes_per_dim;
+    row.source                = sourceTag(Src);
+    row.order                 = Order;
+    row.quad_nodes            = QuadNodes;
+    row.interpolation_nodes   = interp_nodes;
+    row.quadrature_family     = quad_family;
+    row.num_nodes             = num_nodes_per_dim;
     row.h             = cell_spacing[0];
     row.rel_l2        = solver.getL2Error(analytic);
     row.cg_residue    = solver.getResidue();
@@ -98,16 +108,22 @@ ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const st
 }
 
 template <unsigned Order>
-ConvergenceRow runCaseSource(unsigned num_nodes, SourceCase src, bool preconditioned, const std::string& precon_type) {
+ConvergenceRow runCaseSource(unsigned num_nodes, SourceCase src, bool preconditioned,
+                             const std::string& precon_type, const std::string& interp_nodes,
+                             const std::string& quad_family) {
     switch (src) {
         case SourceCase::LowOrderPolynomial:
-            return runCase<Order, SourceCase::LowOrderPolynomial>(num_nodes, preconditioned, precon_type);
+            return runCase<Order, SourceCase::LowOrderPolynomial>(
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
         case SourceCase::HighOrderPolynomial:
-            return runCase<Order, SourceCase::HighOrderPolynomial>(num_nodes, preconditioned, precon_type);
+            return runCase<Order, SourceCase::HighOrderPolynomial>(
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
         case SourceCase::ShiftedExponential:
-            return runCase<Order, SourceCase::ShiftedExponential>(num_nodes, preconditioned, precon_type);
+            return runCase<Order, SourceCase::ShiftedExponential>(
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
         case SourceCase::Sines:
-            return runCase<Order, SourceCase::Sines>(num_nodes, preconditioned, precon_type);
+            return runCase<Order, SourceCase::Sines>(num_nodes, preconditioned, precon_type,
+                                                     interp_nodes, quad_family);
         default:
             throw std::runtime_error("unknown source");
     }
@@ -166,16 +182,16 @@ double observedRate(const ConvergenceRow& coarse, const ConvergenceRow& fine) {
 
 void printTableHeader(std::ostream& os) {
     os << std::setw(14) << "source" << std::setw(8) << "order" << std::setw(8) << "quad"
-       << std::setw(12) << "num_nodes" << std::setw(22) << "h" << std::setw(22) << "rel_L2"
-       << std::setw(22) << "cg_residue" << std::setw(12) << "cg_iters" << std::setw(14) << "rate"
-       << '\n';
+       << std::setw(14) << "interp" << std::setw(12) << "num_nodes" << std::setw(22) << "h"
+       << std::setw(22) << "rel_L2" << std::setw(22) << "cg_residue" << std::setw(12) << "cg_iters"
+       << std::setw(14) << "rate" << '\n';
 }
 
 void printRow(std::ostream& os, const ConvergenceRow& row, double rate) {
     os << std::setw(14) << row.source << std::setw(8) << row.order << std::setw(8) << row.quad_nodes
-       << std::setw(12) << row.num_nodes << std::setw(22) << std::setprecision(16) << row.h
-       << std::setw(22) << row.rel_l2 << std::setw(22) << row.cg_residue << std::setw(12)
-       << row.cg_iterations;
+       << std::setw(14) << row.interpolation_nodes << std::setw(12) << row.num_nodes
+       << std::setw(22) << std::setprecision(16) << row.h << std::setw(22) << row.rel_l2
+       << std::setw(22) << row.cg_residue << std::setw(12) << row.cg_iterations;
     if (rate >= 0.0) {
         os << std::setw(14) << std::setprecision(4) << rate;
     } else {
@@ -197,16 +213,24 @@ int main(int argc, char* argv[]) {
         }
         const bool preconditioned  = parsePreconditioned(argc, argv);
         const std::string precon_type = parsePreconditioner(argc, argv);
+        const std::string interp_nodes = canonicalInterpolationTag(
+            parseStringFlag(argc, argv, "--interpolation_nodes", "gll"));
+        const std::string quad_family = canonicalQuadratureTag(
+            parseStringFlag(argc, argv, "--quadrature_nodes", "gauss_legendre"));
         const unsigned max_order   = maxLagrangeOrderForPreconditioner(precon_type);
 
         const auto out_path =
-            std::filesystem::current_path() / "convergence_FEMPoissonSolver3D.dat";
+            std::filesystem::current_path() / convergenceDatFilename(Dim, interp_nodes);
 
         constexpr const char* domain_note = "[0,1]^3 (homogeneous Dirichlet)";
         logStudyBanner(Dim, QuadNodes, min_nodes, max_nodes, out_path.string(), domain_note,
-                       max_order);
+                       max_order, interp_nodes, quad_family);
         if (ippl::Comm->rank() == 0) {
-            std::cout << "Solver mode: " << (preconditioned ? "preconditioned (" + precon_type + ")" : "plain (unpreconditioned)") << '\n';
+            std::cout << "Solver mode: "
+                      << (preconditioned ? "preconditioned (" + precon_type + ")"
+                                         : "plain (unpreconditioned)")
+                      << "\n";
+
         }
 
         std::unique_ptr<std::ofstream> dat_out;
@@ -215,7 +239,7 @@ int main(int argc, char* argv[]) {
             if (!dat_out->is_open()) {
                 throw std::runtime_error("cannot open output file: " + out_path.string());
             }
-            writeDatHeader(*dat_out, Dim, domain_note);
+            writeDatHeader(*dat_out, Dim, domain_note, interp_nodes, quad_family);
         }
 
         ConvergenceProgressLog progress(totalConvergenceCases(min_nodes, max_nodes, max_order), Dim);
@@ -230,11 +254,14 @@ int main(int argc, char* argv[]) {
                     ConvergenceRow row = [&]() {
                         switch (order) {
                             case 1:
-                                return runCaseSource<1>(n, src, preconditioned, precon_type);
+                                return runCaseSource<1>(n, src, preconditioned, precon_type,
+                                                        interp_nodes, quad_family);
                             case 2:
-                                return runCaseSource<2>(n, src, preconditioned, precon_type);
+                                return runCaseSource<2>(n, src, preconditioned, precon_type,
+                                                        interp_nodes, quad_family);
                             default:
-                                return runCaseSource<3>(n, src, preconditioned, precon_type);
+                                return runCaseSource<3>(n, src, preconditioned, precon_type,
+                                                        interp_nodes, quad_family);
                         }
                     }();
                     progress.endCase(row);

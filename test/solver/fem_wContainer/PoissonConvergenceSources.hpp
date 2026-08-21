@@ -91,7 +91,8 @@ struct AnalyticSolutionFunctor {
 // ---------------------------------------------------------------------------
 template <typename T, unsigned Dim, unsigned Order, SourceCase Src, typename Field_t>
 void assignSourceToField(Field_t& field, UniformCartesian<T, Dim>& mesh,
-                         const FieldLayout<Dim>& layout) {
+                         const FieldLayout<Dim>& layout,
+                         LagrangeNodeFamily family = LagrangeNodeFamily::GLL) {
     using SpaceTraits  = FiniteElementSpaceTraits<LagrangeSpaceTag, Dim, Order>;
     using DOFHandler_t = DOFHandler<T, SpaceTraits>;
     using ElementType =
@@ -106,6 +107,7 @@ void assignSourceToField(Field_t& field, UniformCartesian<T, Dim>& mesh,
     DOFHandler_t dofHandler(mesh, layout);
     ElementType refElement;
     LagrangeDOFLocations<T, Dim, Order> dofLocs;
+    dofLocs.setFromFamily(family);
     const auto elemIndices = dofHandler.getElementIndices();
     const int nghost       = field.getNghost();
 
@@ -181,14 +183,16 @@ void assignSourceToField(Field_t& field, UniformCartesian<T, Dim>& mesh,
 }
 
 struct ConvergenceRow {
-    const char* source   = "";
-    unsigned order       = 0;
-    unsigned quad_nodes  = 0;
-    unsigned num_nodes   = 0;
-    double h             = 0.0;
-    double rel_l2        = 0.0;
-    double cg_residue    = 0.0;
-    int cg_iterations    = 0;
+    const char* source                 = "";
+    unsigned order                     = 0;
+    unsigned quad_nodes                = 0;
+    std::string interpolation_nodes    = "gll";
+    std::string quadrature_family      = "gauss_legendre";
+    unsigned num_nodes                 = 0;
+    double h                           = 0.0;
+    double rel_l2                      = 0.0;
+    double cg_residue                  = 0.0;
+    int cg_iterations                  = 0;
 };
 
 }  // namespace poisson_convergence_wfc

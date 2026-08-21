@@ -210,8 +210,12 @@ namespace ippl {
                 IpplTimings::stopTimer(inner);
                 lhs = lhs + alpha * d;
 
-                // The exact residue is given by
-                // r = rhs - op_m(lhs);
+                // The exact residue is given by r = b - A*x (or rhs - op_m(lhs)).
+                // While some implementations periodically explicitly recompute this 
+                // to offset accumulated floating point errors from the recursive update, 
+                // we intentionally avoid doing so here, since in e.g for higher Order FEM 
+                // this may strongly and badly influence convergence.
+                
                 // This correction is generally not used in practice because
                 // applying the Laplacian is computationally expensive and
                 // the correction does not have a significant effect on accuracy;
@@ -372,13 +376,6 @@ namespace ippl {
                 T alpha = delta1 / innerProduct(d, q);
                 lhs     = lhs + alpha * d;
 
-                // The exact residue is given by
-                // r = rhs - op_m(lhs);
-                // This correction is generally not used in practice because
-                // applying the Laplacian is computationally expensive and
-                // the correction does not have a significant effect on accuracy;
-                // in some implementations, the correction may be applied every few
-                // iterations to offset accumulated floating point errors
                 r      = r - alpha * q;
 
                 delta0 = delta1;
@@ -504,13 +501,6 @@ namespace ippl {
                 T alpha = delta1 / innerProduct(d, q);
                 lhs     = lhs + alpha * d;
 
-                // The exact residue is given by
-                // r = rhs - op_m(lhs);
-                // This correction is generally not used in practice because
-                // applying the Laplacian is computationally expensive and
-                // the correction does not have a significant effect on accuracy;
-                // in some implementations, the correction may be applied every few
-                // iterations to offset accumulated floating point errors
                 r      = r - alpha * q;
                 delta0 = delta1;
                 r.setHalo(0);
@@ -746,13 +736,6 @@ namespace ippl {
                 T alpha = delta1 / innerProduct(this->d, this->q);
                 lhs     = lhs + alpha * this->d;
 
-                // The exact residue is given by
-                // r = rhs - BaseCG::op_m(lhs);
-                // This correction is generally not used in practice because
-                // applying the Laplacian is computationally expensive and
-                // the correction does not have a significant effect on accuracy;
-                // in some implementations, the correction may be applied every few
-                // iterations to offset accumulated floating point errors
                 this->r = this->r - alpha * this->q;
                 // s := M^{-1} r; preconditioner writes into s (NoBcFace).
                 (*preconditioner_m)(this->r, s);
