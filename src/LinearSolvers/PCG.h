@@ -366,7 +366,8 @@ namespace ippl {
             T delta1          = innerProduct(r, d);
             T delta0          = delta1;
             residueNorm       = std::sqrt(delta1);
-            const T tolerance = params.get<T>("tolerance") * norm(rhs);
+            const T rhsNorm = norm(rhs);
+            const T tolerance = params.get<T>("tolerance") * (rhsNorm > T(0) ? rhsNorm : T(1));
 
             lhs_type q(mesh, layout);
 
@@ -906,33 +907,62 @@ namespace ippl {
                 }
             }
 
+            // Flexible CG when M is nonlinear/variable (multigrid V-cycle). Jacobi/SSOR keep
+            // standard PCG. See TASK5 Appendix B.5.
+            bool flexible = false;
+            if (params.contains("flexible_cg")) {
+                flexible = params.template get<bool>("flexible_cg");
+            }
+
             r = rhs - this->op_m(lhs);
             (*preconditioner_m)(r, pcond_out);
             d = T(1) * pcond_out;
             d.setFieldBC(bcTypes);
 
-            T delta1          = innerProduct(r, d);
-            T delta0          = delta1;
-            this->residueNorm = Kokkos::sqrt(Kokkos::abs(delta1));
-            const T tolerance = params.get<T>("tolerance") * norm(rhs);
+            lhs_type z_prev(mesh, layout);
+            if (flexible) {
+                z_prev = T(1) * pcond_out;
+            }
+
+            T delta1 = innerProduct(r, d);
+            T delta0 = delta1;
+            // True residual stop test (avoids false convergence when r·z ~ 0 but ||r|| large).
+            this->residueNorm   = norm(r);
+            const T rhsNorm     = norm(rhs);
+            const T tolerance   = params.get<T>("tolerance") * (rhsNorm > T(0) ? rhsNorm : T(1));
 
             while (this->iterations_m < maxIterations && this->residueNorm > tolerance) {
-                q = this->op_m(d);
+                q       = this->op_m(d);
                 T alpha = delta1 / innerProduct(d, q);
                 lhs     = lhs + alpha * d;
 
-                r = r - alpha * q;
+                if (flexible) {
+                    // Refresh true residual: Flex-CG + nonlinear M makes r-=αq drift.
+                    r = rhs - this->op_m(lhs);
+                } else {
+                    r = r - alpha * q;
+                }
                 (*preconditioner_m)(r, s);
 
-                delta0 = delta1;
-                delta1 = innerProduct(r, s);
-
-                T beta            = delta1 / delta0;
-                this->residueNorm = Kokkos::sqrt(Kokkos::abs(delta1));
-
-                d = s + beta * d;
+                if (flexible) {
+                    // Notay Flex-CG: β = (r, z - z_prev) / (r_old, z_old)
+                    lhs_type z_diff(mesh, layout);
+                    z_diff = s - z_prev;
+                    T numer = innerProduct(r, z_diff);
+                    T beta  = (Kokkos::abs(delta0) > T(0)) ? (numer / delta0) : T(0);
+                    delta0  = innerProduct(r, s);
+                    delta1  = delta0;
+                    z_prev  = T(1) * s;
+                    d       = s + beta * d;
+                } else {
+                    delta0 = delta1;
+                    delta1 = innerProduct(r, s);
+                    T beta = (Kokkos::abs(delta0) > T(0)) ? (delta1 / delta0) : T(0);
+                    d      = s + beta * d;
+                }
+                this->residueNorm = norm(r);
                 d.setFieldBC(bcTypes);
-                
+
                 ++this->iterations_m;
             }
 

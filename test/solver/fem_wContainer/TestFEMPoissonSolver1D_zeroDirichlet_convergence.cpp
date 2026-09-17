@@ -11,11 +11,16 @@
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --max-nodes 1024
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --min-nodes 2 --max-nodes 2
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver plain        # unpreconditioned CG
-//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver preconditioned  # SSOR PCG (default)
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver preconditioned  # Jacobi PCG (default)
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --preconditioner_type jacobi
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --preconditioner_type chebyshev --chebyshev_degree 8
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --preconditioner_type ssor --ssor_omega 1.0
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --interpolation_nodes gll
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --interpolation_nodes equispaced
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --quadrature_nodes gauss_legendre
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --min-order 2 --max-order 3 --accuracy-diagnostics 1
+// Accuracy diagnostics require one MPI rank and a fresh output directory.
+// The legacy rel_L2 column is the absolute L2 error.
 
 #include "Ippl.h"
 
@@ -34,6 +39,7 @@
 #include "PoissonConvergenceProgress.hpp"
 #include "PoissonConvergenceSources.hpp"
 #include "PoissonSolvers/FEMPoissonSolver_wFEMContainer.h"
+#include "PoissonAccuracyDiagnostics1D.hpp"
 
 namespace {
 
@@ -44,9 +50,22 @@ static constexpr unsigned QuadNodes   = 9;
 static constexpr double domain_start  = 0.0;
 static constexpr double domain_end    = 1.0;
 
+struct StudyConfig {
+    double tolerance                    = 1e-13;
+    int max_iterations                  = 150000;
+    int newton_level                    = 2;
+    int chebyshev_degree                = 5;
+    int richardson_iterations           = 4;
+    int gauss_seidel_inner_iterations   = 2;
+    int gauss_seidel_outer_iterations   = 2;
+    double ssor_omega                   = 1.57079632679;
+    bool accuracyDiagnostics           = false;
+};
+
 template <unsigned Order, SourceCase Src>
 ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::string& precon_type,
-                       const std::string& interp_nodes, const std::string& quad_family) {
+                       const std::string& interp_nodes, const std::string& quad_family,
+                       const StudyConfig& config) {
     using T = double;
 
     using DOFHandler_t =
@@ -82,10 +101,16 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::strin
     ippl::FEMPoissonSolver_wFEMContainer<Field_t, Field_t, Order, QuadNodes> solver(lhs, rhs);
 
     ippl::ParameterList params;
-    params.add("tolerance", 1e-13);
-    params.add("max_iterations", 150000);
+    params.add("tolerance", config.tolerance);
+    params.add("max_iterations", config.max_iterations);
     params.add("preconditioned", preconditioned);
     params.add("preconditioner_type", precon_type);
+    params.add("newton_level", config.newton_level);
+    params.add("chebyshev_degree", config.chebyshev_degree);
+    params.add("richardson_iterations", config.richardson_iterations);
+    params.add("gauss_seidel_inner_iterations", config.gauss_seidel_inner_iterations);
+    params.add("gauss_seidel_outer_iterations", config.gauss_seidel_outer_iterations);
+    params.add("ssor_omega", config.ssor_omega);
     params.add("interpolation_nodes", interp_nodes);
     params.add("quadrature_nodes", quad_family);
     solver.mergeParameters(params);
@@ -104,26 +129,29 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::strin
     row.rel_l2       = solver.getL2Error(analytic);
     row.cg_residue   = solver.getResidue();
     row.cg_iterations = solver.getIterationCount();
+    if (config.accuracyDiagnostics)
+        writeAccuracyDiagnostics1D(solver, lhs, rhs, analytic, sourceTag(Src), Order,
+                                   num_nodes, interp_nodes, quad_family);
     return row;
 }
 
 template <unsigned Order>
 ConvergenceRow runCaseSource(unsigned num_nodes, SourceCase src, bool preconditioned,
                              const std::string& precon_type, const std::string& interp_nodes,
-                             const std::string& quad_family) {
+                             const std::string& quad_family, const StudyConfig& config) {
     switch (src) {
         case SourceCase::LowOrderPolynomial:
             return runCase<Order, SourceCase::LowOrderPolynomial>(
-                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family, config);
         case SourceCase::HighOrderPolynomial:
             return runCase<Order, SourceCase::HighOrderPolynomial>(
-                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family, config);
         case SourceCase::ShiftedExponential:
             return runCase<Order, SourceCase::ShiftedExponential>(
-                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family, config);
         case SourceCase::Sines:
             return runCase<Order, SourceCase::Sines>(num_nodes, preconditioned, precon_type,
-                                                     interp_nodes, quad_family);
+                                                     interp_nodes, quad_family, config);
         default:
             throw std::runtime_error("unknown source");
     }
@@ -147,7 +175,7 @@ unsigned parseMinNodes(int argc, char* argv[], unsigned default_min = 4) {
     return default_min;
 }
 
-// Parse --solver plain|preconditioned (default: preconditioned = SSOR PCG)
+// Parse --solver plain|preconditioned (default: preconditioned = Jacobi PCG)
 bool parsePreconditioned(int argc, char* argv[]) {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--solver") {
@@ -170,7 +198,55 @@ std::string parsePreconditioner(int argc, char* argv[]) {
             return type;
         }
     }
-    return "ssor";
+    return "jacobi";
+}
+
+double parseDoubleFlag(int argc, char* argv[], const std::string& flag, double default_value) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == flag) {
+            return std::stod(argv[i + 1]);
+        }
+    }
+    return default_value;
+}
+
+StudyConfig parseStudyConfig(int argc, char* argv[]) {
+    StudyConfig config;
+    config.tolerance = parseDoubleFlag(argc, argv, "--tolerance", config.tolerance);
+    config.max_iterations =
+        parseIntFlag(argc, argv, "--max_iterations", config.max_iterations);
+    config.newton_level = parseIntFlag(argc, argv, "--newton_level", config.newton_level);
+    config.chebyshev_degree =
+        parseIntFlag(argc, argv, "--chebyshev_degree", config.chebyshev_degree);
+    config.richardson_iterations =
+        parseIntFlag(argc, argv, "--richardson_iterations", config.richardson_iterations);
+    config.gauss_seidel_inner_iterations = parseIntFlag(
+        argc, argv, "--gauss_seidel_inner_iterations", config.gauss_seidel_inner_iterations);
+    config.gauss_seidel_outer_iterations = parseIntFlag(
+        argc, argv, "--gauss_seidel_outer_iterations", config.gauss_seidel_outer_iterations);
+    config.ssor_omega = parseDoubleFlag(argc, argv, "--ssor_omega", config.ssor_omega);
+    config.accuracyDiagnostics =
+        parseIntFlag(argc, argv, "--accuracy-diagnostics", 0) != 0;
+    if (config.accuracyDiagnostics && ippl::Comm->size() != 1)
+        throw std::runtime_error("--accuracy-diagnostics requires one MPI rank");
+    return config;
+}
+
+void writeStudyConfig(std::ostream& os, bool preconditioned, const std::string& precon_type,
+                      const StudyConfig& config, const char* prefix = "") {
+    const auto previous_precision = os.precision();
+    os << std::setprecision(17) << prefix << "solver="
+       << (preconditioned ? "preconditioned" : "plain")
+       << "  preconditioner_type=" << precon_type << "  tolerance=" << config.tolerance
+       << "  max_iterations=" << config.max_iterations << '\n'
+       << prefix << "newton_level=" << config.newton_level
+       << "  chebyshev_degree=" << config.chebyshev_degree
+       << "  richardson_iterations=" << config.richardson_iterations
+       << "  gauss_seidel_inner_iterations=" << config.gauss_seidel_inner_iterations
+       << "  gauss_seidel_outer_iterations=" << config.gauss_seidel_outer_iterations
+       << "  ssor_omega=" << config.ssor_omega << '\n'
+       << prefix << "accuracy_diagnostics=" << config.accuracyDiagnostics << '\n';
+    os.precision(previous_precision);
 }
 
 double observedRate(const ConvergenceRow& coarse, const ConvergenceRow& fine) {
@@ -213,24 +289,30 @@ int main(int argc, char* argv[]) {
         }
         const bool preconditioned  = parsePreconditioned(argc, argv);
         const std::string precon_type = parsePreconditioner(argc, argv);
+        const StudyConfig config = parseStudyConfig(argc, argv);
+        const int minOrder = parseIntFlag(argc, argv, "--min-order", 1);
+        const int maxOrder = parseIntFlag(argc, argv, "--max-order", 3);
+        if (minOrder < 1 || maxOrder > 3 || minOrder > maxOrder)
+            throw std::runtime_error("require 1 <= --min-order <= --max-order <= 3");
         const std::string interp_nodes = canonicalInterpolationTag(
             parseStringFlag(argc, argv, "--interpolation_nodes", "gll"));
         const std::string quad_family = canonicalQuadratureTag(
             parseStringFlag(argc, argv, "--quadrature_nodes", "gauss_legendre"));
-        const unsigned max_order   = maxLagrangeOrderForPreconditioner(precon_type);
+        const unsigned numOrders = maxOrder - minOrder + 1;
 
         const auto out_path =
             std::filesystem::current_path() / convergenceDatFilename(Dim, interp_nodes);
 
         constexpr const char* domain_note = "[0,1] (homogeneous Dirichlet)";
         logStudyBanner(Dim, QuadNodes, min_nodes, max_nodes, out_path.string(), domain_note,
-                       max_order, interp_nodes, quad_family);
+                       numOrders, interp_nodes, quad_family);
         if (ippl::Comm->rank() == 0) {
             std::cout << "Solver mode: "
                       << (preconditioned ? "preconditioned (" + precon_type + ")"
                                          : "plain (unpreconditioned)")
                       << "\n";
-
+            writeStudyConfig(std::cout, preconditioned, precon_type, config, "  ");
+            std::cout << "  orders=P" << minOrder << "..P" << maxOrder << '\n';
         }
 
         std::unique_ptr<std::ofstream> dat_out;
@@ -240,14 +322,18 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("cannot open output file: " + out_path.string());
             }
             writeDatHeader(*dat_out, Dim, domain_note, interp_nodes, quad_family);
+            writeStudyConfig(*dat_out, preconditioned, precon_type, config, "# ");
+            *dat_out << "# orders=P" << minOrder << "..P" << maxOrder
+                     << "  rel_L2 is absolute L2 error (legacy column name)\n";
         }
 
-        ConvergenceProgressLog progress(totalConvergenceCases(min_nodes, max_nodes, max_order), Dim);
+        ConvergenceProgressLog progress(
+            totalConvergenceCases(min_nodes, max_nodes, numOrders), Dim);
         std::vector<std::vector<ConvergenceRow>> studies;
 
         for (SourceCase src :
              {SourceCase::LowOrderPolynomial, SourceCase::HighOrderPolynomial, SourceCase::ShiftedExponential, SourceCase::Sines}) {
-            for (unsigned order = 1u; order <= max_order; ++order) {
+            for (unsigned order = minOrder; order <= static_cast<unsigned>(maxOrder); ++order) {
                 std::vector<ConvergenceRow> rows;
                 for (unsigned n = min_nodes; n <= max_nodes; n <<= 1) {
                     progress.beginCase(sourceTag(src), order, n);
@@ -255,13 +341,13 @@ int main(int argc, char* argv[]) {
                         switch (order) {
                             case 1:
                                 return runCaseSource<1>(n, src, preconditioned, precon_type,
-                                                        interp_nodes, quad_family);
+                                                        interp_nodes, quad_family, config);
                             case 2:
                                 return runCaseSource<2>(n, src, preconditioned, precon_type,
-                                                        interp_nodes, quad_family);
+                                                        interp_nodes, quad_family, config);
                             default:
                                 return runCaseSource<3>(n, src, preconditioned, precon_type,
-                                                        interp_nodes, quad_family);
+                                                        interp_nodes, quad_family, config);
                         }
                     }();
                     progress.endCase(row);

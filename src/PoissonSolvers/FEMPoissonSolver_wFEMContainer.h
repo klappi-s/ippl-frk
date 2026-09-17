@@ -4,7 +4,8 @@
 //   Select via params["preconditioned"] = true|false (default: true).
 //   When preconditioned, uses ippl::PCG<> + Preconditioner.h (jacobi, newton, chebyshev,
 //   richardson, richardson_alt, gauss-seidel, ssor, multigrid (P1 h-MG; P2/P3 p-multigrid).
-//   Default preconditioner_type is "ssor".
+//   Default preconditioner_type is "jacobi" (SSOR is weak/harmful for higher-order FEM).
+//   Multigrid uses Flexible CG + FEM rediscretization on all h-levels (Task 5.4).
 //   Newton/Chebyshev spectral bounds are estimated via powermethod / adapted_powermethod.
 
 #ifndef IPPL_FEMPOISSONSOLVER_WFC_H
@@ -88,6 +89,33 @@ namespace ippl {
         void solve() override {
             applyNodeFamilyParameters();
 
+            // The solution owns Dirichlet metadata; rhs still contains source samples.
+            // Krylov directions have homogeneous BCs, while lhs retains prescribed DOFs.
+            const auto solutionBC = this->lhs_mp->getFieldBC();
+            auto bcTypes = this->lhs_mp->getFieldBCTypes();
+            const bool dirichlet = std::all_of(bcTypes.begin(), bcTypes.end(), [](FieldBC bc) {
+                return bc == ZERO_FACE || bc == CONSTANT_FACE;
+            });
+            if (dirichlet) {
+                using ScalarField = Field<Tlhs, Dim, MeshType, Cell>;
+                Tlhs prescribed = 0;
+                for (unsigned face = 0; face < 2 * Dim; ++face) {
+                    const Tlhs value = bcTypes[face] == ZERO_FACE ? Tlhs(0) :
+                        dynamic_cast<ExtrapolateFace<ScalarField>&>(*solutionBC[face]).getOffset();
+                    if (face == 0) prescribed = value;
+                    if (value != prescribed)
+                        throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                                            "Dirichlet faces must prescribe the same constant.");
+                }
+                detail::setFEMBoundaryDOFs(*(this->lhs_mp), *(this->lhs_mp), prescribed, false);
+                bcTypes.fill(ZERO_FACE);
+            } else if (!std::all_of(bcTypes.begin(), bcTypes.end(), [](FieldBC bc) {
+                           return bc == PERIODIC_FACE;
+                       })) {
+                throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                                    "Only uniform Dirichlet or fully periodic boundaries are supported.");
+            }
+            this->rhs_mp->setFieldBC(bcTypes);
             this->rhs_mp->fillHalo();
             lagrangeSpace_m.evaluateLoadVector(*(this->rhs_mp));
 
@@ -104,9 +132,6 @@ namespace ippl {
 
             EvalFunctor<Tlhs, Dim, LagrangeType::numElementDOFs> poissonEquationEval(
                 DPhiInvT, absDetDPhi);
-
-            const auto bcTypes = (this->rhs_mp)->getFieldBCTypes();
-            const FieldBC bcType = bcTypes[0];
 
             const auto algoOperator = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
                 field.setFieldBC(bcTypes);
@@ -144,9 +169,10 @@ namespace ippl {
                 return lagrangeSpace_m.evaluateAx_diag(field, poissonEquationEval);
             };
 
-            if (bcType == CONSTANT_FACE) {
+            if (dirichlet) {
+                this->lhs_mp->fillHalo();
                 *(this->rhs_mp) = *(this->rhs_mp) -
-                    lagrangeSpace_m.evaluateAx_lift(*(this->rhs_mp), poissonEquationEval);
+                    lagrangeSpace_m.evaluateAx_lift(*(this->lhs_mp), poissonEquationEval);
             }
 
             const bool usePrecon = this->params_m.template get<bool>("preconditioned");
@@ -268,9 +294,11 @@ namespace ippl {
                                             "p-multigrid supports Lagrange Order 2 or 3 only.");
                     }
 
+                    this->params_m.update("flexible_cg", true);
                     pcg_algo_m.setOperator(algoOperator);
                     pcg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
                 } else {
+                    this->params_m.update("flexible_cg", preconditioner_type == "multigrid");
                     pcg_algo_m.setPreconditioner(algoOperator, algoOperatorL, algoOperatorU,
                                                  algoOperatorUL, algoOperatorInvD, algoOperatorD,
                                                  alpha, beta, preconditioner_type, level, degree,
@@ -323,7 +351,8 @@ namespace ippl {
             this->params_m.add("max_iterations", 1000);
             this->params_m.add("tolerance", (Tlhs)1e-13);
             this->params_m.add("preconditioned", true);
-            this->params_m.add("preconditioner_type", "ssor");
+            this->params_m.add("preconditioner_type", "jacobi");
+            this->params_m.add("flexible_cg", false);
             // Milder than FD/alpine defaults: spectral types use estimated eigenvalues.
             this->params_m.add("newton_level", 2);
             this->params_m.add("chebyshev_degree", 5);

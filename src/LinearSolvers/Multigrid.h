@@ -477,6 +477,203 @@ namespace ippl {
             IpplTimings::stopTimer(prolong);
         }
 
+        /**
+         * @brief Like prolong_add, but overwrites fine_dst with P*coarse_src (no add).
+         * @param level Index of the fine level (coarse is level+1). Layouts must match L_[level].
+         */
+        void prolong_set_fields(const size_t level, Field& fine_dst, Field& coarse_src) {
+            IpplTimings::TimerRef prolong = IpplTimings::getTimer("prolong_set");
+            IpplTimings::startTimer(prolong);
+
+            if (level >= L_.size() - 1) {
+                std::cerr << "Trying to prolong_set at invalid level" << std::endl;
+                IpplTimings::stopTimer(prolong);
+                return;
+            }
+
+            if (communication_)
+                coarse_src.fillHalo();
+
+            fine_dst = 0.0;
+
+            const auto lDomF = fine_dst.getLayout().getLocalNDIndex();
+            const auto lDomC = coarse_src.getLayout().getLocalNDIndex();
+            const int nghF   = fine_dst.getNghost();
+            const int nghC   = coarse_src.getNghost();
+            auto uf          = fine_dst.getView();
+            auto uc          = coarse_src.getView();
+            const auto gDomF = fine_dst.getLayout().getDomain();
+            constexpr int num_corners = 1 << Dim;
+
+            using index_array_type = typename RangePolicy<Dim>::index_array_type;
+            ippl::parallel_for(
+                "prolong_set", fine_dst.getFieldRangePolicy(),
+                KOKKOS_LAMBDA(const index_array_type& args) {
+                    ippl::Vector<int, Dim> idxC_base;
+                    ippl::Vector<int, Dim> sgn;
+                    for (unsigned d = 0; d < Dim; ++d) {
+                        const int localF   = static_cast<int>(args[d]) - nghF;
+                        const int globalF  = lDomF[d].first() + localF * lDomF[d].stride();
+                        const int logicalF = (globalF - gDomF[d].first()) / lDomF[d].stride();
+                        const int logicalC = logicalF / 2;
+                        sgn[d]             = (logicalF % 2 == 0) ? -1 : +1;
+                        const int globalC  = gDomF[d].first() + logicalC * lDomC[d].stride();
+                        idxC_base[d] = (globalC - lDomC[d].first()) / lDomC[d].stride() + nghC;
+                    }
+                    double interp_val = 0.0;
+                    for (int s = 0; s < num_corners; ++s) {
+                        Vector<int, Dim> idxC = idxC_base;
+                        double weight         = 1.0;
+                        for (unsigned d = 0; d < Dim; ++d) {
+                            int b = (s >> d) & 1;
+                            idxC[d] += b * sgn[d];
+                            weight *= (b == 0) ? 0.75 : 0.25;
+                        }
+                        interp_val += weight * apply(uc, idxC);
+                    }
+                    apply(uf, args) = interp_val;
+                });
+            ippl::fence();
+            IpplTimings::stopTimer(prolong);
+        }
+
+        void prolong_set(const size_t level) { prolong_set_fields(level, L_[level].u, L_[level + 1].u); }
+
+        /**
+         * @brief Full-weight restriction of fine_src into coarse_dst.
+         * @param level Index of the fine level (coarse is level+1).
+         */
+        void restrict_field_to(const size_t level, const Field& fine_src, Field& coarse_dst) {
+            IpplTimings::TimerRef restrict = IpplTimings::getTimer("restrict_field");
+            IpplTimings::startTimer(restrict);
+
+            if (level >= L_.size() - 1) {
+                std::cerr << "Trying to restrict_field at lowest level." << std::endl;
+                IpplTimings::stopTimer(restrict);
+                return;
+            }
+
+            Field fine_work = fine_src.deepCopy();
+            fine_work.fillHalo();
+            coarse_dst = 0.0;
+
+            const auto lDomF = fine_work.getLayout().getLocalNDIndex();
+            const auto lDomC = coarse_dst.getLayout().getLocalNDIndex();
+            const int nghF   = fine_work.getNghost();
+            const int nghC   = coarse_dst.getNghost();
+            auto rf          = fine_work.getView();
+            auto fc          = coarse_dst.getView();
+            constexpr int num_children = 1 << Dim;
+            constexpr double denom     = static_cast<double>(num_children);
+
+            using index_array_type = typename RangePolicy<Dim>::index_array_type;
+            ippl::parallel_for(
+                "restrict_field", coarse_dst.getFieldRangePolicy(),
+                KOKKOS_LAMBDA(const index_array_type& args) {
+                    ippl::Vector<int, Dim> idxF_base;
+                    for (unsigned d = 0; d < Dim; ++d) {
+                        const int localC  = static_cast<int>(args[d]) - nghC;
+                        const int globalC = lDomC[d].first() + localC * lDomC[d].stride();
+                        idxF_base[d] = (globalC - lDomF[d].first()) / lDomF[d].stride() + nghF;
+                    }
+                    double sum = 0.0;
+                    for (int s = 0; s < num_children; ++s) {
+                        Vector<int, Dim> idxF = idxF_base;
+                        for (unsigned d = 0; d < Dim; ++d) {
+                            idxF[d] += (s >> d) & 1;
+                        }
+                        sum += apply(rf, idxF);
+                    }
+                    apply(fc, args) = sum / denom;
+                });
+            ippl::fence();
+
+            if (is_all_periodic_) {
+                auto avg   = coarse_dst.getVolumeAverage();
+                coarse_dst = coarse_dst - avg;
+            }
+            if (communication_)
+                coarse_dst.fillHalo();
+
+            IpplTimings::stopTimer(restrict);
+        }
+
+        void restrict_field(const size_t level, const Field& fine_src) {
+            restrict_field_to(level, fine_src, L_[level + 1].f);
+        }
+
+        /**
+         * @brief Variational restriction R = P^T (same stencil weights as prolong_set).
+         * Required for SPD Galerkin A_c = R A_f P. Accumulates with atomics.
+         */
+        void restrict_adjoint_to(const size_t level, const Field& fine_src, Field& coarse_dst) {
+            IpplTimings::TimerRef restrict = IpplTimings::getTimer("restrict_adjoint");
+            IpplTimings::startTimer(restrict);
+
+            if (level >= L_.size() - 1) {
+                std::cerr << "Trying to restrict_adjoint at lowest level." << std::endl;
+                IpplTimings::stopTimer(restrict);
+                return;
+            }
+
+            Field fine_work = fine_src.deepCopy();
+            fine_work.fillHalo();
+            coarse_dst = 0.0;
+
+            const auto lDomF = fine_work.getLayout().getLocalNDIndex();
+            const auto lDomC = coarse_dst.getLayout().getLocalNDIndex();
+            const int nghF   = fine_work.getNghost();
+            const int nghC   = coarse_dst.getNghost();
+            auto uf          = fine_work.getView();
+            auto uc          = coarse_dst.getView();
+            const auto gDomF = fine_work.getLayout().getDomain();
+            constexpr int num_corners = 1 << Dim;
+
+            using index_array_type = typename RangePolicy<Dim>::index_array_type;
+            ippl::parallel_for(
+                "restrict_adjoint", fine_work.getFieldRangePolicy(),
+                KOKKOS_LAMBDA(const index_array_type& args) {
+                    ippl::Vector<int, Dim> idxC_base;
+                    ippl::Vector<int, Dim> sgn;
+                    for (unsigned d = 0; d < Dim; ++d) {
+                        const int localF   = static_cast<int>(args[d]) - nghF;
+                        const int globalF  = lDomF[d].first() + localF * lDomF[d].stride();
+                        const int logicalF = (globalF - gDomF[d].first()) / lDomF[d].stride();
+                        const int logicalC = logicalF / 2;
+                        sgn[d]             = (logicalF % 2 == 0) ? -1 : +1;
+                        const int globalC  = gDomF[d].first() + logicalC * lDomC[d].stride();
+                        idxC_base[d] = (globalC - lDomC[d].first()) / lDomC[d].stride() + nghC;
+                    }
+                    const double fine_val = apply(uf, args);
+                    for (int s = 0; s < num_corners; ++s) {
+                        Vector<int, Dim> idxC = idxC_base;
+                        double weight         = 1.0;
+                        for (unsigned d = 0; d < Dim; ++d) {
+                            int b = (s >> d) & 1;
+                            idxC[d] += b * sgn[d];
+                            weight *= (b == 0) ? 0.75 : 0.25;
+                        }
+                        Kokkos::atomic_add(&apply(uc, idxC), weight * fine_val);
+                    }
+                });
+            ippl::fence();
+
+            if (is_all_periodic_) {
+                auto avg   = coarse_dst.getVolumeAverage();
+                coarse_dst = coarse_dst - avg;
+            }
+            if (communication_)
+                coarse_dst.fillHalo();
+
+            IpplTimings::stopTimer(restrict);
+        }
+
+        /**
+         * @brief Residual transfer fine → coarse (default: full-weight average).
+         * Override for variational R = P^T (Galerkin FEM MG).
+         */
+        virtual void restrict_residual(const size_t level) { restrict_average(level); }
+
     protected:
         std::deque<multigrid::Level<Field>> L_;
         OperatorF op_;
@@ -597,7 +794,7 @@ namespace ippl {
          *
          * @param level The current level index in the V-cycle.
          */
-        void vcycle(size_t level) {
+        virtual void vcycle(size_t level) {
             active_level_ = level;
             if (level == L_.size() - 1) {
                 // Coarsest grid: just smooth a lot (or use a direct solver)
@@ -605,7 +802,7 @@ namespace ippl {
                 return;
             }
             smooth_jacobi(level, nu1_);  // Pre-smoothing
-            restrict_average(level);     // Pass level
+            restrict_residual(level);    // residual transfer (full-weight or R=P^T)
             vcycle(level + 1);           // Recursively go down one level
             prolong_add(level);          // Pass level
             smooth_jacobi(level, nu2_);  // Post-smoothing

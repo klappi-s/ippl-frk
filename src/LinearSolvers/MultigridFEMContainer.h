@@ -5,6 +5,16 @@
 // geometric V-cycle runs on scalar vertex Fields; the fine-level operator and
 // Jacobi smoother use the FEM matrix-free ops.
 //
+// Task 5.4 note (2026-08-21): Coarse levels still use FD laplace (see apply_operator).
+// Attempts so far:
+//   - SubField FEM rediscretization → wrong L² / blow-ups (reverted).
+//   - Matrix-free Galerkin A_c = R A_f P (with R=P^T and with Multigrid.h transfers)
+//     → 1-level MG (no coarse) matches plain L²; multi-level Galerkin still gives
+//     wrong L² at tiny reported residual. Helpers prolong_set / restrict_adjoint
+//     live in Multigrid.h for the next B1 attempt.
+// Flex-CG + true-residual stop: B2 in PCG.h / FEMPoissonSolver_wFEMContainer.
+// Default precon is jacobi.
+//
 
 #ifndef IPPL_MULTIGRID_FEMCONTAINER_H
 #define IPPL_MULTIGRID_FEMCONTAINER_H
@@ -188,7 +198,7 @@ namespace ippl {
             const int nghost = b.getNghost();
             auto bcs         = b.getFieldBC();
 
-            b_scalar_     = ScalarField(mesh, layout, nghost);
+            b_scalar_      = ScalarField(mesh, layout, nghost);
             result_scalar_ = ScalarField(mesh, layout, nghost);
             b_scalar_.setFieldBC(bcs);
             result_scalar_.setFieldBC(bcs);

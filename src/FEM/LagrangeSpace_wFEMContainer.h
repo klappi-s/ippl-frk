@@ -239,21 +239,22 @@ namespace ippl {
         FieldLHS evaluateAx_lift(FieldLHS& field, F& evalFunction) const;
 
         /**
-         * @brief Compute the diagonal of the stiffness matrix A.
-         *        Used as a Jacobi preconditioner: M = diag(A).
-         *        Boundary DOFs (ZERO_FACE) are set to 1 so division is safe.
+         * @brief Apply the diagonal D = diag(A) to the input coefficients.
+         *        ZERO_FACE boundary rows return zero; CONSTANT_FACE rows copy the input.
          *
-         * @param field A field used for mesh/layout/BC information.
+         * @param field Input coefficients and mesh/layout/BC information.
          * @param evalFunction The bilinear form (same as passed to evaluateAx).
          *
-         * @return FieldLHS - Field where each DOF stores the diagonal entry A[i,i].
+         * @return FieldLHS - D*x on unconstrained DOFs.
          */
         template <typename F>
         FieldLHS evaluateAx_diag(FieldLHS& field, F& evalFunction) const;
 
+        // Strict lower triangle: global row index > global column index (x-fastest).
         template <typename F>
         FieldLHS evaluateAx_lower(FieldLHS& field, F& evalFunction) const;
 
+        // Strict upper triangle: global row index < global column index (x-fastest).
         template <typename F>
         FieldLHS evaluateAx_upper(FieldLHS& field, F& evalFunction) const;
 

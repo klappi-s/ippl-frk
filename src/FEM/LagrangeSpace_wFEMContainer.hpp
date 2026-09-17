@@ -3,6 +3,50 @@
 
 namespace ippl {
 
+    namespace detail {
+        // Physical boundary DOFs are prescribed once by their owner, not summed
+        // as element contributions. Shared by solver setup and operator identity rows.
+        template <typename Field>
+        void setFEMBoundaryDOFs(Field& destination, const Field& source,
+                               typename Field::value_type value, bool copySource) {
+            constexpr unsigned Dim = Field::dim;
+            auto entity = [&]<typename Entity>() {
+                auto view = destination.template getView<Entity>();
+                const auto input = source.template getView<Entity>();
+                const auto owned = destination.template getLayout<Entity>().getLocalNDIndex();
+                const auto domain = destination.template getLayout<Entity>().getDomain();
+                Vector<int, Dim> first, last;
+                for (unsigned d = 0; d < Dim; ++d) {
+                    first[d] = owned[d].first();
+                    last[d] = domain[d].last();
+                }
+                const int ghosts = destination.getNghost();
+                const int shift = source.getNghost()-ghosts;
+                const unsigned count = destination.template getNumDOFs<Entity>();
+                using ExecSpace = typename decltype(view)::execution_space;
+                using IndexArray = typename RangePolicy<Dim, ExecSpace>::index_array_type;
+                ippl::parallel_for("FEM owned boundary DOFs",
+                    destination.template getFieldRangePolicy<Entity>(0),
+                    KOKKOS_LAMBDA(const IndexArray& index) {
+                        bool boundary = false;
+                        auto sourceIndex = index;
+                        for (unsigned d = 0; d < Dim; ++d) {
+                            const int global = index[d]-ghosts+first[d];
+                            boundary |= !Entity::dir[d] && (global == 0 || global == last[d]);
+                            sourceIndex[d] += shift;
+                        }
+                        if (boundary)
+                            for (unsigned j = 0; j < count; ++j)
+                                apply(view, index)[j] = copySource ? apply(input, sourceIndex)[j] : value;
+                    });
+            };
+            [&]<typename... Entities>(std::tuple<Entities...>) {
+                (entity.template operator()<Entities>(), ...);
+            }(Field::getEntityTypes());
+        }
+    } // namespace detail
+
+
     // Functors for LagrangeSpace_wfc parallel operations
     // Must be defined at namespace scope for CUDA compatibility
 
@@ -110,7 +154,8 @@ namespace ippl {
                 }
 
                 for (size_t j = DofStartB; j < DofEndB; ++j) {
-                    if (g_dofs[i] >= g_dofs[j]) continue;
+                    // Strict lower: row i is greater than column j in global DOF order.
+                    if (g_dofs[i] <= g_dofs[j]) continue;
 
                     DOFMapping_t dofMap_j = dofHandler.getElementDOFMapping(j);
                     if (((bcTypes[0] == CONSTANT_FACE) || (bcTypes[0] == ZERO_FACE)) && dofHandler.isDOFOnBoundary(elementIndex, j)) {
@@ -161,7 +206,8 @@ namespace ippl {
                 }
 
                 for (size_t j = DofStartB; j < DofEndB; ++j) {
-                    if (g_dofs[i] <= g_dofs[j]) continue;
+                    // Strict upper: row i is less than column j in global DOF order.
+                    if (g_dofs[i] >= g_dofs[j]) continue;
 
                     DOFMapping_t dofMap_j = dofHandler.getElementDOFMapping(j);
                     if (((bcTypes[0] == CONSTANT_FACE) || (bcTypes[0] == ZERO_FACE)) && dofHandler.isDOFOnBoundary(elementIndex, j)) {
@@ -995,6 +1041,9 @@ namespace ippl {
             resultField.accumulateHalo();
         }
 
+        if (bcTypes[0] == CONSTANT_FACE)
+            detail::setFEMBoundaryDOFs(resultField, field, T(0), true);
+
         IpplTimings::stopTimer(evalAx);
 
         return resultField;
@@ -1202,6 +1251,9 @@ namespace ippl {
 
         // Accumulate halo (same pattern as evaluateAx)
         diagField.accumulateHalo();
+
+        if (bcTypes[0] == CONSTANT_FACE)
+            detail::setFEMBoundaryDOFs(diagField, field, T(0), true);
 
         IpplTimings::stopTimer(evalAx_diag_timer);
 
@@ -1938,8 +1990,12 @@ namespace ippl {
             resultField.applyBC();
             resultField.assignGhostToPhysical();
         } else {
-            resultField.accumulateHalo_noghost();
+            // Preserve interface contributions from every entity orientation.
+            resultField.accumulateHalo();
         }
+
+        if (bcTypes[0] == CONSTANT_FACE)
+            detail::setFEMBoundaryDOFs(resultField, field, T(0), true);
 
         IpplTimings::stopTimer(evalAx_lower_timer);
         return resultField;
@@ -2029,8 +2085,12 @@ namespace ippl {
             resultField.applyBC();
             resultField.assignGhostToPhysical();
         } else {
-            resultField.accumulateHalo_noghost();
+            // Preserve interface contributions from every entity orientation.
+            resultField.accumulateHalo();
         }
+
+        if (bcTypes[0] == CONSTANT_FACE)
+            detail::setFEMBoundaryDOFs(resultField, field, T(0), true);
 
         IpplTimings::stopTimer(evalAx_upper_timer);
         return resultField;
@@ -2119,8 +2179,12 @@ namespace ippl {
             resultField.applyBC();
             resultField.assignGhostToPhysical();
         } else {
-            resultField.accumulateHalo_noghost();
+            // Preserve interface contributions from every entity orientation.
+            resultField.accumulateHalo();
         }
+
+        if (bcTypes[0] == CONSTANT_FACE)
+            detail::setFEMBoundaryDOFs(resultField, field, T(0), true);
 
         IpplTimings::stopTimer(evalAx_upperlower_timer);
         return resultField;
@@ -2236,6 +2300,9 @@ namespace ippl {
                 applyInvDiag.template operator()<EntityTypeA>();
             }.template operator()<Is>(), ...);
         }(std::make_index_sequence<numTypes>{});
+
+        if (bcTypes[0] == CONSTANT_FACE || bcTypes[0] == ZERO_FACE)
+            detail::setFEMBoundaryDOFs(resultField, field, T(0), bcTypes[0] == CONSTANT_FACE);
 
         IpplTimings::stopTimer(evalAx_inversediag_timer);
         return resultField;

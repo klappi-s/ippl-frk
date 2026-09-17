@@ -757,6 +757,43 @@ TYPED_TEST(FEMContainerTest, NormZeroContainerFull) {
     assertEqual<T>(0.0, norm2);
 }
 
+TYPED_TEST(FEMContainerTest, BoundaryValuesSurviveSetAndCopy) {
+    using T = typename TestFixture::value_type;
+    using Container = typename TestFixture::femcontainer_full_type;
+    constexpr unsigned Dim = TestFixture::dim;
+    using ScalarField = ippl::Field<T, Dim, typename TestFixture::mesh_type, Cell>;
+    auto& original = *this->femContainerFull;
+    std::array<ippl::FieldBC, 2*Dim> types;
+    std::array<T, 2*Dim> offsets, slopes;
+    for (unsigned face = 0; face < 2*Dim; ++face) {
+        types[face] = face % 2 ? ippl::EXTRAPOLATE_FACE : ippl::CONSTANT_FACE;
+        offsets[face] = T(face)*T(.75); // Includes an explicitly prescribed zero.
+        slopes[face] = face % 2 ? T(.25) : T(0);
+    }
+    original.setFieldBC(types, offsets, slopes);
+    auto check = [&](const Container& container) {
+        auto bc = container.getFieldBC();
+        for (unsigned face = 0; face < 2*Dim; ++face) {
+            EXPECT_EQ(bc[face]->getBCType(), types[face]);
+            auto* extrapolate = dynamic_cast<ippl::ExtrapolateFace<ScalarField>*>(bc[face].get());
+            ASSERT_NE(extrapolate, nullptr);
+            EXPECT_EQ(extrapolate->getOffset(), offsets[face]);
+            EXPECT_EQ(extrapolate->getSlope(), slopes[face]);
+        }
+    };
+    check(original);
+    Container copied(original);
+    check(copied);
+    auto deep = original.deepCopy();
+    check(deep);
+    Container assigned(*this->mesh, *this->layout);
+    assigned = original;
+    check(assigned);
+    Container restored(*this->mesh, *this->layout);
+    restored.setFieldBC(original.getFieldBC());
+    check(restored);
+}
+
 int main(int argc, char* argv[]) {
     int success = 1;
     ippl::initialize(argc, argv);

@@ -10,7 +10,7 @@
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --max-nodes 16
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --min-nodes 2 --max-nodes 2
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --solver plain        # unpreconditioned CG
-//   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --solver preconditioned  # SSOR PCG (default)
+//   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --solver preconditioned  # Jacobi PCG (default)
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --preconditioner_type jacobi
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --interpolation_nodes gll
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --interpolation_nodes equispaced
@@ -147,7 +147,7 @@ unsigned parseMinNodes(int argc, char* argv[], unsigned default_min = 4) {
     return default_min;
 }
 
-// Parse --solver plain|preconditioned (default: preconditioned = SSOR PCG)
+// Parse --solver plain|preconditioned (default: preconditioned = Jacobi PCG)
 bool parsePreconditioned(int argc, char* argv[]) {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--solver") {
@@ -170,7 +170,7 @@ std::string parsePreconditioner(int argc, char* argv[]) {
             return type;
         }
     }
-    return "ssor";
+    return "jacobi";
 }
 
 double observedRate(const ConvergenceRow& coarse, const ConvergenceRow& fine) {

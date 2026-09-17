@@ -163,14 +163,8 @@ namespace ippl {
             const range_list &sendRanges   = layout->getNeighborsSendRange(),
                              &recvRanges   = layout->getNeighborsRecvRange();
 
-            auto ldom = layout->getLocalNDIndex();
-            for (const auto& axis : ldom) {
-                if ((axis.length() == 1) && (Dim != 1)) {
-                    throw IpplException(
-                        "HaloCells::exchangeBoundaries",
-                        "Cannot do neighbour exchange when domain decomposition contains planes.");
-                }
-            }
+            // Thin local domains are valid. FieldLayout classifies neighbor
+            // directions from domain positions, including one-entry parallel axes.
 
             // needed for the NOGHOST approach - we want to remove the ghost
             // cells on the boundaries of the global domain from the halo
@@ -295,14 +289,8 @@ namespace ippl {
             const range_list &sendRanges   = layout->getNeighborsSendRange(),
                              &recvRanges   = layout->getNeighborsRecvRange();
 
-            auto ldom = layout->getLocalNDIndex();
-            for (const auto& axis : ldom) {
-                if ((axis.length() == 1) && (Dim != 1)) {
-                    throw std::runtime_error(
-                        "HaloCells: Cannot do neighbour exchange when domain decomposition "
-                        "contains planes!");
-                }
-            }
+            // Thin local domains are valid. FieldLayout classifies neighbor
+            // directions from domain positions, including one-entry parallel axes.
 
             // needed for the NOGHOST approach - we want to remove the ghost
             // cells on the boundaries of the global domain from the halo

@@ -22,6 +22,22 @@ namespace ippl {
         }
     };
 
+    // Reduce scalar DOFs, not DOFArrays: the latter have no scalar ordering or MPI min/max.
+    template <typename ViewType, typename T, std::size_t NumDOFs,
+              typename IndexArrayType, bool Maximum>
+    struct FEMContainerExtremumFunctor {
+        ViewType view;
+
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const IndexArrayType& args, T& value) const {
+            auto dofs = apply(view, args);
+            for (std::size_t i = 0; i < NumDOFs; ++i) {
+                if constexpr (Maximum) value = Kokkos::max(value, dofs[i]);
+                else value = Kokkos::min(value, dofs[i]);
+            }
+        }
+    };
+
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     FEMContainer<T, Dim, EntityTypes, DOFNums>::FEMContainer() {}
 
@@ -35,7 +51,9 @@ namespace ippl {
         : nghost_m(other.nghost_m)
         , mesh_m(other.mesh_m)
         , VertexLayout_m(other.VertexLayout_m)
-        , bcTypes_m(other.bcTypes_m) {
+        , bcTypes_m(other.bcTypes_m)
+        , bcValues_m(other.bcValues_m)
+        , bcSlopes_m(other.bcSlopes_m) {
 
         // Copy the layout array
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -46,6 +64,7 @@ namespace ippl {
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             ((std::get<Is>(data_m) = std::get<Is>(other.data_m).deepCopy()), ...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
+        setFieldBC(bcTypes_m, bcValues_m, bcSlopes_m);
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
@@ -68,6 +87,8 @@ namespace ippl {
 
         // Initialize boundary condition types to NO_FACE by default
         bcTypes_m.fill(NO_FACE);
+        bcValues_m.fill(T(0));
+        bcSlopes_m.fill(T(0));
 
         // Get domain and communicator of the layout
         NDIndex<Dim> domain = l.getDomain();
@@ -256,38 +277,50 @@ namespace ippl {
         return result;
     }
 
-    // TODO: Only for testing purposes, not efficient
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     T FEMContainer<T, Dim, EntityTypes, DOFNums>::max() const {
-        T maxVal = std::numeric_limits<T>::lowest();
+        T local = std::numeric_limits<T>::lowest();
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             (([&]() {
-                auto fieldMax = std::get<Is>(data_m).max();
-                for (unsigned int i = 0; i < fieldMax.data.size(); ++i) {
-                    if (fieldMax[i] > maxVal) {
-                        maxVal = fieldMax[i];
-                    }
-                }
+                const auto& field = std::get<Is>(data_m);
+                auto view = field.getView();
+                constexpr std::size_t numDOFs = std::get<Is>(DOFNums{}).value;
+                using exec_space = typename std::remove_reference_t<decltype(field)>::execution_space;
+                using index_array_type = typename RangePolicy<Dim, exec_space>::index_array_type;
+                using functor_t = FEMContainerExtremumFunctor<decltype(view), T, numDOFs,
+                                                             index_array_type, true>;
+                T entityValue = std::numeric_limits<T>::lowest();
+                ippl::parallel_reduce("FEMContainer::max", field.getFieldRangePolicy(0),
+                                      functor_t{view}, Kokkos::Max<T>(entityValue));
+                local = std::max(local, entityValue);
             }()), ...);
-        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
-        return maxVal;
+        }(std::make_index_sequence<NEntitys>{});
+        T global = std::numeric_limits<T>::lowest();
+        VertexLayout_m->comm.allreduce(local, global, 1, std::greater<T>());
+        return global;
     }
 
-    // TODO:Only for testing purposes, not efficient
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     T FEMContainer<T, Dim, EntityTypes, DOFNums>::min() const {
-        T minVal = std::numeric_limits<T>::max();
+        T local = std::numeric_limits<T>::max();
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             (([&]() {
-                auto fieldMin = std::get<Is>(data_m).min();
-                for (unsigned int i = 0; i < fieldMin.data.size(); ++i) {
-                    if (fieldMin[i] < minVal) {
-                        minVal = fieldMin[i];
-                    }
-                }
+                const auto& field = std::get<Is>(data_m);
+                auto view = field.getView();
+                constexpr std::size_t numDOFs = std::get<Is>(DOFNums{}).value;
+                using exec_space = typename std::remove_reference_t<decltype(field)>::execution_space;
+                using index_array_type = typename RangePolicy<Dim, exec_space>::index_array_type;
+                using functor_t = FEMContainerExtremumFunctor<decltype(view), T, numDOFs,
+                                                             index_array_type, false>;
+                T entityValue = std::numeric_limits<T>::max();
+                ippl::parallel_reduce("FEMContainer::min", field.getFieldRangePolicy(0),
+                                      functor_t{view}, Kokkos::Min<T>(entityValue));
+                local = std::min(local, entityValue);
             }()), ...);
-        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
-        return minVal;
+        }(std::make_index_sequence<NEntitys>{});
+        T global = std::numeric_limits<T>::max();
+        VertexLayout_m->comm.allreduce(local, global, 1, std::less<T>());
+        return global;
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
@@ -335,6 +368,8 @@ namespace ippl {
         mesh_m = other.mesh_m;
         VertexLayout_m = other.VertexLayout_m;
         bcTypes_m = other.bcTypes_m;
+        bcValues_m = other.bcValues_m;
+        bcSlopes_m = other.bcSlopes_m;
 
         // Copy the layout array
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -353,6 +388,8 @@ namespace ippl {
                 Kokkos::deep_copy(std::get<Is>(data_m).getView(), temp.getView());
             }()), ...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
+
+        setFieldBC(bcTypes_m, bcValues_m, bcSlopes_m);
 
         return *this;
     }
@@ -514,6 +551,8 @@ namespace ippl {
     void FEMContainer<T, Dim, EntityTypes, DOFNums>::setFieldBC(const std::array<FieldBC, 2*Dim>& bcTypes, std::array<T, 2*Dim> bcValues, std::array<T, 2*Dim> bcSlopes) {
         // Store the boundary condition types
         bcTypes_m = bcTypes;
+        bcValues_m = bcValues;
+        bcSlopes_m = bcSlopes;
 
         // Apply boundary conditions to each field in the container
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
