@@ -101,13 +101,15 @@ namespace ippl {
                         return bc == ZERO_FACE || bc == CONSTANT_FACE;
                     }))
                     throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
-                                        "Corrected stiffness modes currently require Dirichlet boundaries.");
+                                        "constant_preserving currently requires Dirichlet boundaries; "
+                                        "set poisson_stiffness_mode=standard for periodic solves.");
                 auto preconditioner = this->params_m.template get<std::string>("preconditioner_type");
                 std::transform(preconditioner.begin(), preconditioner.end(), preconditioner.begin(),
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 if (this->params_m.template get<bool>("preconditioned") && preconditioner == "multigrid")
                     throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
-                                        "Corrected stiffness modes are not validated with multigrid.");
+                                        "constant_preserving is not validated with multigrid; "
+                                        "set poisson_stiffness_mode=standard for multigrid solves.");
             }
 
             // The solution owns Dirichlet metadata; rhs still contains source samples.
@@ -265,7 +267,8 @@ namespace ippl {
                     using P1Cont   = typename DOFHandler<Tlhs, P1Traits>::FEMContainer_t;
                     using P1Space =
                         LagrangeSpace_wfc<Tlhs, Dim, 1, ElementType, QuadratureType, P1Cont, P1Cont>;
-                    EvalFunctor<Tlhs, Dim, P1Space::numElementDOFs> eval1(DPhiInvT, absDetDPhi);
+                    EvalFunctor<Tlhs, Dim, P1Space::numElementDOFs> eval1(
+                        DPhiInvT, absDetDPhi, stiffnessMode);
 
                     auto space1 = std::make_shared<P1Space>(mesh, refElement_m, quadrature_m, layout);
 
@@ -377,7 +380,7 @@ namespace ippl {
             this->params_m.add("tolerance", (Tlhs)1e-13);
             this->params_m.add("preconditioned", true);
             this->params_m.add("preconditioner_type", "jacobi");
-            this->params_m.add("poisson_stiffness_mode", std::string("standard"));
+            this->params_m.add("poisson_stiffness_mode", std::string("constant_preserving"));
             this->params_m.add("flexible_cg", false);
             // Milder than FD/alpine defaults: spectral types use estimated eigenvalues.
             this->params_m.add("newton_level", 2);

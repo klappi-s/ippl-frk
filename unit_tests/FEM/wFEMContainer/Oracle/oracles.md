@@ -126,8 +126,10 @@ these eight solve variants in this order (each name starts with the case ID):
 `ZeroSource` and `ZeroSourceConstantBoundary` are constructed by the C++ test
 and have no separate stored dataset. Their exact solutions are respectively
 zero and the prescribed constant. CTest repeats operator/solve registrations
-with `standard`, `rowsum_diagonal`, and `constant_preserving` stiffness modes,
+with `standard` and `constant_preserving` stiffness modes,
 using the same numerical package and tolerances in every mode.
+`constant_preserving` is the solver default; the registry explicitly selects each
+mode so baseline coverage is retained.
 These are per-case variant orders; typed registration, MPI launches, and CTest
 sharding determine execution order separately.
 

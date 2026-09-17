@@ -19,7 +19,7 @@
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --interpolation_nodes equispaced
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --quadrature_nodes gauss_legendre
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --min-order 2 --max-order 3 --accuracy-diagnostics 1
-//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --poisson_stiffness_mode constant_preserving
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --poisson_stiffness_mode standard # baseline; default is constant_preserving
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver-timings 1
 // Accuracy diagnostics require one MPI rank and a fresh output directory.
 // Solver timing CSV uses the existing "cg" timer (including preconditioner
@@ -65,7 +65,7 @@ struct StudyConfig {
     double ssor_omega                   = 1.57079632679;
     bool accuracyDiagnostics           = false;
     bool solverTimings                 = false;
-    std::string stiffnessMode          = "standard";
+    std::string stiffnessMode          = "constant_preserving";
 };
 
 template <unsigned Order, SourceCase Src>
@@ -246,7 +246,7 @@ double parseDoubleFlag(int argc, char* argv[], const std::string& flag, double d
 
 StudyConfig parseStudyConfig(int argc, char* argv[]) {
     StudyConfig config;
-    config.stiffnessMode = parseStringFlag(argc, argv, "--poisson_stiffness_mode", "standard");
+    config.stiffnessMode = parseStringFlag(argc, argv, "--poisson_stiffness_mode", config.stiffnessMode);
     ippl::parsePoissonStiffnessMode(config.stiffnessMode);
     config.tolerance = parseDoubleFlag(argc, argv, "--tolerance", config.tolerance);
     config.max_iterations =

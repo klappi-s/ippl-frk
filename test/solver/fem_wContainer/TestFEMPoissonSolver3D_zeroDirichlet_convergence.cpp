@@ -15,6 +15,7 @@
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --interpolation_nodes gll
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --interpolation_nodes equispaced
 //   ./TestFEMPoissonSolver3D_zeroDirichlet_convergence --quadrature_nodes gauss_legendre
+//   --poisson_stiffness_mode constant_preserving (default) | standard (baseline, required for multigrid)
 
 
 #include "Ippl.h"
@@ -46,7 +47,7 @@ static constexpr double domain_end   = 1.0;
 
 template <unsigned Order, SourceCase Src>
 ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const std::string& precon_type,
-                       const std::string& interp_nodes, const std::string& quad_family) {
+                       const std::string& interp_nodes, const std::string& quad_family, const std::string& stiffnessMode) {
     using T = double;
 
     using DOFHandler_t =
@@ -88,6 +89,7 @@ ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const st
     params.add("preconditioner_type", precon_type);
     params.add("interpolation_nodes", interp_nodes);
     params.add("quadrature_nodes", quad_family);
+    params.add("poisson_stiffness_mode", stiffnessMode);
     solver.mergeParameters(params);
     solver.solve();
 
@@ -110,20 +112,20 @@ ConvergenceRow runCase(unsigned num_nodes_per_dim, bool preconditioned, const st
 template <unsigned Order>
 ConvergenceRow runCaseSource(unsigned num_nodes, SourceCase src, bool preconditioned,
                              const std::string& precon_type, const std::string& interp_nodes,
-                             const std::string& quad_family) {
+                             const std::string& quad_family, const std::string& stiffnessMode) {
     switch (src) {
         case SourceCase::LowOrderPolynomial:
             return runCase<Order, SourceCase::LowOrderPolynomial>(
-                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family, stiffnessMode);
         case SourceCase::HighOrderPolynomial:
             return runCase<Order, SourceCase::HighOrderPolynomial>(
-                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family, stiffnessMode);
         case SourceCase::ShiftedExponential:
             return runCase<Order, SourceCase::ShiftedExponential>(
-                num_nodes, preconditioned, precon_type, interp_nodes, quad_family);
+                num_nodes, preconditioned, precon_type, interp_nodes, quad_family, stiffnessMode);
         case SourceCase::Sines:
             return runCase<Order, SourceCase::Sines>(num_nodes, preconditioned, precon_type,
-                                                     interp_nodes, quad_family);
+                                                     interp_nodes, quad_family, stiffnessMode);
         default:
             throw std::runtime_error("unknown source");
     }
@@ -217,6 +219,9 @@ int main(int argc, char* argv[]) {
             parseStringFlag(argc, argv, "--interpolation_nodes", "gll"));
         const std::string quad_family = canonicalQuadratureTag(
             parseStringFlag(argc, argv, "--quadrature_nodes", "gauss_legendre"));
+        const std::string stiffnessMode =
+            parseStringFlag(argc, argv, "--poisson_stiffness_mode", "constant_preserving");
+        ippl::parsePoissonStiffnessMode(stiffnessMode);
         const unsigned max_order   = maxLagrangeOrderForPreconditioner(precon_type);
 
         const auto out_path =
@@ -229,7 +234,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Solver mode: "
                       << (preconditioned ? "preconditioned (" + precon_type + ")"
                                          : "plain (unpreconditioned)")
-                      << "\n";
+                      << "\nPoisson stiffness mode: " << stiffnessMode << "\n";
 
         }
 
@@ -240,6 +245,7 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("cannot open output file: " + out_path.string());
             }
             writeDatHeader(*dat_out, Dim, domain_note, interp_nodes, quad_family);
+            *dat_out << "# poisson_stiffness_mode=" << stiffnessMode << '\n';
         }
 
         ConvergenceProgressLog progress(totalConvergenceCases(min_nodes, max_nodes, max_order), Dim);
@@ -255,13 +261,13 @@ int main(int argc, char* argv[]) {
                         switch (order) {
                             case 1:
                                 return runCaseSource<1>(n, src, preconditioned, precon_type,
-                                                        interp_nodes, quad_family);
+                                                        interp_nodes, quad_family, stiffnessMode);
                             case 2:
                                 return runCaseSource<2>(n, src, preconditioned, precon_type,
-                                                        interp_nodes, quad_family);
+                                                        interp_nodes, quad_family, stiffnessMode);
                             default:
                                 return runCaseSource<3>(n, src, preconditioned, precon_type,
-                                                        interp_nodes, quad_family);
+                                                        interp_nodes, quad_family, stiffnessMode);
                         }
                     }();
                     progress.endCase(row);

@@ -558,16 +558,20 @@ Track B solver uses `SelectableQuadrature` (working tree). ParameterList keys
 (default interp `gll`; `.dat` named `convergence_FEMPoissonSolver{1,2,3}D_{gll|equispaced}.dat`).
 Mass-shortcut (`usesGllMassShortcut`) is commented out — Poisson has no mass term.
 
-Track B also accepts `poisson_stiffness_mode`: `standard` (default),
-`rowsum_diagonal`, or `constant_preserving`. `EvalFunctor` explicitly opts into
-the shared `LagrangeSpace_wfc::assembleElementMatrix` policy; generic mass forms
-remain ordinary integrals. Corrected modes reconstruct each complete physical
+Track B accepts `poisson_stiffness_mode`: `constant_preserving` (default) or
+`standard` (explicit baseline). `EvalFunctor` defaults to the same Poisson policy,
+consumed by the shared `LagrangeSpace_wfc::assembleElementMatrix`; generic mass forms
+remain ordinary integrals. The default reconstructs each complete physical
 element diagonal before BC restriction. The constant-preserving full action
 uses `K_ij*(x_j-x_i)`; Dirichlet columns contribute `K_ij*(0-x_i)` and must not
 be skipped. Lifting and L/U keep ordinary off-diagonal products; D/inverse-D use
-the corrected assembled diagonal. Corrected solver modes currently reject
-periodic boundaries and multigrid. `getStiffnessMode()` lets diagnostics use the
-same evaluator policy. See the manual 1D driver and `FEMConstantPreservation`.
+the corrected assembled diagonal. The default currently rejects periodic
+boundaries and multigrid; those paths require explicit `standard` selection.
+The P1 multigrid evaluator inherits the selected mode, retaining standard assembly.
+`getStiffnessMode()` lets diagnostics use the same evaluator policy.
+All three manual convergence drivers accept
+`--poisson_stiffness_mode`. `FEMConstantPreservation` exercises the default
+without a mode override and checks explicit baseline selection.
 The manual 1D driver's optional `--solver-timings 1` writes `solver_timings.csv`
 on one MPI rank: existing `cg` timer samples include preconditioner setup and
 applications; a separate timer measures the full `solve()` call. Both exclude

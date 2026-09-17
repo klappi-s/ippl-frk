@@ -17,7 +17,7 @@
 
 namespace fem_oracle::test {
 
-    inline ippl::PoissonStiffnessMode selectedStiffnessMode = ippl::PoissonStiffnessMode::Standard;
+    inline ippl::PoissonStiffnessMode selectedStiffnessMode = ippl::PoissonStiffnessMode::ConstantPreserving;
 
     inline void configureStiffnessMode() {
         if (const char* value = std::getenv("IPPL_FEM_STIFFNESS_MODE"))

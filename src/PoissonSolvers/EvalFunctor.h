@@ -16,11 +16,10 @@
 #include "FEM/RefShapeFunctionData.h"
 
 namespace ippl {
-    enum class PoissonStiffnessMode { Standard, RowSumDiagonal, ConstantPreserving };
+    enum class PoissonStiffnessMode { Standard, ConstantPreserving };
 
     inline PoissonStiffnessMode parsePoissonStiffnessMode(std::string_view name) {
         if (name == "standard") return PoissonStiffnessMode::Standard;
-        if (name == "rowsum_diagonal") return PoissonStiffnessMode::RowSumDiagonal;
         if (name == "constant_preserving") return PoissonStiffnessMode::ConstantPreserving;
         throw std::invalid_argument("Unknown poisson_stiffness_mode: " + std::string(name));
     }
@@ -28,7 +27,6 @@ namespace ippl {
     inline const char* poissonStiffnessModeName(PoissonStiffnessMode mode) {
         switch (mode) {
             case PoissonStiffnessMode::Standard: return "standard";
-            case PoissonStiffnessMode::RowSumDiagonal: return "rowsum_diagonal";
             case PoissonStiffnessMode::ConstantPreserving: return "constant_preserving";
         }
         throw std::invalid_argument("Invalid PoissonStiffnessMode");
@@ -40,14 +38,14 @@ namespace ippl {
         const Tlhs absDetDPhi;
 
         EvalFunctor(Vector<Tlhs, Dim> DPhiInvT, Tlhs absDetDPhi,
-                    PoissonStiffnessMode mode = PoissonStiffnessMode::Standard)
+                    PoissonStiffnessMode mode = PoissonStiffnessMode::ConstantPreserving)
             : DPhiInvT(DPhiInvT)
             , absDetDPhi(absDetDPhi)
             , mode_m(mode) {}
 
         // Explicit opt-in consumed by Track B's element builder/full action.
         // Generic mass/reaction functors have no such policy.
-        bool enforceZeroRowSum() const { return mode_m != PoissonStiffnessMode::Standard; }
+        bool enforceZeroRowSum() const { return useCoefficientDifferences(); }
         bool useCoefficientDifferences() const {
             return mode_m == PoissonStiffnessMode::ConstantPreserving;
         }

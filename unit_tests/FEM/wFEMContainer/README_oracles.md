@@ -75,18 +75,23 @@ once per stiffness mode. Four-rank solves select stretched P3 and both P5 famili
 Sharding follows dynamically registered cases, so adding a case cannot silently
 omit its solve. CTest `PROCESSORS` accounts for MPI rank counts.
 
-Operator and solver registrations run the same immutable dataset in `standard`,
-`rowsum_diagonal`, and `constant_preserving` modes. Corrected registrations have
+Operator and solver registrations run the same immutable dataset in `standard`
+and `constant_preserving` modes. Corrected registrations have
 the mode appended to their names; `IPPL_FEM_STIFFNESS_MODE` selects the test
-evaluator and solver parameter consistently. The production default remains
-`standard`. The load and mass tests retain ordinary assembly in every mode.
+evaluator and solver parameter consistently. The production default and direct
+oracle-executable default are `constant_preserving`; CTest explicitly selects
+each mode. Periodic or multigrid solver configurations currently require explicit
+`standard`. The load and mass tests retain ordinary assembly in both modes.
 Solver variants include zero source with both zero and constant boundary data.
 `ConstantActionBoundaryColumnsAndSplitConsistency` adds raw constant-action,
 local symmetry/energy, retained Dirichlet-column and diagonal/split checks.
 
 `FEMConstantPreservation` is a separate analytical regression target: it checks
 constant-shift invariance and the P3 quadratic solve on 1,023 cells with both
-node families. Run it with `ctest -R '^FEMConstantPreservation$' --output-on-failure`.
+node families, using the default without a mode override. It also checks explicit
+`standard` selection. The solver registry checks rejection of the removed
+diagonal-only mode and unsupported default-mode configurations before load assembly.
+Run it with `ctest -R '^FEMConstantPreservation$' --output-on-failure`.
 It needs no additional oracle file or Python generation.
 
 The reference suite checks:
@@ -351,11 +356,15 @@ No Python FEM stack is used by ordinary C++ builds or test execution.
 
 On 17 September, the constant-preservation implementation passed all **368
 FEM-labeled CTest registrations**, plus the two existing first-/higher-order
-Lagrange targets. This exercises all three stiffness modes on the same published
+Lagrange targets. This historical run exercised three stiffness modes on the same published
 dataset. The 288 distinct full solves run on one and two ranks in each mode;
 32 selected 3D solves per mode also run on four ranks. Validation used serial
 Kokkos, builds with `-j 8`, and CTest with `-j 2`. The complete FEM suite took
 about 41 minutes; all registrations retain the 60-second timeout.
+The subsequent removal of the diagonal-only comparison mode reduces the current
+FEM registrations to **248**, covering two modes. Targeted validation passed
+29 CTest registrations, the three default-mode GoogleTests, and all three manual
+drivers. The historical 368-test count above is not the current count.
 
 The regression work exposed and repaired these production defects:
 

@@ -127,10 +127,7 @@ TEST(FEMPoissonRegistry, UnsupportedModesFailBeforeLoadAssembly) {
     ctx.scatter(rhs, found->source.nodalValues);
     ippl::FEMPoissonSolver_wFEMContainer<Field, Field, Tag::ORDER, Tag::QUAD_POINTS> solver(lhs, rhs);
     ippl::ParameterList parameters;
-    parameters.add("poisson_stiffness_mode", std::string("invalid"));
-    solver.mergeParameters(parameters);
-    EXPECT_THROW(solver.solve(), std::invalid_argument);
-    parameters.update("poisson_stiffness_mode", std::string("constant_preserving"));
+    ASSERT_EQ(solver.getStiffnessMode(), ippl::PoissonStiffnessMode::ConstantPreserving);
     parameters.add("preconditioner_type", std::string("multigrid"));
     solver.mergeParameters(parameters);
     EXPECT_THROW(solver.solve(), IpplException);
@@ -140,6 +137,12 @@ TEST(FEMPoissonRegistry, UnsupportedModesFailBeforeLoadAssembly) {
     periodic.fill(ippl::PERIODIC_FACE);
     lhs.setFieldBC(periodic);
     EXPECT_THROW(solver.solve(), IpplException);
+    parameters.add("poisson_stiffness_mode", std::string("invalid"));
+    solver.mergeParameters(parameters);
+    EXPECT_THROW(solver.solve(), std::invalid_argument);
+    parameters.update("poisson_stiffness_mode", std::string("rowsum_diagonal"));
+    solver.mergeParameters(parameters);
+    EXPECT_THROW(solver.solve(), std::invalid_argument);
     const auto after = ctx.gather(rhs);
     for (size_t i = 0; i < after.size(); ++i) EXPECT_EQ(after[i], found->source.nodalValues[i]);
 }
