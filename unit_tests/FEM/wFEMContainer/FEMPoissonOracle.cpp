@@ -40,7 +40,7 @@ public:
         std::vector<double> load(c.load.preBc.begin(), c.load.preBc.end());
         if (zeroSource_m) {
             std::fill(source.begin(), source.end(), 0.0);
-            std::fill(expected.begin(), expected.end(), 0.0);
+            std::fill(expected.begin(), expected.end(), prescribed);
             std::fill(load.begin(), load.end(), 0.0);
         }
         // Nonzero initial boundary coefficients intentionally differ from g.
@@ -51,6 +51,8 @@ public:
         ippl::ParameterList parameters;
         parameters.add("preconditioned", jacobi_m);
         parameters.add("preconditioner_type", std::string("jacobi"));
+        parameters.add("poisson_stiffness_mode",
+                       std::string(ippl::poissonStiffnessModeName(support::selectedStiffnessMode)));
         parameters.add("interpolation_nodes", std::string(c.geometry.interpolationFamily));
         parameters.add("quadrature_nodes", std::string("gauss_legendre"));
         parameters.add("max_iterations", 600);
@@ -110,9 +112,42 @@ TEST(FEMPoissonRegistry, EveryCaseHasSolutionsAndOneCompiledType) {
     }
 }
 
+TEST(FEMPoissonRegistry, UnsupportedModesFailBeforeLoadAssembly) {
+    using Tag = std::tuple_element_t<0, oracle::CaseTypes>;
+    using Context = support::Context<double, Tag>;
+    using Field = typename Context::Field;
+    const auto cases = fem_oracle::operatorCases();
+    const auto found = std::find_if(cases.begin(), cases.end(), [](const auto& c) {
+        return support::matches<Tag>(c.geometry);
+    });
+    ASSERT_NE(found, cases.end());
+    Context ctx(found->geometry);
+    auto lhs = ctx.field(ippl::ZERO_FACE);
+    auto rhs = ctx.field();
+    ctx.scatter(rhs, found->source.nodalValues);
+    ippl::FEMPoissonSolver_wFEMContainer<Field, Field, Tag::ORDER, Tag::QUAD_POINTS> solver(lhs, rhs);
+    ippl::ParameterList parameters;
+    parameters.add("poisson_stiffness_mode", std::string("invalid"));
+    solver.mergeParameters(parameters);
+    EXPECT_THROW(solver.solve(), std::invalid_argument);
+    parameters.update("poisson_stiffness_mode", std::string("constant_preserving"));
+    parameters.add("preconditioner_type", std::string("multigrid"));
+    solver.mergeParameters(parameters);
+    EXPECT_THROW(solver.solve(), IpplException);
+    parameters.update("preconditioner_type", std::string("jacobi"));
+    solver.mergeParameters(parameters);
+    std::array<ippl::FieldBC, 2 * Tag::DIM> periodic;
+    periodic.fill(ippl::PERIODIC_FACE);
+    lhs.setFieldBC(periodic);
+    EXPECT_THROW(solver.solve(), IpplException);
+    const auto after = ctx.gather(rhs);
+    for (size_t i = 0; i < after.size(); ++i) EXPECT_EQ(after[i], found->source.nodalValues[i]);
+}
+
 int main(int argc, char** argv) {
     ippl::initialize(argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
+    support::configureStiffnessMode();
     [&]<typename... Tags>(std::tuple<Tags...>) {
         (
             [&] {
@@ -120,15 +155,16 @@ int main(int argc, char** argv) {
                     if (!support::matches<Tags>(c.geometry))
                         continue;
                     for (bool jacobi : {false, true}) {
-                        for (unsigned stage = 0; stage < 3; ++stage) {
+                        for (unsigned stage = 0; stage < 4; ++stage) {
                             const auto name =
                                 std::string(c.geometry.name) + (jacobi ? "_Jacobi_" : "_CG_")
-                                + (stage == 2 ? "ZeroSource" : c.boundaries[stage].name);
+                                + (stage == 3 ? "ZeroSourceConstantBoundary" :
+                                   stage == 2 ? "ZeroSource" : c.boundaries[stage].name);
                             ::testing::RegisterTest(
                                 "FEMPoissonOracle", name.c_str(), nullptr, nullptr, __FILE__,
                                 __LINE__, [&c, jacobi, stage]() -> ::testing::Test* {
-                                    return new FEMPoissonOracle<Tags>(c, stage == 1 ? 1 : 0, jacobi,
-                                                                      stage == 2);
+                                    return new FEMPoissonOracle<Tags>(c, stage % 2, jacobi,
+                                                                      stage >= 2);
                                 });
                         }
                     }

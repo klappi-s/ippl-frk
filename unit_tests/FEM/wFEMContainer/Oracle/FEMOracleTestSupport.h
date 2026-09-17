@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -15,6 +16,15 @@
 #include "gtest/gtest.h"
 
 namespace fem_oracle::test {
+
+    inline ippl::PoissonStiffnessMode selectedStiffnessMode = ippl::PoissonStiffnessMode::Standard;
+
+    inline void configureStiffnessMode() {
+        if (const char* value = std::getenv("IPPL_FEM_STIFFNESS_MODE"))
+            selectedStiffnessMode = ippl::parsePoissonStiffnessMode(value);
+        std::cout << "Oracle stiffness mode: "
+                  << ippl::poissonStiffnessModeName(selectedStiffnessMode) << '\n';
+    }
 
     template <typename Tag>
     constexpr bool matches(const ReferenceCase& c) {
@@ -104,14 +114,14 @@ namespace fem_oracle::test {
             result = T(0);
             return result;
         }
-        auto stiffness() const {
+        auto stiffness(ippl::PoissonStiffnessMode mode = selectedStiffnessMode) const {
             Point inverse;
             T determinant = 1;
             for (unsigned d = 0; d < DIM; ++d) {
                 inverse[d] = T(1) / mesh_m.getMeshSpacing(d);
                 determinant *= mesh_m.getMeshSpacing(d);
             }
-            return ippl::EvalFunctor<T, DIM, N>(inverse, determinant);
+            return ippl::EvalFunctor<T, DIM, N>(inverse, determinant, mode);
         }
         struct Mass {
             T determinant;

@@ -64,6 +64,7 @@ namespace ippl {
         MatrixType A_K;
         BCTypesArray bcTypes;
         int nghost;
+        bool coefficientDifferences;
 
         KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
             using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
@@ -87,6 +88,28 @@ namespace ippl {
                               elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF]);
                     continue;
                 } else if (bcTypes[0] == ZERO_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                    continue;
+                }
+
+                if (coefficientDifferences) {
+                    const T xi = apply(viewBC, elementNDIndex + dofMap_i.entityLocalIndex)
+                                     [dofMap_i.entityLocalDOF];
+                    T contribution = T(0);
+                    for (size_t j = DofStartB; j < DofEndB; ++j) {
+                        if (j == i) continue; // The diagonal is implicit in the differences.
+                        const auto dofMap_j = dofHandler.getElementDOFMapping(j);
+                        const bool constrained =
+                            (bcTypes[0] == CONSTANT_FACE || bcTypes[0] == ZERO_FACE)
+                            && dofHandler.isDOFOnBoundary(elementIndex, j);
+                        // Keep K_ij*(0-x_i) for eliminated Dirichlet columns.
+                        const T xj = constrained ? T(0) :
+                            apply(view, elementNDIndex + dofMap_j.entityLocalIndex)
+                                 [dofMap_j.entityLocalDOF];
+                        contribution += A_K[i][j] * (xj - xi);
+                    }
+                    Kokkos::atomic_add(
+                        &apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)
+                              [dofMap_i.entityLocalDOF], contribution);
                     continue;
                 }
 
@@ -910,29 +933,11 @@ namespace ippl {
     /// Assembly operations ///////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////
 
-    // TODO Fix boundary conditions for result field (not set correctly before apply)
-
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,
               typename QuadratureType, typename FieldLHS, typename FieldRHS>
     template <typename F>
-    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
-                           FieldRHS>::evaluateAx(FieldLHS& field, F& evalFunction) const {
-        Inform m("");
-
-        // start a timer
-        static IpplTimings::TimerRef evalAx = IpplTimings::getTimer("evaluateAx");
-        IpplTimings::startTimer(evalAx);
-
-        // get number of ghost cells in field
-        const int nghost = field.getNghost();
-
-        // create a new field for result with view initialized to zero (views are initialized to
-        // zero by default)
-
-        // TODO check if we need to set BCs the same as field
-        FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
-
-        // List of quadrature weights
+    auto LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::assembleElementMatrix(F& evalFunction) const -> ElementMatrix {
         const Vector<T, QuadratureType::numElementNodes> w =
             this->quadrature_m.getWeightsForRefElement();
 
@@ -966,6 +971,48 @@ namespace ippl {
                 }
             }
         }
+        // Enforce the identity on the full physical element, before any BC or
+        // triangular restriction. Functors without the policy retain ordinary assembly.
+        if constexpr (requires { evalFunction.enforceZeroRowSum(); }) {
+            if (evalFunction.enforceZeroRowSum()) {
+                for (size_t i = 0; i < numElementDOFs; ++i) {
+                    T offDiagonalSum = T(0);
+                    for (size_t j = 0; j < numElementDOFs; ++j)
+                        if (j != i) offDiagonalSum += A_K[i][j];
+                    A_K[i][i] = -offDiagonalSum;
+                }
+            }
+        }
+        return A_K;
+    }
+
+    // TODO Fix boundary conditions for result field (not set correctly before apply)
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                           FieldRHS>::evaluateAx(FieldLHS& field, F& evalFunction) const {
+        Inform m("");
+
+        // start a timer
+        static IpplTimings::TimerRef evalAx = IpplTimings::getTimer("evaluateAx");
+        IpplTimings::startTimer(evalAx);
+
+        // get number of ghost cells in field
+        const int nghost = field.getNghost();
+
+        // create a new field for result with view initialized to zero (views are initialized to
+        // zero by default)
+
+        // TODO check if we need to set BCs the same as field
+        FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
+
+        const auto A_K = assembleElementMatrix(evalFunction);
+
+        bool coefficientDifferences = false;
+        if constexpr (requires { evalFunction.useCoefficientDifferences(); })
+            coefficientDifferences = evalFunction.useCoefficientDifferences();
 
 
         // Get boundary conditions from field
@@ -1011,7 +1058,8 @@ namespace ippl {
 
             Kokkos::parallel_for(
                 "Loop over elements", policy_type(0, elemIndices.extent(0)),
-                functor_t{dofHandler, elemIndices, viewBC, view, resultView, A_K, bcTypes, nghost});
+                functor_t{dofHandler, elemIndices, viewBC, view, resultView, A_K, bcTypes, nghost,
+                          coefficientDifferences});
         };
 
         // Iterate over all entity type pairs using compile-time double loop
@@ -1068,40 +1116,7 @@ namespace ippl {
         // zero by default)
         FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
 
-        // List of quadrature weights
-        const Vector<T, QuadratureType::numElementNodes> w =
-            this->quadrature_m.getWeightsForRefElement();
-
-        // List of quadrature nodes
-        const Vector<point_t, QuadratureType::numElementNodes> q =
-            this->quadrature_m.getIntegrationNodesForRefElement();
-
-        // TODO move outside of evaluateAx (I think it is possible for other problems as well)
-        // Gradients of the basis functions for the DOF at the quadrature nodes
-        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
-        // Values of the basis functions at the quadrature nodes
-        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < numElementDOFs; ++i) {
-                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
-                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
-        // Make local element matrix -- does not change through the element mesh
-        // Element matrix
-        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
-
-        // 1. Compute the Galerkin element matrix A_K
-        for (size_t i = 0; i < numElementDOFs; ++i) {
-            for (size_t j = 0; j < numElementDOFs; ++j) {
-                A_K[i][j] = 0.0;
-                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(
-                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
-                }
-            }
-        }
+        const auto A_K = assembleElementMatrix(evalFunction);
 
         // start a timer
         static IpplTimings::TimerRef outer_loop =
@@ -1185,34 +1200,7 @@ namespace ippl {
         FieldLHS diagField(field.get_mesh(), field.getLayout(), nghost);
         diagField = T(0);
 
-        // Quadrature nodes and weights
-        const Vector<T, QuadratureType::numElementNodes> w =
-            this->quadrature_m.getWeightsForRefElement();
-        const Vector<point_t, QuadratureType::numElementNodes> q =
-            this->quadrature_m.getIntegrationNodesForRefElement();
-
-        // Precompute gradients at the quadrature nodes
-        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
-        // Values of the basis functions at the quadrature nodes
-        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < numElementDOFs; ++i) {
-                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
-                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
-        // Compute local element stiffness matrix A_K (same as evaluateAx)
-        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
-        for (size_t i = 0; i < numElementDOFs; ++i) {
-            for (size_t j = 0; j < numElementDOFs; ++j) {
-                A_K[i][j] = T(0);
-                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(
-                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
-                }
-            }
-        }
+        const auto A_K = assembleElementMatrix(evalFunction);
 
         const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
 
@@ -1918,28 +1906,7 @@ namespace ippl {
         FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
         resultField = T(0);
 
-        const Vector<T, QuadratureType::numElementNodes> w = this->quadrature_m.getWeightsForRefElement();
-        const Vector<point_t, QuadratureType::numElementNodes> q = this->quadrature_m.getIntegrationNodesForRefElement();
-
-        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
-        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < numElementDOFs; ++i) {
-                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
-                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
-        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
-        for (size_t i = 0; i < numElementDOFs; ++i) {
-            for (size_t j = 0; j < numElementDOFs; ++j) {
-                A_K[i][j] = T(0);
-                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(
-                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
-                }
-            }
-        }
+        const auto A_K = assembleElementMatrix(evalFunction);
 
         const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
         FieldBC bcType = bcTypes[0];
@@ -2013,28 +1980,7 @@ namespace ippl {
         FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
         resultField = T(0);
 
-        const Vector<T, QuadratureType::numElementNodes> w = this->quadrature_m.getWeightsForRefElement();
-        const Vector<point_t, QuadratureType::numElementNodes> q = this->quadrature_m.getIntegrationNodesForRefElement();
-
-        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
-        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < numElementDOFs; ++i) {
-                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
-                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
-        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
-        for (size_t i = 0; i < numElementDOFs; ++i) {
-            for (size_t j = 0; j < numElementDOFs; ++j) {
-                A_K[i][j] = T(0);
-                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(
-                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
-                }
-            }
-        }
+        const auto A_K = assembleElementMatrix(evalFunction);
 
         const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
         FieldBC bcType = bcTypes[0];
@@ -2108,28 +2054,7 @@ namespace ippl {
         FieldLHS resultField(field.get_mesh(), field.getLayout(), nghost);
         resultField = T(0);
 
-        const Vector<T, QuadratureType::numElementNodes> w = this->quadrature_m.getWeightsForRefElement();
-        const Vector<point_t, QuadratureType::numElementNodes> q = this->quadrature_m.getIntegrationNodesForRefElement();
-
-        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
-        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < numElementDOFs; ++i) {
-                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
-                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
-        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
-        for (size_t i = 0; i < numElementDOFs; ++i) {
-            for (size_t j = 0; j < numElementDOFs; ++j) {
-                A_K[i][j] = T(0);
-                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(
-                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
-                }
-            }
-        }
+        const auto A_K = assembleElementMatrix(evalFunction);
 
         const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
         FieldBC bcType = bcTypes[0];
@@ -2203,30 +2128,7 @@ namespace ippl {
         FieldLHS diagField(field.get_mesh(), field.getLayout(), nghost);
         diagField = T(0);
 
-        const Vector<T, QuadratureType::numElementNodes> w =
-            this->quadrature_m.getWeightsForRefElement();
-        const Vector<point_t, QuadratureType::numElementNodes> q =
-            this->quadrature_m.getIntegrationNodesForRefElement();
-
-        Vector<Vector<point_t, numElementDOFs>, QuadratureType::numElementNodes> grad_b_q;
-        Vector<Vector<T, numElementDOFs>, QuadratureType::numElementNodes> b_q;
-        for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-            for (size_t i = 0; i < numElementDOFs; ++i) {
-                grad_b_q[k][i] = this->evaluateRefElementShapeFunctionGradient(i, q[k]);
-                b_q[k][i]      = this->evaluateRefElementShapeFunction(i, q[k]);
-            }
-        }
-
-        Vector<Vector<T, numElementDOFs>, numElementDOFs> A_K;
-        for (size_t i = 0; i < numElementDOFs; ++i) {
-            for (size_t j = 0; j < numElementDOFs; ++j) {
-                A_K[i][j] = T(0);
-                for (size_t k = 0; k < QuadratureType::numElementNodes; ++k) {
-                    A_K[i][j] += w[k] * evalFunction(
-                        i, j, RefShapeFunctionData<T, point_t, numElementDOFs>{b_q[k], grad_b_q[k]});
-                }
-            }
-        }
+        const auto A_K = assembleElementMatrix(evalFunction);
 
         const std::array<FieldBC, 2 * Dim> bcTypes = field.getFieldBCTypes();
         auto dofHandler  = dofHandler_m;

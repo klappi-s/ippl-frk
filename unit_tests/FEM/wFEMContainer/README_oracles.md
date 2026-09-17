@@ -18,7 +18,8 @@ plus translated/stretched P3 meshes: 36 cases. `FEMReferenceOracle.cpp` runs
 ordinary IPPL GoogleTests in double and float. `FEMOperatorOracle.cpp` uses the
 same registry for field assembly and diagnostics. `FEMPoissonOracle.cpp` tests
 complete CG/Jacobi solves in double for all 36 cases, with zero/constant Dirichlet
-data and a separate zero-load solve from a nonzero initial guess.
+data, plus zero-load solves with zero and constant boundary values from a
+nonzero initial guess.
 
 ## Run the tests
 
@@ -27,7 +28,7 @@ configuration. Keep your usual IPPL toolchain and dependency settings. From the
 **fem workspace**, this also clears any earlier local oracle overrides:
 
 ```bash
-cmake -S ipplFEM/ippl-frk -B ipplFEM/build_serial \
+cmake -S ipplFEM/ippl-frk -B ipplFEM/build \
   -DIPPL_ENABLE_UNIT_TESTS=ON -DIPPL_FEM_ORACLE_DOWNLOAD=ON \
   -DIPPL_FEM_ORACLE_ARCHIVE= -DIPPL_FEM_ORACLE_ROOT=
 ```
@@ -51,27 +52,42 @@ package on `CMAKE_PREFIX_PATH`, and set `IPPL_FEM_ORACLE_DOWNLOAD=OFF`.
 From the **fem workspace**, with FFT, solvers, and unit tests enabled:
 
 ```bash
-cmake --build ipplFEM/build_serial --target FEMReferenceOracle1D FEMReferenceOracle2D FEMReferenceOracle3D -j 12
-cmake --build ipplFEM/build_serial --target FEMOperatorOracle1D FEMOperatorOracle2D FEMOperatorOracle3D -j 12
-cmake --build ipplFEM/build_serial --target FEMPoissonOracle1D FEMPoissonOracle2D FEMPoissonOracle3D FEMOracleRuntimeTest -j 12
-ctest --test-dir ipplFEM/build_serial -R '^FEM((Reference|Operator|Poisson)Oracle|OracleRuntimeTest)' -j 4 --output-on-failure
+cmake --build ipplFEM/build --target FEMReferenceOracle1D FEMReferenceOracle2D FEMReferenceOracle3D -j 8
+cmake --build ipplFEM/build --target FEMOperatorOracle1D FEMOperatorOracle2D FEMOperatorOracle3D -j 8
+cmake --build ipplFEM/build --target FEMPoissonOracle1D FEMPoissonOracle2D FEMPoissonOracle3D FEMOracleRuntimeTest FEMConstantPreservation FEMThinHalo -j 8
+ctest --test-dir ipplFEM/build -L FEM -j 2 --output-on-failure
 ```
 
 Every registration uses the normal MPI launcher and configured Kokkos backend.
 Reference/single-cell tests use one rank; whole-field operator and solve tests also
 run on two ranks. Targeted four-rank 3D tests check at least two split axes. Separate dimension targets bound compilation memory. The 3D column loop is
 partitioned across 16 CTest runs of the same binary; all columns still run exactly
-once, and each run retains the normal 60-second timeout. Use the regex above to
-include these runs. The three load-related stages are also separated by precision
-to keep P5 within the same limit. `-j 4` runs independent MPI test launches concurrently. Ordinary
+once, and each run retains the normal 60-second timeout. The label above includes
+these runs. The three load-related stages are also separated by precision
+to keep P5 within the same limit. `-j 2` limits concurrent MPI launches; avoid
+competing compilation/refinement jobs during this suite. Ordinary
 builds/tests use the pinned runtime files and do not run Python. The operator suite compiles one translation unit per generated type, and a single
 loader object is shared by reference, operator, and solver targets. This bounds compiler memory without
 changing runtime coverage. The 3D solve suite uses
-GoogleTest sharding across 24 launches per rank count; every generated solve runs
-once. Four-rank solves select stretched P3 and both P5 families in 12 shards.
+GoogleTest sharding across 32 launches per rank count; every generated solve runs
+once per stiffness mode. Four-rank solves select stretched P3 and both P5 families in 16 shards.
 `FEMThinHalo` separately checks thin 2D/3D partitions and corner accumulation.
 Sharding follows dynamically registered cases, so adding a case cannot silently
 omit its solve. CTest `PROCESSORS` accounts for MPI rank counts.
+
+Operator and solver registrations run the same immutable dataset in `standard`,
+`rowsum_diagonal`, and `constant_preserving` modes. Corrected registrations have
+the mode appended to their names; `IPPL_FEM_STIFFNESS_MODE` selects the test
+evaluator and solver parameter consistently. The production default remains
+`standard`. The load and mass tests retain ordinary assembly in every mode.
+Solver variants include zero source with both zero and constant boundary data.
+`ConstantActionBoundaryColumnsAndSplitConsistency` adds raw constant-action,
+local symmetry/energy, retained Dirichlet-column and diagonal/split checks.
+
+`FEMConstantPreservation` is a separate analytical regression target: it checks
+constant-shift invariance and the P3 quadratic solve on 1,023 cells with both
+node families. Run it with `ctest -R '^FEMConstantPreservation$' --output-on-failure`.
+It needs no additional oracle file or Python generation.
 
 The reference suite checks:
 
@@ -146,8 +162,10 @@ check. Python also checks this bound against NumPy float sampling.
 
 ## Complete solves
 
-Each registry case has six named solves: CG and Jacobi-PCG for zero Dirichlet,
-constant `g=0.75`, and zero source with zero Dirichlet. All use fresh fields;
+Each registry case has eight named solves: CG and Jacobi-PCG for zero Dirichlet,
+constant `g=0.75`, and zero source with either zero or constant Dirichlet data.
+The zero-source, constant-boundary solution is the same constant everywhere.
+All use fresh fields;
 source samples and the raw load remain immutable in the generated data. The
 initial guess is asymmetric and deliberately has incorrect boundary values.
 
@@ -330,6 +348,14 @@ storage report for package sizes, loading/build measurements, and current
 verification. All 104 registrations passed again on 16 September after adapting
 the package, installed configuration, and release lock to `ipplTestData`.
 No Python FEM stack is used by ordinary C++ builds or test execution.
+
+On 17 September, the constant-preservation implementation passed all **368
+FEM-labeled CTest registrations**, plus the two existing first-/higher-order
+Lagrange targets. This exercises all three stiffness modes on the same published
+dataset. The 288 distinct full solves run on one and two ranks in each mode;
+32 selected 3D solves per mode also run on four ranks. Validation used serial
+Kokkos, builds with `-j 8`, and CTest with `-j 2`. The complete FEM suite took
+about 41 minutes; all registrations retain the 60-second timeout.
 
 The regression work exposed and repaired these production defects:
 

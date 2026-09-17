@@ -19,7 +19,11 @@
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --interpolation_nodes equispaced
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --quadrature_nodes gauss_legendre
 //   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --min-order 2 --max-order 3 --accuracy-diagnostics 1
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --poisson_stiffness_mode constant_preserving
+//   ./TestFEMPoissonSolver1D_zeroDirichlet_convergence --solver-timings 1
 // Accuracy diagnostics require one MPI rank and a fresh output directory.
+// Solver timing CSV uses the existing "cg" timer (including preconditioner
+// setup/applications) and times solve() separately; both exclude error evaluation.
 // The legacy rel_L2 column is the absolute L2 error.
 
 #include "Ippl.h"
@@ -60,6 +64,8 @@ struct StudyConfig {
     int gauss_seidel_outer_iterations   = 2;
     double ssor_omega                   = 1.57079632679;
     bool accuracyDiagnostics           = false;
+    bool solverTimings                 = false;
+    std::string stiffnessMode          = "standard";
 };
 
 template <unsigned Order, SourceCase Src>
@@ -105,6 +111,7 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::strin
     params.add("max_iterations", config.max_iterations);
     params.add("preconditioned", preconditioned);
     params.add("preconditioner_type", precon_type);
+    params.add("poisson_stiffness_mode", config.stiffnessMode);
     params.add("newton_level", config.newton_level);
     params.add("chebyshev_degree", config.chebyshev_degree);
     params.add("richardson_iterations", config.richardson_iterations);
@@ -114,7 +121,19 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::strin
     params.add("interpolation_nodes", interp_nodes);
     params.add("quadrature_nodes", quad_family);
     solver.mergeParameters(params);
+    const std::string cgTimerName = "cg";
+    const auto previousTimings = config.solverTimings
+        ? IpplTimings::getMeasurements(cgTimerName).size() : 0;
+    Timer solveClock;
+    if (config.solverTimings) {
+        Kokkos::fence();
+        solveClock.start();
+    }
     solver.solve();
+    if (config.solverTimings) {
+        Kokkos::fence();
+        solveClock.stop();
+    }
 
     AnalyticSolutionFunctor<Src, Dim, T> analytic;
 
@@ -129,6 +148,21 @@ ConvergenceRow runCase(unsigned num_nodes, bool preconditioned, const std::strin
     row.rel_l2       = solver.getL2Error(analytic);
     row.cg_residue   = solver.getResidue();
     row.cg_iterations = solver.getIterationCount();
+    if (config.solverTimings) {
+        const auto& times = IpplTimings::getMeasurements(cgTimerName);
+        if (times.size() != previousTimings + 1)
+            throw std::runtime_error("expected one completed cg timer measurement per solve");
+        const bool newFile = !std::filesystem::exists("solver_timings.csv");
+        std::ofstream output("solver_timings.csv", std::ios::app);
+        if (!output) throw std::runtime_error("cannot write solver timing CSV");
+        if (newFile)
+            output << "source,order,num_nodes,stiffness_mode,preconditioner,iterations,"
+                      "cg_pcg_seconds,solve_seconds\n";
+        output << std::setprecision(17) << sourceTag(Src) << ',' << Order << ',' << num_nodes
+               << ',' << config.stiffnessMode << ',' << (preconditioned ? precon_type : "none")
+               << ',' << row.cg_iterations << ',' << times.back() << ',' << solveClock.elapsed()
+               << '\n';
+    }
     if (config.accuracyDiagnostics)
         writeAccuracyDiagnostics1D(solver, lhs, rhs, analytic, sourceTag(Src), Order,
                                    num_nodes, interp_nodes, quad_family);
@@ -212,6 +246,8 @@ double parseDoubleFlag(int argc, char* argv[], const std::string& flag, double d
 
 StudyConfig parseStudyConfig(int argc, char* argv[]) {
     StudyConfig config;
+    config.stiffnessMode = parseStringFlag(argc, argv, "--poisson_stiffness_mode", "standard");
+    ippl::parsePoissonStiffnessMode(config.stiffnessMode);
     config.tolerance = parseDoubleFlag(argc, argv, "--tolerance", config.tolerance);
     config.max_iterations =
         parseIntFlag(argc, argv, "--max_iterations", config.max_iterations);
@@ -227,8 +263,11 @@ StudyConfig parseStudyConfig(int argc, char* argv[]) {
     config.ssor_omega = parseDoubleFlag(argc, argv, "--ssor_omega", config.ssor_omega);
     config.accuracyDiagnostics =
         parseIntFlag(argc, argv, "--accuracy-diagnostics", 0) != 0;
+    config.solverTimings = parseIntFlag(argc, argv, "--solver-timings", 0) != 0;
     if (config.accuracyDiagnostics && ippl::Comm->size() != 1)
         throw std::runtime_error("--accuracy-diagnostics requires one MPI rank");
+    if (config.solverTimings && ippl::Comm->size() != 1)
+        throw std::runtime_error("--solver-timings requires one MPI rank");
     return config;
 }
 
@@ -245,7 +284,9 @@ void writeStudyConfig(std::ostream& os, bool preconditioned, const std::string& 
        << "  gauss_seidel_inner_iterations=" << config.gauss_seidel_inner_iterations
        << "  gauss_seidel_outer_iterations=" << config.gauss_seidel_outer_iterations
        << "  ssor_omega=" << config.ssor_omega << '\n'
-       << prefix << "accuracy_diagnostics=" << config.accuracyDiagnostics << '\n';
+       << prefix << "accuracy_diagnostics=" << config.accuracyDiagnostics
+       << "  solver_timings=" << config.solverTimings
+       << "  poisson_stiffness_mode=" << config.stiffnessMode << '\n';
     os.precision(previous_precision);
 }
 

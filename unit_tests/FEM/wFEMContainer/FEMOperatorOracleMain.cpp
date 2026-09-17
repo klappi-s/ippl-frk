@@ -36,6 +36,7 @@ TEST(FEMOperatorRegistry, EveryReferenceCaseHasOneOperatorAndCompiledType) {
 int main(int argc, char** argv) {
     ippl::initialize(argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
+    support::configureStiffnessMode();
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
         if (arg.starts_with("--fem-column-shard="))

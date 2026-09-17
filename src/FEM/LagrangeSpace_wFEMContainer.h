@@ -214,6 +214,12 @@ namespace ippl {
         /// Assembly operations ///////////////////////////////////////////////
         ///////////////////////////////////////////////////////////////////////
 
+        using ElementMatrix = Vector<Vector<T, numElementDOFs>, numElementDOFs>;
+
+        /// Physical element matrix before boundary restriction or splitting.
+        template <typename F>
+        ElementMatrix assembleElementMatrix(F& evalFunction) const;
+
         /**
          * @brief Assemble the left stiffness matrix A of the system Ax = b
          *

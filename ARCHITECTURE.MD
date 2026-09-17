@@ -18,7 +18,7 @@
   **finite-element** simulations. Parallelism = **Kokkos** (CPU/GPU kernels) + **MPI** (domain/particle decomposition) + **heFFTe** (FFT).
 - **Everything lives in `namespace ippl`.** Almost every class is a template over `<T (float/double), unsigned Dim (1..6), ...>`.
 - **Headers are `.h`, template implementations are `.hpp`** (included at the bottom of the matching `.h`). Edit the `.hpp` for logic, the `.h` for the interface.
-- **Build:** `ipplFEM/build_serial` (serial Release, SOLVERS+TESTS; configured 2026-08-20). Historical full FFT+ALPINE+UNIT_TESTS tree is `old/IPPLfem/build_serial`. Always `cmake --build . -j 12` (never bare `-j`). See [§9](#9-build--run).
+- **Build:** `ipplFEM/build` (serial Release, FFT+SOLVERS+TESTS+UNIT_TESTS). Always `cmake --build . -j 8` (user's memory limit; never bare `-j`). See [§9](#9-build--run).
 - **Entry header:** `#include "Ippl.h"` pulls in the core. Every program is wrapped in `ippl::initialize(argc, argv); { ... } ippl::finalize();`.
 - **The FEM subsystem ([§7](#7-fem-finite-elements)) is the fork's focus and the target of later project tasks.**
 
@@ -558,6 +558,21 @@ Track B solver uses `SelectableQuadrature` (working tree). ParameterList keys
 (default interp `gll`; `.dat` named `convergence_FEMPoissonSolver{1,2,3}D_{gll|equispaced}.dat`).
 Mass-shortcut (`usesGllMassShortcut`) is commented out — Poisson has no mass term.
 
+Track B also accepts `poisson_stiffness_mode`: `standard` (default),
+`rowsum_diagonal`, or `constant_preserving`. `EvalFunctor` explicitly opts into
+the shared `LagrangeSpace_wfc::assembleElementMatrix` policy; generic mass forms
+remain ordinary integrals. Corrected modes reconstruct each complete physical
+element diagonal before BC restriction. The constant-preserving full action
+uses `K_ij*(x_j-x_i)`; Dirichlet columns contribute `K_ij*(0-x_i)` and must not
+be skipped. Lifting and L/U keep ordinary off-diagonal products; D/inverse-D use
+the corrected assembled diagonal. Corrected solver modes currently reject
+periodic boundaries and multigrid. `getStiffnessMode()` lets diagnostics use the
+same evaluator policy. See the manual 1D driver and `FEMConstantPreservation`.
+The manual 1D driver's optional `--solver-timings 1` writes `solver_timings.csv`
+on one MPI rank: existing `cg` timer samples include preconditioner setup and
+applications; a separate timer measures the full `solve()` call. Both exclude
+source sampling and error evaluation. Performance studies use the serial backend.
+
 Supported types: `jacobi`, `newton`, `chebyshev`, `richardson`, `richardson_alt`, `gauss-seidel`,
 `ssor`, `multigrid`. Newton/Chebyshev estimate `alpha`/`beta` via `powermethod` / `adapted_powermethod`.
 `multigrid`: **P1** uses geometric h-MG (`fem_multigrid_preconditioner`). **P2/P3** use
@@ -615,11 +630,13 @@ Base `Poisson<FieldLHS,FieldRHS>` (`Poisson.h`): `-laplace(lhs)=rhs`; `setLhs/se
 (`IPPL_PLATFORMS=serial`, FFT/SOLVERS/ALPINE/TESTS/UNIT_TESTS ON) against the older
 `IPPLfem/ippl-frk` tree (now under `old/IPPLfem`). **`ipplFEM/build_serial` exists**
 (configured 2026-08-20 for Task 7.7: serial Release, SOLVERS+TESTS, FFT/unit tests off).
-Always **`-j 12`**, never bare `-j` (OOM risk).
+Current active build (September 2026): **`ipplFEM/build`**, serial Release,
+SOLVERS+TESTS+UNIT_TESTS enabled. Always **`-j 8`** per the user's updated memory
+limit; never bare `-j`.
 
 ```bash
-cd ipplFEM/build_serial
-cmake --build . -j 12
+cd ipplFEM/build
+cmake --build . -j 8
 # FEM solver test executables: test/solver/fem/ and test/solver/fem_wContainer/
 ```
 `compile_commands.json` is present in `build_serial` (use for clangd / static analysis).

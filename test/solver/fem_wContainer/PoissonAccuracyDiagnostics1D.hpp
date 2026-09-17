@@ -2,6 +2,8 @@
 #ifndef IPPL_POISSON_ACCURACY_DIAGNOSTICS_1D_HPP
 #define IPPL_POISSON_ACCURACY_DIAGNOSTICS_1D_HPP
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -53,7 +55,8 @@ void writeAccuracyDiagnostics1D(Solver& solver, Field& lhs, Field& load,
     auto& space = solver.getSpace();
     const auto spacing = lhs.get_mesh().getMeshSpacing(0);
     const auto inverse = ippl::Vector<double, 1>(1.0 / spacing);
-    ippl::EvalFunctor<double, 1, Space::numElementDOFs> eval(inverse, spacing);
+    ippl::EvalFunctor<double, 1, Space::numElementDOFs> eval(
+        inverse, spacing, solver.getStiffnessMode());
     auto action = space.evaluateAx(lhs, eval);
     auto residual = load.deepCopy();
     residual = load - action;
@@ -82,6 +85,20 @@ void writeAccuracyDiagnostics1D(Solver& solver, Field& lhs, Field& load,
     interpolant.fillHalo();
     const double interpolationError = space.computeErrorL2(interpolant, exact);
 
+    auto constant = lhs.deepCopy();
+    constant.setFieldBC(std::array<ippl::FieldBC, 2>{ippl::NO_FACE, ippl::NO_FACE});
+    constant = 1.0;
+    constant.fillHalo();
+    auto constantAction = space.evaluateAx(constant, eval);
+    const double constantActionNorm = ippl::norm(constantAction);
+    const auto storedMatrix = space.assembleElementMatrix(eval);
+    long double maxStoredRowSum = 0;
+    for (size_t i = 0; i < Space::numElementDOFs; ++i) {
+        long double sum = 0;
+        for (size_t j = 0; j < Space::numElementDOFs; ++j) sum += storedMatrix[i][j];
+        maxStoredRowSum = std::max(maxStoredRowSum, std::abs(sum));
+    }
+
     const std::string stem = std::string(source) + "_p" + std::to_string(order)
                              + "_n" + std::to_string(numNodes);
     std::ofstream output("accuracy_" + stem + ".csv");
@@ -97,11 +114,13 @@ void writeAccuracyDiagnostics1D(Solver& solver, Field& lhs, Field& load,
     if (!summary) throw std::runtime_error("cannot write accuracy summary");
     if (newFile)
         summary << "source,order,num_nodes,absolute_l2,interpolation_l2,recursive_residual,"
-                   "fresh_residual,rhs_norm,relative_fresh_residual\n";
+                   "fresh_residual,rhs_norm,relative_fresh_residual,stiffness_mode,"
+                   "constant_action_norm,max_stored_element_row_sum\n";
     summary << std::setprecision(17) << source << ',' << order << ',' << numNodes << ','
             << solver.getL2Error(exact) << ',' << interpolationError << ','
             << solver.getResidue() << ',' << freshNorm << ',' << loadNorm << ','
-            << freshNorm / loadNorm << '\n';
+            << freshNorm / loadNorm << ',' << ippl::poissonStiffnessModeName(solver.getStiffnessMode())
+            << ',' << constantActionNorm << ',' << maxStoredRowSum << '\n';
 
     // Recover the actual physical element stiffness using single-cell NO_FACE
     // evaluateAx columns. This avoids duplicating production quadrature arithmetic.
@@ -116,6 +135,19 @@ void writeAccuracyDiagnostics1D(Solver& solver, Field& lhs, Field& load,
     Quadrature quadrature(element, ippl::parseQuadratureNodeFamily(quadratureFamily));
     Space single(mesh, element, quadrature, layout);
     single.setInterpolationNodes(ippl::parseLagrangeNodeFamily(interpolation));
+    // Distinguish the stored diagonal from columns of the actual difference action.
+    const auto global = single.getGlobalDOFIndices(0);
+    std::vector<std::vector<double>> stored(order + 1, std::vector<double>(order + 1));
+    for (unsigned i = 0; i <= order; ++i)
+        for (unsigned j = 0; j <= order; ++j)
+            stored[global[i]][global[j]] = storedMatrix[i][j];
+    std::ofstream storedOutput("stored_" + matrixPath);
+    if (!storedOutput) throw std::runtime_error("cannot write stored element matrix diagnostic");
+    storedOutput << std::setprecision(17);
+    for (const auto& row : stored) {
+        for (unsigned j = 0; j <= order; ++j) storedOutput << (j ? "," : "") << row[j];
+        storedOutput << '\n';
+    }
     Field input(mesh, layout, 1);
     input.setFieldBC(std::array<ippl::FieldBC, 2>{ippl::NO_FACE, ippl::NO_FACE});
     Kokkos::View<double*> column("element column", order + 1);

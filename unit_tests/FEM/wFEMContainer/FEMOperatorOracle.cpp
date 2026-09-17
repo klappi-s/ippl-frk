@@ -330,6 +330,73 @@ namespace {
         });
     }
 
+    TYPED_TEST(FEMOperatorOracle, ConstantActionBoundaryColumnsAndSplitConsistency) {
+        using T = typename TestFixture::T;
+        this->eachCase([&](const auto& c, auto& ctx) {
+            auto a = ctx.stiffness();
+            auto standard = ctx.stiffness(ippl::PoissonStiffnessMode::Standard);
+            const auto matrix = ctx.space_m.assembleElementMatrix(a);
+            const auto original = ctx.space_m.assembleElementMatrix(standard);
+            constexpr auto N = TestFixture::Context::N;
+            for (size_t i = 0; i < N; ++i) {
+                long double sum = 0, magnitude = 0;
+                for (size_t j = 0; j < N; ++j) {
+                    if (i != j) {
+                        EXPECT_EQ(matrix[i][j], original[i][j]);
+                    }
+                    sum += matrix[i][j];
+                    magnitude += std::abs(static_cast<long double>(matrix[i][j]));
+                    EXPECT_NEAR(matrix[i][j], matrix[j][i],
+                        8 * std::numeric_limits<T>::epsilon() * TestFixture::QUAD_TOTAL
+                          * std::sqrt(std::abs(double(matrix[i][i]) * matrix[j][j])));
+                }
+                if (a.enforceZeroRowSum()) {
+                    EXPECT_LE(std::abs(sum), N * std::numeric_limits<T>::epsilon() * magnitude);
+                }
+            }
+            // Coordinate coefficients represent nonconstant affine functions.
+            for (unsigned d = 0; d < TestFixture::DIM; ++d) {
+                long double energy = 0;
+                for (size_t i = 0; i < N; ++i)
+                    for (size_t j = 0; j < N; ++j)
+                        energy += c.geometry.reference.nodes[i * TestFixture::DIM + d]
+                                  * static_cast<long double>(matrix[i][j])
+                                  * c.geometry.reference.nodes[j * TestFixture::DIM + d];
+                EXPECT_GT(energy, 0);
+            }
+
+            auto raw = ctx.field();
+            std::vector<double> constant(c.op.probe.size(), 1.25), zero(constant.size());
+            ctx.scatter(raw, constant);
+            raw.fillHalo();
+            auto rawAction = ctx.space_m.evaluateAx(raw, a);
+            if (a.useCoefficientDifferences()) {
+                EXPECT_EQ(ippl::norm(rawAction), T(0));
+            } else {
+                this->compare(ctx.gather(rawAction), zero,
+                              support::apply(c.op.stiffness, constant, true));
+            }
+            auto mass = ctx.mass();
+            auto massAction = ctx.space_m.evaluateAx(raw, mass);
+            EXPECT_GT(ippl::norm(massAction), T(0));
+
+            auto constrained = ctx.field(ippl::ZERO_FACE);
+            ctx.scatter(constrained, constant); // Deliberately nonzero physical boundary entries.
+            constrained.fillHalo();
+            auto full = ctx.space_m.evaluateAx(constrained, a);
+            auto diagonal = ctx.space_m.evaluateAx_diag(constrained, a);
+            auto off = ctx.space_m.evaluateAx_upperlower(constrained, a);
+            auto split = diagonal.deepCopy();
+            split = diagonal + off;
+            for (auto i : c.boundaries[0].constrainedDofs) constant[i] = 0;
+            auto expected = support::apply(c.op.stiffness, constant);
+            for (auto i : c.boundaries[0].constrainedDofs) expected[i] = 0;
+            const auto scale = support::apply(c.op.stiffness, constant, true);
+            this->compare(ctx.gather(full), expected, scale);
+            this->compare(ctx.gather(split), ctx.gather(full), scale);
+        });
+    }
+
     TYPED_TEST(FEMOperatorOracle, CoefficientNormsExcludeGhostsAndPhysicalErrorIsAbsolute) {
         this->eachCase([&](const auto& c, auto& ctx) {
             using T = typename TestFixture::T;

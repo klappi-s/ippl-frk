@@ -112,16 +112,22 @@ Within each complete P3 example and every operator case, `boundaries` is ordered
 | 1 | `constant_0_75` | The same quantities with `g=0.75` on every boundary face. |
 
 For each operator case, [FEMPoissonOracle.cpp](../FEMPoissonOracle.cpp) registers
-these six solve variants in this order (each name starts with the case ID):
+these eight solve variants in this order (each name starts with the case ID):
 
 1. `<case>_CG_zero`
 2. `<case>_CG_constant_0_75`
 3. `<case>_CG_ZeroSource`
-4. `<case>_Jacobi_zero`
-5. `<case>_Jacobi_constant_0_75`
-6. `<case>_Jacobi_ZeroSource`
+4. `<case>_CG_ZeroSourceConstantBoundary`
+5. `<case>_Jacobi_zero`
+6. `<case>_Jacobi_constant_0_75`
+7. `<case>_Jacobi_ZeroSource`
+8. `<case>_Jacobi_ZeroSourceConstantBoundary`
 
-`ZeroSource` is constructed by the C++ test and has no separate stored dataset.
+`ZeroSource` and `ZeroSourceConstantBoundary` are constructed by the C++ test
+and have no separate stored dataset. Their exact solutions are respectively
+zero and the prescribed constant. CTest repeats operator/solve registrations
+with `standard`, `rowsum_diagonal`, and `constant_preserving` stiffness modes,
+using the same numerical package and tolerances in every mode.
 These are per-case variant orders; typed registration, MPI launches, and CTest
 sharding determine execution order separately.
 
@@ -264,11 +270,12 @@ come from the dimension’s runtime package. The operator test names belong to
 | `c.sampledConvergenceSource`, `sampledConvergenceScale` | Expected samples of the convergence driver's polynomial source and its float roundoff allowance. | `SourceSamplingUsesPhysicalNodesAndSelectedFamily` |
 | `c.boundaries[k].constrainedDofs`, `freeDofs`, `prescribedValues`, `operatorAction`, `lift`, `liftedRhs` | Boundary/free DOFs, prescribed values, constrained action, `A_FC*g`, and `b_F-A_FC*g`. | `ConstrainedActionsBoundaryLiftAndRhs`; boundary indices/values also check solver output. |
 | `c.op.diagonal`; `c.boundaries[k].lowerAction`, `upperAction`, `offDiagonalAction` | Global diagonal and strict triangular/off-diagonal actions on free DOFs. | `DiagonalInverseAndGlobalTriangularBlocks` |
+| `c.geometry.reference.nodes`, `c.op.stiffness`, boundary indices | Affine energy probes and independent constrained constant-vector action; other expectations are structural identities. | `ConstantActionBoundaryColumnsAndSplitConsistency` |
 | `c.diagnostics.*` | Coefficient norms/inner product, a second vector, physical L² norm, and absolute/relative FE errors. | `CoefficientNormsExcludeGhostsAndPhysicalErrorIsAbsolute` |
 | **`c.boundaries[k].solution`** | **Full discrete solution, including prescribed boundary coefficients.** | [FEMPoissonOracle.cpp](../FEMPoissonOracle.cpp): CG and Jacobi-PCG coefficient comparisons, together with residual checks against `c.op.stiffness` and immutable `c.load.preBc`. |
 
 `boundaries[0]` is zero Dirichlet; `boundaries[1]` is constant `0.75`. Complete
-solve tests also construct a zero-source/zero-solution case from each fixture;
+solve tests also construct zero-source cases with zero and constant solutions from each fixture;
 there is no separate stored zero-source dataset. The same data serve all MPI
 rank counts. Reference/operator tests use double and float; complete solves use double.
 

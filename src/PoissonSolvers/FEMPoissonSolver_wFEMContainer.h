@@ -81,6 +81,11 @@ namespace ippl {
 
         LagrangeType& getSpace() { return lagrangeSpace_m; }
 
+        PoissonStiffnessMode getStiffnessMode() const {
+            return parsePoissonStiffnessMode(
+                this->params_m.template get<std::string>("poisson_stiffness_mode"));
+        }
+
         /** Apply interpolation/quadrature ParameterList keys (also invoked at start of solve). */
         void configureNodeFamilies() { applyNodeFamilyParameters(); }
 
@@ -88,6 +93,22 @@ namespace ippl {
 
         void solve() override {
             applyNodeFamilyParameters();
+            const auto stiffnessMode = getStiffnessMode();
+
+            if (stiffnessMode != PoissonStiffnessMode::Standard) {
+                const auto boundaries = this->lhs_mp->getFieldBCTypes();
+                if (!std::all_of(boundaries.begin(), boundaries.end(), [](FieldBC bc) {
+                        return bc == ZERO_FACE || bc == CONSTANT_FACE;
+                    }))
+                    throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                                        "Corrected stiffness modes currently require Dirichlet boundaries.");
+                auto preconditioner = this->params_m.template get<std::string>("preconditioner_type");
+                std::transform(preconditioner.begin(), preconditioner.end(), preconditioner.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (this->params_m.template get<bool>("preconditioned") && preconditioner == "multigrid")
+                    throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                                        "Corrected stiffness modes are not validated with multigrid.");
+            }
 
             // The solution owns Dirichlet metadata; rhs still contains source samples.
             // Krylov directions have homogeneous BCs, while lhs retains prescribed DOFs.
@@ -131,7 +152,7 @@ namespace ippl {
                 refElement_m.getDeterminantOfTransformationJacobian(firstElementVertexPoints));
 
             EvalFunctor<Tlhs, Dim, LagrangeType::numElementDOFs> poissonEquationEval(
-                DPhiInvT, absDetDPhi);
+                DPhiInvT, absDetDPhi, stiffnessMode);
 
             const auto algoOperator = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
                 field.setFieldBC(bcTypes);
@@ -215,10 +236,14 @@ namespace ippl {
                     lhs_type x0(*(this->lhs_mp));
                     x0 = Tlhs(1);
                     x0.setFieldBC(bcTypes);
+                    if (stiffnessMode != PoissonStiffnessMode::Standard)
+                        detail::setFEMBoundaryDOFs(x0, x0, Tlhs(0), false);
                     // Cap power iterations: FEM operator is expensive vs FD laplace.
                     beta = powermethod(algoOperator, x0, /*max_iter=*/200, /*tol=*/1e-3);
                     x0   = Tlhs(1);
                     x0.setFieldBC(bcTypes);
+                    if (stiffnessMode != PoissonStiffnessMode::Standard)
+                        detail::setFEMBoundaryDOFs(x0, x0, Tlhs(0), false);
                     alpha = adapted_powermethod(algoOperator, x0, beta, /*max_iter=*/200,
                                                 /*tol=*/1e-3);
                     if (!(alpha > 0.0 && beta > alpha)) {
@@ -352,6 +377,7 @@ namespace ippl {
             this->params_m.add("tolerance", (Tlhs)1e-13);
             this->params_m.add("preconditioned", true);
             this->params_m.add("preconditioner_type", "jacobi");
+            this->params_m.add("poisson_stiffness_mode", std::string("standard"));
             this->params_m.add("flexible_cg", false);
             // Milder than FD/alpine defaults: spectral types use estimated eigenvalues.
             this->params_m.add("newton_level", 2);
