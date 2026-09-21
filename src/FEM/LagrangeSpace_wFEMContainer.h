@@ -318,6 +318,7 @@ namespace ippl {
             // works since numElementDOFs in LagrangeSpace_wfc is static constexpr
             static constexpr unsigned numElementDOFs = LagrangeSpace_wfc::numElementDOFs;
             Vector<size_t, Dim> nr_m;
+            bool periodic_m = false;
             ElementType ref_element_m;
             LagrangeDOFLocations<T, Dim, Order> dofLocations_m;
             
@@ -332,6 +333,8 @@ namespace ippl {
             KOKKOS_FUNCTION point_t getRefElementDOFLocation(const size_t& localDOF) const;
 
             KOKKOS_FUNCTION T evaluateRefElementShapeFunction(const size_t& localDOF,
+                const point_t& localPoint) const;
+            KOKKOS_FUNCTION point_t evaluateRefElementShapeFunctionGradient(const size_t& localDOF,
                 const point_t& localPoint) const;
         };
 
@@ -378,6 +381,7 @@ namespace ippl {
 
         /// DOFHandler for this space /////////////////////////////////////////
         DOFHandler_t dofHandler_m;
+        bool periodic_m = false;
 
         // Typename for DOF mapping, used to get in which entity, at which
         // NDIndex and at which position in the DOF Array a local DOF is located

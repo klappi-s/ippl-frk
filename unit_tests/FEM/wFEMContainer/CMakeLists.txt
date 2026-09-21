@@ -8,7 +8,37 @@ add_ippl_test(LagrangeSpace_firstOrder)
 add_ippl_test(LagrangeSpace_higherOrder)
 add_ippl_test(LagrangeGLLNodes)
 add_ippl_test(FEMOracleRuntimeTest NUM_PROCS 1 LABELS FEM oracle)
+add_ippl_test(FEMReuse NUM_PROCS 1 LABELS FEM periodic reuse)
+add_ippl_test(FEMPreconditionerProperties NUM_PROCS 1 LABELS FEM periodic preconditioner)
 add_ippl_test(FEMConstantPreservation NUM_PROCS 1 LABELS FEM operator solver)
+set(_periodic_sources)
+foreach(_dim RANGE 1 3)
+  foreach(_order RANGE 1 5)
+    set(_source "${CMAKE_CURRENT_BINARY_DIR}/FEMPeriodic_${_dim}D_P${_order}.cpp")
+    file(GENERATE OUTPUT "${_source}" CONTENT
+      "#define FEM_PERIODIC_CASE\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/FEMPeriodic.cpp\"\nTEST(FEMPeriodic, P${_order}_${_dim}D) { checkPeriodic<${_dim},${_order}>(); }\n")
+    list(APPEND _periodic_sources "${_source}")
+  endforeach()
+endforeach()
+add_ippl_test(FEMPeriodic SOURCES FEMPeriodic.cpp ${_periodic_sources}
+  $<TARGET_OBJECTS:FEMOracleData1D> NUM_PROCS 1 LABELS FEM periodic solver)
+target_link_libraries(FEMPeriodic PRIVATE FEMOraclePackage)
+add_ippl_test(FEMParticleCoupling SOURCES FEMParticleCoupling.cpp
+  $<TARGET_OBJECTS:FEMOracleData1D> NUM_PROCS 1 LABELS FEM particle)
+target_link_libraries(FEMParticleCoupling PRIVATE FEMOraclePackage)
+if(BUILD_TESTING)
+  # Exhaustive P1-P5 tensor cases take about five minutes on the Serial backend.
+  set_tests_properties(FEMPeriodic PROPERTIES TIMEOUT 600)
+  add_test(NAME FEMReuse_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMReuse> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMReuse_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;periodic;reuse")
+  add_test(NAME FEMParticleCoupling_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMParticleCoupling> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMParticleCoupling_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;particle")
+  add_test(NAME FEMPeriodic_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMPeriodic> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMPeriodic_MPI2 PROPERTIES TIMEOUT 600 PROCESSORS 2 LABELS "FEM;periodic;solver")
+endif()
 include(Oracle/FEMOracleDependency.cmake)
 ippl_resolve_fem_oracles()
 # Only test targets depend on the package. The IPPL library is unaffected.

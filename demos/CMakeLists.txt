@@ -28,3 +28,7 @@ endif()
 if(IPPL_ENABLE_COLLISIONS)
   add_subdirectory(collisions)
 endif()
+
+if(IPPL_ENABLE_ELECTROSTATIC_FEM)
+  add_subdirectory(electrostaticFEM)
+endif()

@@ -4,6 +4,71 @@
 namespace ippl {
 
     namespace detail {
+        template<typename T, unsigned Dim, unsigned Order, typename Nodes>
+        KOKKOS_FUNCTION Vector<T,Dim> lagrangeGradient(const Vector<T,Dim>& ref_element_point,
+            const Vector<T,Dim>& localPoint, const Nodes& nodes) {
+        Vector<T,Dim> gradient;
+
+        // For Lagrange elements, gradient is tensor product with one derivative
+        // grad_i(phi) = [phi_1, phi_2, ..., dphi_i/dx_i, ..., phi_Dim]
+        for (size_t d = 0; d < Dim; d++) {
+            T product = 1;
+
+            for (size_t d2 = 0; d2 < Dim; d2++) {
+                if (d2 == d) {
+                    // Compute derivative of 1D Lagrange basis in this dimension
+                    T basis_deriv_1d = 0.0;
+
+                    // Loop over all nodes to construct derivative
+                    for (unsigned k = 0; k <= Order; ++k) {
+                        T node_k = nodes[k];
+
+                        // Skip if this is the node corresponding to ref_element_point[d]
+                        if (Kokkos::abs(ref_element_point[d] - node_k) < 1e-10) {
+                            continue;
+                        }
+
+                        // Compute derivative using product rule
+                        T term = 1.0 / (ref_element_point[d] - node_k);
+
+                        for (unsigned j = 0; j <= Order; ++j) {
+                            T node_j = nodes[j];
+
+                            if (Kokkos::abs(ref_element_point[d] - node_j) < 1e-10 || j == k) {
+                                continue;
+                            }
+
+                            term *= (localPoint[d] - node_j) / (ref_element_point[d] - node_j);
+                        }
+
+                        basis_deriv_1d += term;
+                    }
+
+                    product *= basis_deriv_1d;
+                } else {
+                    // Compute 1D Lagrange basis in other dimensions
+                    T basis_1d = 1.0;
+
+                    for (unsigned k = 0; k <= Order; ++k) {
+                        T node_k = nodes[k];
+
+                        if (Kokkos::abs(ref_element_point[d2] - node_k) < 1e-10) {
+                            continue;
+                        }
+
+                        basis_1d *= (localPoint[d2] - node_k) / (ref_element_point[d2] - node_k);
+                    }
+
+                    product *= basis_1d;
+                }
+            }
+
+            gradient[d] = product;
+        }
+
+        return gradient;
+        }
+
         // Physical boundary DOFs are prescribed once by their owner, not summed
         // as element contributions. Shared by solver setup and operator identity rows.
         template <typename Field>
@@ -154,6 +219,7 @@ namespace ippl {
         BCTypesArray bcTypes;
         IndicesType nr_m;
         int nghost;
+        bool periodic;
 
         KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
             using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
@@ -162,7 +228,7 @@ namespace ippl {
             const IndicesType elementPos = dofHandler.getElementNDIndex(elementIndex);
 
             Vector<size_t, NumElementDOFs> g_dofs(0);
-            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos, nr_m);
+            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos, nr_m, periodic);
 
             for (size_t i = DofStartA; i < DofEndA; ++i) {
                 DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
@@ -206,6 +272,7 @@ namespace ippl {
         BCTypesArray bcTypes;
         IndicesType nr_m;
         int nghost;
+        bool periodic;
 
         KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
             using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
@@ -214,7 +281,7 @@ namespace ippl {
             const IndicesType elementPos = dofHandler.getElementNDIndex(elementIndex);
 
             Vector<size_t, NumElementDOFs> g_dofs(0);
-            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos, nr_m);
+            detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos, nr_m, periodic);
 
             for (size_t i = DofStartA; i < DofEndA; ++i) {
                 DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
@@ -443,6 +510,7 @@ namespace ippl {
         PatternView globalCoeffs;
         IndicesType nr_m;
         int nghost;
+        bool periodic;
 
         KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
             using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
@@ -454,7 +522,7 @@ namespace ippl {
 
             Vector<size_t, NumElementDOFs> g_dofs(0);
             detail::fillLagrangeGlobalDOFIndices<Dim, Order, NumElementDOFs>(g_dofs, elementPos,
-                                                                             nr_m);
+                                                                             nr_m, periodic);
 
             for (size_t i = DofStartA; i < DofEndA; ++i) {
                 DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
@@ -656,7 +724,7 @@ namespace ippl {
                              FiniteElementSpaceTraits<LagrangeSpaceTag, Dim, Order>::dofsPerElement,
                              ElementType, QuadratureType, FieldLHS, FieldRHS>(mesh, ref_element,
                                                                               quadrature)
-        , dofHandler_m(mesh, layout) {
+        , dofHandler_m(mesh, layout), periodic_m(layout.isAllPeriodic_m) {
         // Assert that the dimension is either 1, 2 or 3.
         static_assert(Dim >= 1 && Dim <= 3,
                       "Finite Element space only supports 1D, 2D and 3D meshes");
@@ -700,6 +768,7 @@ namespace ippl {
 
         // Initialize the DOFHandler
         dofHandler_m.initialize(mesh, layout);
+        periodic_m = layout.isAllPeriodic_m;
 
         // Initialize the elementIndices view
         elementIndices = dofHandler_m.getElementIndices();
@@ -715,7 +784,7 @@ namespace ippl {
                                          FieldRHS>::numGlobalDOFs() const {
         size_t num_global_dofs = 1;
         for (size_t d = 0; d < Dim; ++d) {
-            num_global_dofs *= (this->nr_m[d] - 1) * Order + 1;
+            num_global_dofs *= (this->nr_m[d] - 1) * Order + (periodic_m ? 0 : 1);
         }
         return num_global_dofs;
     }
@@ -783,7 +852,7 @@ namespace ippl {
         Vector<size_t, numElementDOFs> globalDOFs(0);
         const indices_t elementPos = this->getElementNDIndex(elementIndex);
         detail::fillLagrangeGlobalDOFIndices<Dim, Order, numElementDOFs>(globalDOFs, elementPos,
-                                                                         this->nr_m);
+                                                                         this->nr_m, periodic_m);
         return globalDOFs;
     }
 
@@ -867,66 +936,7 @@ namespace ippl {
         // Get the DOF location on the reference element
         const point_t ref_element_point = getRefElementDOFLocation(localDOF);
 
-        point_t gradient;
-
-        // For Lagrange elements, gradient is tensor product with one derivative
-        // grad_i(phi) = [phi_1, phi_2, ..., dphi_i/dx_i, ..., phi_Dim]
-        for (size_t d = 0; d < Dim; d++) {
-            T product = 1;
-
-            for (size_t d2 = 0; d2 < Dim; d2++) {
-                if (d2 == d) {
-                    // Compute derivative of 1D Lagrange basis in this dimension
-                    T basis_deriv_1d = 0.0;
-
-                    // Loop over all nodes to construct derivative
-                    for (unsigned k = 0; k <= Order; ++k) {
-                        T node_k = dofLocations_m.nodes1d_m[k];
-
-                        // Skip if this is the node corresponding to ref_element_point[d]
-                        if (Kokkos::abs(ref_element_point[d] - node_k) < 1e-10) {
-                            continue;
-                        }
-
-                        // Compute derivative using product rule
-                        T term = 1.0 / (ref_element_point[d] - node_k);
-
-                        for (unsigned j = 0; j <= Order; ++j) {
-                            T node_j = dofLocations_m.nodes1d_m[j];
-
-                            if (Kokkos::abs(ref_element_point[d] - node_j) < 1e-10 || j == k) {
-                                continue;
-                            }
-
-                            term *= (localPoint[d] - node_j) / (ref_element_point[d] - node_j);
-                        }
-
-                        basis_deriv_1d += term;
-                    }
-
-                    product *= basis_deriv_1d;
-                } else {
-                    // Compute 1D Lagrange basis in other dimensions
-                    T basis_1d = 1.0;
-
-                    for (unsigned k = 0; k <= Order; ++k) {
-                        T node_k = dofLocations_m.nodes1d_m[k];
-
-                        if (Kokkos::abs(ref_element_point[d2] - node_k) < 1e-10) {
-                            continue;
-                        }
-
-                        basis_1d *= (localPoint[d2] - node_k) / (ref_element_point[d2] - node_k);
-                    }
-
-                    product *= basis_1d;
-                }
-            }
-
-            gradient[d] = product;
-        }
-
-        return gradient;
+        return detail::lagrangeGradient<T,Dim,Order>(ref_element_point,localPoint,dofLocations_m.nodes1d_m);
     }
 
     ///////////////////////////////////////////////////////////////////////
@@ -938,6 +948,9 @@ namespace ippl {
     template <typename F>
     auto LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
                            FieldRHS>::assembleElementMatrix(F& evalFunction) const -> ElementMatrix {
+        if constexpr (requires { evalFunction.preparedMatrix(); }) {
+            if (const auto* matrix=evalFunction.preparedMatrix()) return *matrix;
+        }
         const Vector<T, QuadratureType::numElementNodes> w =
             this->quadrature_m.getWeightsForRefElement();
 
@@ -1081,7 +1094,7 @@ namespace ippl {
         IpplTimings::stopTimer(outer_loop);
 
         // TODO add Periodic BC handling for entity type views
-        if (bcTypes[0] == PERIODIC_FACE) {
+        if (bcTypes[0] == PERIODIC_FACE && !field.getLayout().isAllPeriodic_m) {
             resultField.accumulateHalo();
             resultField.applyBC();
             resultField.assignGhostToPhysical();
@@ -1282,7 +1295,7 @@ namespace ippl {
 
                     Kokkos::parallel_for(
                         "fillFromGlobalCoefficients", policy_type(0, elemIndices.extent(0)),
-                        functor_t{dofHandler, elemIndices, resultView_a, globalCoeffs, nr, nghost});
+                        functor_t{dofHandler, elemIndices, resultView_a, globalCoeffs, nr, nghost, periodic_m});
                 }(),
                 ...);
         }(std::make_index_sequence<numTypes>{});
@@ -1401,7 +1414,7 @@ namespace ippl {
         IpplTimings::stopTimer(outer_loop);
 
         // Sum duplicate contributions at partition / entity halos (same as evaluateAx).
-        if (bcTypes[0] == PERIODIC_FACE) {
+        if (bcTypes[0] == PERIODIC_FACE && !field.getLayout().isAllPeriodic_m) {
             temp_field.accumulateHalo();
             temp_field.applyBC();
         } else {
@@ -1752,9 +1765,19 @@ namespace ippl {
         const {
         DeviceStruct space_mirror;
         space_mirror.nr_m           = this->nr_m;
+        space_mirror.periodic_m = periodic_m;
         space_mirror.ref_element_m  = this->ref_element_m;
         space_mirror.dofLocations_m = this->dofLocations_m;
         return space_mirror;
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    KOKKOS_FUNCTION auto LagrangeSpace_wfc<T,Dim,Order,ElementType,QuadratureType,FieldLHS,FieldRHS>::
+        DeviceStruct::evaluateRefElementShapeFunctionGradient(const size_t& localDOF,
+                                                              const point_t& point) const -> point_t {
+        return detail::lagrangeGradient<T,Dim,Order>(getRefElementDOFLocation(localDOF),point,
+                                                    dofLocations_m.nodes1d_m);
     }
 
     // I don't know how to avoid code duplication here...
@@ -1801,7 +1824,7 @@ namespace ippl {
         const {
         Vector<size_t, numElementDOFs> globalDOFs(0);
         detail::fillLagrangeGlobalDOFIndices<Dim, Order, numElementDOFs>(globalDOFs, elementNDIndex,
-                                                                         this->nr_m);
+                                                                         this->nr_m, periodic_m);
         return globalDOFs;
     }
 
@@ -1936,7 +1959,7 @@ namespace ippl {
 
             Kokkos::parallel_for(
                 "evaluateAx_lower: compute", policy_type(0, elemIndices.extent(0)),
-                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nr, nghost});
+                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nr, nghost, periodic_m});
         };
 
         constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
@@ -1952,7 +1975,7 @@ namespace ippl {
             }.template operator()<Is>(), ...);
         }(std::make_index_sequence<numTypes>{});
 
-        if (bcType == PERIODIC_FACE) {
+        if (bcType == PERIODIC_FACE && !field.getLayout().isAllPeriodic_m) {
             resultField.accumulateHalo();
             resultField.applyBC();
             resultField.assignGhostToPhysical();
@@ -2010,7 +2033,7 @@ namespace ippl {
 
             Kokkos::parallel_for(
                 "evaluateAx_upper: compute", policy_type(0, elemIndices.extent(0)),
-                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nr, nghost});
+                functor_t{dofHandler, elemIndices, viewBC_a, inputView_b, resultView_a, A_K, bcTypes, nr, nghost, periodic_m});
         };
 
         constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
@@ -2026,7 +2049,7 @@ namespace ippl {
             }.template operator()<Is>(), ...);
         }(std::make_index_sequence<numTypes>{});
 
-        if (bcType == PERIODIC_FACE) {
+        if (bcType == PERIODIC_FACE && !field.getLayout().isAllPeriodic_m) {
             resultField.accumulateHalo();
             resultField.applyBC();
             resultField.assignGhostToPhysical();
@@ -2099,7 +2122,7 @@ namespace ippl {
             }.template operator()<Is>(), ...);
         }(std::make_index_sequence<numTypes>{});
 
-        if (bcType == PERIODIC_FACE) {
+        if (bcType == PERIODIC_FACE && !field.getLayout().isAllPeriodic_m) {
             resultField.accumulateHalo();
             resultField.applyBC();
             resultField.assignGhostToPhysical();

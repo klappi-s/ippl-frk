@@ -17,6 +17,7 @@
 
 #include "FEM/FEMVector.h"
 #include "FEM/FEMContainer.h"
+#include "Utility/Timer.h"
 
 namespace ippl {
     namespace pcg_preconditioner_defaults {
@@ -323,20 +324,25 @@ namespace ippl {
          * the last time this solver was used
          * @return Iteration count of last solve
          */
+        void clearWorkspace() { workspace_m.clear(); }
+
+        void setProjector(std::function<void(lhs_type&)> projector) {
+            projector_m = std::move(projector);
+        }
+
         virtual int getIterationCount() { return iterations_m; }
 
         virtual void operator()(lhs_type& lhs, rhs_type& rhs,
                                 const ParameterList& params) override {
-            typename lhs_type::Mesh_t mesh     = lhs.get_mesh();
-            typename lhs_type::Layout_t layout = lhs.getLayout();
 
             iterations_m            = 0;
             const int maxIterations = params.get<int>("max_iterations");
 
             // Variable names mostly based on description in
             // https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf
-            lhs_type r(mesh, layout);
-            lhs_type d(mesh, layout);
+            prepareWorkspace(lhs,3,params);
+            auto& r=*workspace_m[0];
+            auto& d=*workspace_m[1];
 
             auto lhsBCs = lhs.getFieldBC();
             std::array<FieldBC, 2*Dim> bcTypes;
@@ -359,7 +365,9 @@ namespace ippl {
                 }
             }
 
+            if (projector_m) projector_m(lhs);
             r = rhs - op_m(lhs);
+            if (projector_m) projector_m(r);
             d = r.deepCopy();
             d.setFieldBC(bcTypes);
 
@@ -369,15 +377,19 @@ namespace ippl {
             const T rhsNorm = norm(rhs);
             const T tolerance = params.get<T>("tolerance") * (rhsNorm > T(0) ? rhsNorm : T(1));
 
-            lhs_type q(mesh, layout);
+            auto& q=*workspace_m[2];
 
             while (iterations_m < maxIterations && residueNorm > tolerance) {
                 q = op_m(d);
 
-                T alpha = delta1 / innerProduct(d, q);
+                const T curvature=innerProduct(d,q);
+                if (!(curvature>T(0)) || !std::isfinite(curvature))
+                    throw IpplException("CG", "Nonpositive or nonfinite operator curvature.");
+                T alpha = delta1 / curvature;
                 lhs     = lhs + alpha * d;
 
                 r      = r - alpha * q;
+                if (projector_m) projector_m(r);
 
                 delta0 = delta1;
                 delta1 = innerProduct(r, r);
@@ -389,7 +401,7 @@ namespace ippl {
                 ++iterations_m;
             }
 
-            if (allFacesPeriodic) {
+            if (allFacesPeriodic && !projector_m) {
                 T avg = lhs.getVolumeAverage();
                 lhs   = lhs - avg;
             }
@@ -398,7 +410,19 @@ namespace ippl {
         virtual T getResidue() const { return residueNorm; }
 
     protected:
+        std::vector<std::unique_ptr<lhs_type>> workspace_m;
+        void prepareWorkspace(lhs_type& lhs,unsigned count,const ParameterList& params) {
+            const bool reuse=params.contains("fem_reuse") &&
+                params.template get<std::string>("fem_reuse")=="full";
+            if (!reuse) clearWorkspace();
+            if (workspace_m.size()!=count) {
+                clearWorkspace();
+                for (unsigned i=0; i<count; ++i)
+                    workspace_m.push_back(std::make_unique<lhs_type>(lhs.get_mesh(),lhs.getLayout(),lhs.getNghost()));
+            }
+        }
         OperatorF op_m;
+        std::function<void(lhs_type&)> projector_m;
         T residueNorm    = 0;
         int iterations_m = 0;
     };
@@ -811,6 +835,7 @@ namespace ippl {
             unsigned mg_min_cells_per_rank_per_dim = pcg_preconditioner_defaults::mg_min_cells,
             bool mg_communication = pcg_preconditioner_defaults::mg_communication) override {
             
+            preconditionerFieldsReady_m=false;
             if (preconditioner_type == "jacobi") {
                 preconditioner_m =
                     std::move(std::make_unique<jacobi_preconditioner<lhs_type, InverseDiagF>>(
@@ -864,7 +889,18 @@ namespace ippl {
 
         void setPreconditionerObject(std::unique_ptr<preconditioner<lhs_type>> precon) {
             preconditioner_m = std::move(precon);
+            preconditionerFieldsReady_m=false;
         }
+
+        void preparePreconditioner(lhs_type& lhs) {
+            if (!preconditionerFieldsReady_m) {
+                preconditioner_m->init_fields(lhs);
+                preconditionerFieldsReady_m=true;
+            }
+        }
+        unsigned getApplicationCount() const { return applications_m; }
+        double getApplicationSeconds() const { return applicationSeconds_m; }
+        bool applyingPreconditioner() const { return applying_m; }
 
         void operator()(lhs_type& lhs, rhs_type& rhs, const ParameterList& params) override {
             if (preconditioner_m == nullptr) {
@@ -872,22 +908,25 @@ namespace ippl {
                                     "Preconditioner has not been set for PCG solver");
             }
             
-            typename lhs_type::Mesh_t mesh     = lhs.get_mesh();
-            typename lhs_type::Layout_t layout = lhs.getLayout();
+            auto& mesh=lhs.get_mesh();
+            auto& layout=lhs.getLayout();
+            applications_m=0; applicationSeconds_m=0;
+            detailedTiming_m=params.contains("fem_detailed_timing") && params.get<bool>("fem_detailed_timing");
 
             this->iterations_m            = 0;
             const int maxIterations = params.get<int>("max_iterations");
 
-            lhs_type r(mesh, layout);
-            lhs_type d(mesh, layout);
-            lhs_type s(mesh, layout);
-            lhs_type pcond_out(mesh, layout);
-            lhs_type q(mesh, layout);
+            this->prepareWorkspace(lhs,6,params);
+            auto& r=*this->workspace_m[0];
+            auto& d=*this->workspace_m[1];
+            auto& s=*this->workspace_m[2];
+            auto& pcond_out=*this->workspace_m[3];
+            auto& q=*this->workspace_m[4];
 
             // Each preconditioner's init_fields() is responsible for being
             // cheap on the steady-state path (refreshing layout in-place, not
             // reallocating).
-            preconditioner_m->init_fields(lhs);
+            preparePreconditioner(lhs);
 
             auto lhsBCs = lhs.getFieldBC();
             std::array<FieldBC, 2*Dim> bcTypes;
@@ -914,12 +953,15 @@ namespace ippl {
                 flexible = params.template get<bool>("flexible_cg");
             }
 
+            if (this->projector_m) this->projector_m(lhs);
             r = rhs - this->op_m(lhs);
-            (*preconditioner_m)(r, pcond_out);
+            if (this->projector_m) this->projector_m(r);
+            applyPreconditioner(r,pcond_out);
+            if (this->projector_m) this->projector_m(pcond_out);
             d = T(1) * pcond_out;
             d.setFieldBC(bcTypes);
 
-            lhs_type z_prev(mesh, layout);
+            auto& z_prev=*this->workspace_m[5];
             if (flexible) {
                 z_prev = T(1) * pcond_out;
             }
@@ -933,7 +975,11 @@ namespace ippl {
 
             while (this->iterations_m < maxIterations && this->residueNorm > tolerance) {
                 q       = this->op_m(d);
-                T alpha = delta1 / innerProduct(d, q);
+                const T curvature=innerProduct(d,q);
+                if (!(curvature>T(0)) || !std::isfinite(curvature) ||
+                    !(delta1>T(0)) || !std::isfinite(delta1))
+                    throw IpplException("PCG", "Nonpositive/nonfinite operator or preconditioner curvature.");
+                T alpha = delta1 / curvature;
                 lhs     = lhs + alpha * d;
 
                 if (flexible) {
@@ -942,7 +988,9 @@ namespace ippl {
                 } else {
                     r = r - alpha * q;
                 }
-                (*preconditioner_m)(r, s);
+                if (this->projector_m) this->projector_m(r);
+                applyPreconditioner(r,s);
+                if (this->projector_m) this->projector_m(s);
 
                 if (flexible) {
                     // Notay Flex-CG: β = (r, z - z_prev) / (r_old, z_old)
@@ -966,13 +1014,28 @@ namespace ippl {
                 ++this->iterations_m;
             }
 
-            if (allFacesPeriodic) {
+            if (allFacesPeriodic && !this->projector_m) {
                 T avg = lhs.getVolumeAverage();
                 lhs   = lhs - avg;
             }
         }
         
     protected:
+        bool preconditionerFieldsReady_m=false, applying_m=false, detailedTiming_m=false;
+        unsigned applications_m=0;
+        double applicationSeconds_m=0;
+        void applyPreconditioner(lhs_type& input,lhs_type& output) {
+            Timer timer;
+            if (detailedTiming_m) { Kokkos::fence(); timer.start(); }
+            applying_m=true;
+            try { (*preconditioner_m)(input,output); }
+            catch (...) { applying_m=false; throw; }
+            applying_m=false;
+            if (detailedTiming_m) {
+                Kokkos::fence(); timer.stop(); applicationSeconds_m+=timer.elapsed();
+            }
+            ++applications_m;
+        }
         std::unique_ptr<preconditioner<lhs_type>> preconditioner_m;
     };
     // ====== PCG FEMContainer Specialization : end ======

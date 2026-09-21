@@ -17,7 +17,7 @@ namespace ippl {
             auto dofArray = apply(view_, args);
             // Sum over all DOF elements in this DOFArray
             for (std::size_t dof = 0; dof < NumDOFs; ++dof) {
-                val += std::pow(Kokkos::abs(dofArray[dof]), p_);
+                val += Kokkos::pow(Kokkos::abs(dofArray[dof]), p_);
             }
         }
     };
@@ -62,7 +62,13 @@ namespace ippl {
 
         // Copy the data tuple (fields)
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((std::get<Is>(data_m) = std::get<Is>(other.data_m).deepCopy()), ...);
+            (([&]() {
+                // Each field must reference this container's layout, since the
+                // source can be a temporary or a destroyed cached container.
+                std::get<Is>(data_m).initialize(*mesh_m, layout_m[Is], nghost_m);
+                Kokkos::deep_copy(std::get<Is>(data_m).getView(),
+                                  std::get<Is>(other.data_m).getView());
+            }()), ...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
         setFieldBC(bcTypes_m, bcValues_m, bcSlopes_m);
     }
@@ -93,6 +99,16 @@ namespace ippl {
         // Get domain and communicator of the layout
         NDIndex<Dim> domain = l.getDomain();
 
+        // Inspect every rank before constructing sublayouts, so all ranks reject
+        // an empty periodic element partition together (rather than hanging).
+        if (l.isAllPeriodic_m) {
+            const auto domains = l.getHostLocalDomains();
+            for (size_t rank=0; rank<domains.extent(0); ++rank)
+                for (unsigned d=0; d<Dim; ++d)
+                    if (domain[d].length()<3 || domains(rank)[d].first()>=domain[d].last())
+                        throw IpplException("FEMContainer", "Periodic FEM requires at least two cells per axis and a nonempty element partition on every rank.");
+        }
+
         mpi::Communicator comm = l.comm;
         auto parallel = l.isParallel();
 
@@ -107,7 +123,10 @@ namespace ippl {
                 NDIndex<Dim> subDomain = domain;
                 
                 for (unsigned int d = 0; d < Dim; ++d) {
-                    subDomain[d] = dir[d] ? subDomain[d].cut(1) : subDomain[d];
+                    // A periodic endpoint is an alias, not another owned unknown.
+                    // The supplied mesh/layout still describe all geometric vertices.
+                    subDomain[d] = (dir[d] || l.isAllPeriodic_m)
+                        ? subDomain[d].cut(1) : subDomain[d];
                 }
                 
                 // Create a sub field layout for this element type and direction
@@ -363,6 +382,7 @@ namespace ippl {
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     FEMContainer<T, Dim, EntityTypes, DOFNums>& FEMContainer<T, Dim, EntityTypes, DOFNums>::operator=(const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) {
+        if (this == &other) return *this;
         // Copy member variables
         nghost_m = other.nghost_m;
         mesh_m = other.mesh_m;
@@ -706,6 +726,7 @@ namespace ippl {
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     void FEMContainer<T, Dim, EntityTypes, DOFNums>::applyBC() {
+        if (VertexLayout_m->isAllPeriodic_m) { fillHalo(); return; }
         // Apply boundary conditions to each field
         std::apply([&](auto&... fields) {
             ((fields.getFieldBC().apply(fields)), ...);
@@ -714,6 +735,8 @@ namespace ippl {
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     void FEMContainer<T, Dim, EntityTypes, DOFNums>::assignGhostToPhysical() {
+        // Periodic contributions were already reduced by accumulateHalo().
+        if (VertexLayout_m->isAllPeriodic_m) return;
         // Assign ghost to physical for each field
         std::apply([&](auto&... fields) {
             ((fields.getFieldBC().assignGhostToPhysical(fields)), ...);

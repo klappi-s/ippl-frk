@@ -6,7 +6,8 @@
 //   richardson, richardson_alt, gauss-seidel, ssor, multigrid (P1 h-MG; P2/P3 p-multigrid).
 //   Default preconditioner_type is "jacobi" (SSOR is weak/harmful for higher-order FEM).
 //   Multigrid uses Flexible CG + FEM rediscretization on all h-levels (Task 5.4).
-//   Newton/Chebyshev spectral bounds are estimated via powermethod / adapted_powermethod.
+//   Periodic Newton/Chebyshev use conservative positive-spectrum bounds.
+//   Dirichlet bounds retain powermethod / adapted_powermethod estimates.
 
 #ifndef IPPL_FEMPOISSONSOLVER_WFC_H
 #define IPPL_FEMPOISSONSOLVER_WFC_H
@@ -16,6 +17,9 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <sstream>
+#include <iomanip>
+#include "Utility/Timer.h"
 
 #include "LinearSolvers/PCG.h"
 #include "LinearSolvers/Preconditioner.h"
@@ -76,6 +80,7 @@ namespace ippl {
 
         void setRhs(rhs_type& rhs) override {
             Base::setRhs(rhs);
+            invalidatePreparedData();
             lagrangeSpace_m.initialize(rhs.get_mesh(), rhs.getLayout());
         }
 
@@ -91,18 +96,105 @@ namespace ippl {
 
         // bool usesGllMassShortcut() const { return gllMassShortcutActive_m; }
 
-        void solve() override {
-            applyNodeFamilyParameters();
+        void solve() override { solveImpl(*this->rhs_mp, false); }
+
+        // The caller retains an already assembled weak load; no second mass action.
+        void solveLoadVector(const rhs_type& load) {
+            auto work = load.deepCopy();
+            solveImpl(work, true);
+        }
+
+        struct SolveStatistics {
+            double operatorSetupSeconds=0, preconditionerSetupSeconds=0, krylovSeconds=0;
+            unsigned operatorSetups=0, preconditionerSetups=0, operatorCalls=0;
+            unsigned preconditionerOperatorCalls=0, preconditionerApplications=0;
+            double preconditionerApplicationSeconds=0;
+            double spectralLower=0, spectralUpper=0;
+            unsigned triangularCalls=0, diagonalCalls=0;
+            double operatorSeconds=0, triangularSeconds=0, diagonalSeconds=0;
+            double diagonalSetupSeconds=0, spectralSetupSeconds=0;
+        };
+        const SolveStatistics& getSolveStatistics() const { return statistics_m; }
+        lhs_type applyOperator(rhs_type field) const {
+            const auto vertices=lagrangeSpace_m.getElementMeshVertexPoints(Vector<size_t,Dim>(0));
+            PoissonEval raw(refElement_m.getInverseTransposeTransformationJacobian(vertices),
+                Kokkos::abs(refElement_m.getDeterminantOfTransformationJacobian(vertices)),getStiffnessMode());
+            PreparedEval eval{raw,elementMatrix_m};
+            field.setFieldBC(this->lhs_mp->getFieldBC());
+            field.fillHalo();
+            return lagrangeSpace_m.evaluateAx(field,eval);
+        }
+        void invalidatePreparedData() {
+            operatorKey_m.clear(); preconditionerKey_m.clear();
+            elementMatrix_m.reset(); diagonal_m.reset(); constant_m.reset(); volumeWeights_m.reset();
+            cg_algo_m.clearWorkspace(); pcg_algo_m.clearWorkspace();
+        }
+
+    private:
+        using ElementMatrix=typename LagrangeType::ElementMatrix;
+        using PoissonEval=EvalFunctor<Tlhs,Dim,LagrangeType::numElementDOFs>;
+        struct PreparedEval : PoissonEval {
+            std::shared_ptr<const ElementMatrix> matrix;
+            const ElementMatrix* preparedMatrix() const { return matrix.get(); }
+        };
+        std::string operatorKey_m, preconditionerKey_m;
+        std::shared_ptr<const ElementMatrix> elementMatrix_m;
+        std::shared_ptr<lhs_type> diagonal_m,constant_m,volumeWeights_m;
+        Tlhs constantNormSquared_m=0,volume_m=0;
+        double spectralLower_m=0,spectralUpper_m=0;
+        SolveStatistics statistics_m;
+        bool detailedTiming_m=false;
+        template<typename Action>
+        lhs_type profileAction(Action&& action,unsigned& calls,double& seconds) {
+            ++calls;
+            Timer timer;
+            if (detailedTiming_m) { Kokkos::fence(); timer.start(); }
+            auto result=action();
+            if (detailedTiming_m) { Kokkos::fence(); timer.stop(); seconds+=timer.elapsed(); }
+            return result;
+        }
+        std::string operatorKey() const {
+            std::ostringstream key;
+            key << std::setprecision(17);
+            for (auto name : {"interpolation_nodes","quadrature_nodes","poisson_stiffness_mode"})
+                key << this->params_m.template get<std::string>(name) << ':';
+            const auto& mesh=this->lhs_mp->get_mesh();
+            const auto& layout=this->lhs_mp->getLayout();
+            key << layout.isAllPeriodic_m;
+            for (unsigned d=0; d<Dim; ++d)
+                key << ':' << mesh.getMeshSpacing()[d] << ':' << mesh.getOrigin()[d]
+                    << ':' << mesh.getGridsize()[d] << ':' << layout.getLocalNDIndex()[d].first()
+                    << ':' << layout.getLocalNDIndex()[d].last();
+            for (auto bc:this->lhs_mp->getFieldBCTypes()) key << ':' << int(bc);
+            return key.str();
+        }
+        void solveImpl(rhs_type& rhs, bool assembledLoad) {
+            statistics_m={};
+            detailedTiming_m=this->params_m.template get<bool>("fem_detailed_timing");
+            const auto reuse=this->params_m.template get<std::string>("fem_reuse");
+            if (reuse!="off" && reuse!="operator" && reuse!="full")
+                throw IpplException("FEMPoissonSolver", "Unknown fem_reuse mode.");
+            const auto key=operatorKey();
+            if (reuse=="off" || key!=operatorKey_m) {
+                Timer timer; Kokkos::fence(); timer.start();
+                invalidatePreparedData();
+                lagrangeSpace_m.initialize(rhs.get_mesh(),rhs.getLayout());
+                applyNodeFamilyParameters();
+                operatorKey_m=key;
+                Kokkos::fence(); timer.stop();
+                statistics_m.operatorSetupSeconds=timer.elapsed();
+                statistics_m.operatorSetups=1;
+            }
+            if (reuse!="full") { diagonal_m.reset(); preconditionerKey_m.clear(); }
             const auto stiffnessMode = getStiffnessMode();
 
             if (stiffnessMode != PoissonStiffnessMode::Standard) {
                 const auto boundaries = this->lhs_mp->getFieldBCTypes();
                 if (!std::all_of(boundaries.begin(), boundaries.end(), [](FieldBC bc) {
-                        return bc == ZERO_FACE || bc == CONSTANT_FACE;
+                        return bc == ZERO_FACE || bc == CONSTANT_FACE || bc == PERIODIC_FACE;
                     }))
                     throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
-                                        "constant_preserving currently requires Dirichlet boundaries; "
-                                        "set poisson_stiffness_mode=standard for periodic solves.");
+                                        "constant_preserving requires uniform Dirichlet or periodic boundaries.");
                 auto preconditioner = this->params_m.template get<std::string>("preconditioner_type");
                 std::transform(preconditioner.begin(), preconditioner.end(), preconditioner.begin(),
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -119,6 +211,8 @@ namespace ippl {
             const bool dirichlet = std::all_of(bcTypes.begin(), bcTypes.end(), [](FieldBC bc) {
                 return bc == ZERO_FACE || bc == CONSTANT_FACE;
             });
+            if (dirichlet && this->lhs_mp->getLayout().isAllPeriodic_m)
+                throw IpplException("FEMPoissonSolver", "Dirichlet conditions require nonperiodic FEM ownership.");
             if (dirichlet) {
                 using ScalarField = Field<Tlhs, Dim, MeshType, Cell>;
                 Tlhs prescribed = 0;
@@ -138,9 +232,43 @@ namespace ippl {
                 throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
                                     "Only uniform Dirichlet or fully periodic boundaries are supported.");
             }
-            this->rhs_mp->setFieldBC(bcTypes);
-            this->rhs_mp->fillHalo();
-            lagrangeSpace_m.evaluateLoadVector(*(this->rhs_mp));
+            rhs.setFieldBC(bcTypes);
+            if (!dirichlet && !rhs.getLayout().isAllPeriodic_m)
+                throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                    "Periodic FEM requires a periodic geometric vertex layout (isAllPeriodic=true).");
+            if (!assembledLoad) {
+                rhs.fillHalo();
+                lagrangeSpace_m.evaluateLoadVector(rhs);
+            }
+            if (!dirichlet) {
+                if (!constant_m) {
+                    Timer timer; Kokkos::fence(); timer.start();
+                    constant_m=std::make_shared<lhs_type>(rhs); *constant_m=Tlhs(1);
+                    constantNormSquared_m=innerProduct(*constant_m,*constant_m);
+                    volumeWeights_m=std::make_shared<lhs_type>(*constant_m);
+                    volumeWeights_m->fillHalo(); lagrangeSpace_m.evaluateLoadVector(*volumeWeights_m);
+                    volume_m=innerProduct(*constant_m,*volumeWeights_m);
+                    Kokkos::fence(); timer.stop();
+                    statistics_m.operatorSetupSeconds+=timer.elapsed();
+                    statistics_m.operatorSetups=1;
+                }
+                const auto constant=constant_m;
+                const Tlhs count=constantNormSquared_m;
+                const Tlhs charge = innerProduct(*constant, rhs);
+                if (std::abs(charge) > Tlhs(1e-12) *
+                    std::max(Tlhs(1), norm(rhs) * std::sqrt(count)))
+                    throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
+                                        "Periodic load has nonzero total charge.");
+                auto project = [constant, count](lhs_type& value) {
+                    value -= innerProduct(*constant, value) / count;
+                };
+                project(rhs);
+                cg_algo_m.setProjector(project);
+                pcg_algo_m.setProjector(project);
+            } else {
+                cg_algo_m.setProjector({});
+                pcg_algo_m.setProjector({});
+            }
 
             const Vector<size_t, Dim> zeroNdIndex = Vector<size_t, Dim>(0);
 
@@ -153,48 +281,59 @@ namespace ippl {
             const Tlhs absDetDPhi = Kokkos::abs(
                 refElement_m.getDeterminantOfTransformationJacobian(firstElementVertexPoints));
 
-            EvalFunctor<Tlhs, Dim, LagrangeType::numElementDOFs> poissonEquationEval(
-                DPhiInvT, absDetDPhi, stiffnessMode);
+            PoissonEval rawEval(DPhiInvT,absDetDPhi,stiffnessMode);
+            if (reuse!="off" && !elementMatrix_m) {
+                Timer timer; Kokkos::fence(); timer.start();
+                elementMatrix_m=std::make_shared<ElementMatrix>(lagrangeSpace_m.assembleElementMatrix(rawEval));
+                Kokkos::fence(); timer.stop();
+                statistics_m.operatorSetupSeconds+=timer.elapsed();
+                statistics_m.operatorSetups=1;
+            }
+            PreparedEval poissonEquationEval{rawEval,elementMatrix_m};
 
             const auto algoOperator = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
-                field.setFieldBC(bcTypes);
-                field.fillHalo();
-                return lagrangeSpace_m.evaluateAx(field, poissonEquationEval);
+                if (pcg_algo_m.applyingPreconditioner()) ++statistics_m.preconditionerOperatorCalls;
+                return profileAction([&] {
+                    field.setFieldBC(bcTypes); field.fillHalo();
+                    return lagrangeSpace_m.evaluateAx(field,poissonEquationEval);
+                },statistics_m.operatorCalls,statistics_m.operatorSeconds);
             };
-
             const auto algoOperatorL = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
-                field.setFieldBC(bcTypes);
-                field.fillHalo();
-                return lagrangeSpace_m.evaluateAx_lower(field, poissonEquationEval);
+                return profileAction([&] {
+                    field.setFieldBC(bcTypes); field.fillHalo();
+                    return lagrangeSpace_m.evaluateAx_lower(field,poissonEquationEval);
+                },statistics_m.triangularCalls,statistics_m.triangularSeconds);
             };
-
             const auto algoOperatorU = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
-                field.setFieldBC(bcTypes);
-                field.fillHalo();
-                return lagrangeSpace_m.evaluateAx_upper(field, poissonEquationEval);
+                return profileAction([&] {
+                    field.setFieldBC(bcTypes); field.fillHalo();
+                    return lagrangeSpace_m.evaluateAx_upper(field,poissonEquationEval);
+                },statistics_m.triangularCalls,statistics_m.triangularSeconds);
             };
-
             const auto algoOperatorUL = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
-                field.setFieldBC(bcTypes);
-                field.fillHalo();
-                return lagrangeSpace_m.evaluateAx_upperlower(field, poissonEquationEval);
+                return profileAction([&] {
+                    field.setFieldBC(bcTypes); field.fillHalo();
+                    return lagrangeSpace_m.evaluateAx_upperlower(field,poissonEquationEval);
+                },statistics_m.triangularCalls,statistics_m.triangularSeconds);
             };
-
             const auto algoOperatorInvD = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
-                field.setFieldBC(bcTypes);
-                field.fillHalo();
-                return lagrangeSpace_m.evaluateAx_inversediag(field, poissonEquationEval);
+                return profileAction([&] {
+                    field.setFieldBC(bcTypes); field.fillHalo();
+                    if (diagonal_m) return field / *diagonal_m;
+                    return lagrangeSpace_m.evaluateAx_inversediag(field,poissonEquationEval);
+                },statistics_m.diagonalCalls,statistics_m.diagonalSeconds);
             };
-
             const auto algoOperatorD = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
-                field.setFieldBC(bcTypes);
-                field.fillHalo();
-                return lagrangeSpace_m.evaluateAx_diag(field, poissonEquationEval);
+                return profileAction([&] {
+                    field.setFieldBC(bcTypes); field.fillHalo();
+                    if (diagonal_m) return field * *diagonal_m;
+                    return lagrangeSpace_m.evaluateAx_diag(field,poissonEquationEval);
+                },statistics_m.diagonalCalls,statistics_m.diagonalSeconds);
             };
 
             if (dirichlet) {
                 this->lhs_mp->fillHalo();
-                *(this->rhs_mp) = *(this->rhs_mp) -
+                rhs = rhs -
                     lagrangeSpace_m.evaluateAx_lift(*(this->lhs_mp), poissonEquationEval);
             }
 
@@ -232,9 +371,44 @@ namespace ippl {
                     preconditioner_type, warn, level, degree, richardson_iterations, inner, outer,
                     omega, &communication, mg_pre, mg_post, mg_omega, mg_min_cells);
 
+                std::ostringstream signature;
+                signature << std::setprecision(17) << operatorKey_m << ':' << preconditioner_type
+                    << ':' << level << ':' << degree << ':' << richardson_iterations
+                    << ':' << inner << ':' << outer << ':' << omega;
+                const bool prepare=reuse!="full" || signature.str()!=preconditionerKey_m;
+                Timer setupTimer;
+                Kokkos::fence(); setupTimer.start();
+                if (prepare && reuse=="full" && !diagonal_m) {
+                    Timer child; child.start();
+                    auto unit=rhs.deepCopy(); unit=Tlhs(1); unit.fillHalo();
+                    diagonal_m=std::make_shared<lhs_type>(lagrangeSpace_m.evaluateAx_diag(unit,poissonEquationEval));
+                    // Safe values on constrained rows: residuals vanish there.
+                    if (dirichlet) detail::setFEMBoundaryDOFs(*diagonal_m,*diagonal_m,Tlhs(1),false);
+                    diagonal_m->fillHalo();
+                    Kokkos::fence(); child.stop(); statistics_m.diagonalSetupSeconds=child.elapsed();
+                }
+                Timer spectralTimer; spectralTimer.start();
                 double alpha = 0.0;
                 double beta  = 0.0;
-                if (preconditioner_type == "newton" || preconditioner_type == "chebyshev") {
+                if (prepare && !dirichlet &&
+                    (preconditioner_type=="newton" || preconditioner_type=="chebyshev")) {
+                    // Conservative positive-spectrum bounds. Point evaluation for tensor
+                    // degree p has squared L2 norm <= (p+1)^(2*Dim). Summing local
+                    // nodal values and using periodic Poincare gives this lower bound
+                    // on the algebraic mean-zero subspace. No nullspace power seed.
+                    const auto matrix=lagrangeSpace_m.assembleElementMatrix(poissonEquationEval);
+                    double rowBound=0, longest=0;
+                    for (unsigned i=0; i<LagrangeType::numElementDOFs; ++i) {
+                        double row=0;
+                        for (unsigned j=0; j<LagrangeType::numElementDOFs; ++j) row+=std::abs(matrix[i][j]);
+                        rowBound=std::max(rowBound,row);
+                    }
+                    for (unsigned d=0; d<Dim; ++d)
+                        longest=std::max(longest,double(rhs.get_mesh().getMeshSpacing()[d]*(rhs.get_mesh().getGridsize()[d]-1)));
+                    const double wave=2*Kokkos::numbers::pi_v<double>/longest;
+                    alpha=0.5*wave*wave*absDetDPhi/std::pow(double(Order+1),3*Dim);
+                    beta=1.01*(1u<<Dim)*rowBound;
+                } else if (prepare && (preconditioner_type == "newton" || preconditioner_type == "chebyshev")) {
                     lhs_type x0(*(this->lhs_mp));
                     x0 = Tlhs(1);
                     x0.setFieldBC(bcTypes);
@@ -258,10 +432,18 @@ namespace ippl {
                     }
                 }
 
+                spectralTimer.stop();
+                if (prepare && (preconditioner_type=="newton" || preconditioner_type=="chebyshev"))
+                    statistics_m.spectralSetupSeconds=spectralTimer.elapsed();
+                if (prepare) { spectralLower_m=alpha; spectralUpper_m=beta; }
+                statistics_m.spectralLower=spectralLower_m;
+                statistics_m.spectralUpper=spectralUpper_m;
+                if (!dirichlet && preconditioner_type=="multigrid")
+                    throw IpplException("FEMPoissonSolver", "Periodic FEM multigrid is not supported.");
                 if (preconditioner_type == "multigrid" && Order > 1) {
                     // p-multigrid: build Order→…→P1 chain; P1 bottom = geometric h-MG.
-                    auto& mesh   = this->rhs_mp->get_mesh();
-                    auto& layout = this->rhs_mp->getLayout();
+                    auto& mesh   = rhs.get_mesh();
+                    auto& layout = rhs.getLayout();
 
                     using P1Traits = FiniteElementSpaceTraits<LagrangeSpaceTag, Dim, 1>;
                     using P1Cont   = typename DOFHandler<Tlhs, P1Traits>::FEMContainer_t;
@@ -324,31 +506,46 @@ namespace ippl {
 
                     this->params_m.update("flexible_cg", true);
                     pcg_algo_m.setOperator(algoOperator);
-                    pcg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
+                    pcg_algo_m(*(this->lhs_mp), rhs, this->params_m);
                 } else {
                     this->params_m.update("flexible_cg", preconditioner_type == "multigrid");
-                    pcg_algo_m.setPreconditioner(algoOperator, algoOperatorL, algoOperatorU,
+                    if (prepare) pcg_algo_m.setPreconditioner(algoOperator, algoOperatorL, algoOperatorU,
                                                  algoOperatorUL, algoOperatorInvD, algoOperatorD,
                                                  alpha, beta, preconditioner_type, level, degree,
                                                  richardson_iterations, inner, outer, omega, mg_pre,
                                                  mg_post, mg_omega, mg_min_cells);
-
+                    pcg_algo_m.preparePreconditioner(*this->lhs_mp);
+                    if (prepare) preconditionerKey_m=signature.str();
+                    Kokkos::fence(); setupTimer.stop();
+                    statistics_m.preconditionerSetupSeconds=setupTimer.elapsed();
+                    statistics_m.preconditionerSetups=prepare;
+                    Timer krylov; krylov.start();
                     pcg_algo_m.setOperator(algoOperator);
-                    pcg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
+                    pcg_algo_m(*(this->lhs_mp), rhs, this->params_m);
+                    Kokkos::fence(); krylov.stop();
+                    statistics_m.krylovSeconds=krylov.elapsed();
                 }
                 iteration_count_m = pcg_algo_m.getIterationCount();
                 residue_m         = pcg_algo_m.getResidue();
+                statistics_m.preconditionerApplications=pcg_algo_m.getApplicationCount();
+                statistics_m.preconditionerApplicationSeconds=pcg_algo_m.getApplicationSeconds();
             } else {
+                Timer krylov; Kokkos::fence(); krylov.start();
                 cg_algo_m.setOperator(algoOperator);
-                cg_algo_m(*(this->lhs_mp), *(this->rhs_mp), this->params_m);
+                cg_algo_m(*(this->lhs_mp), rhs, this->params_m);
+                Kokkos::fence(); krylov.stop();
+                statistics_m.krylovSeconds=krylov.elapsed();
                 iteration_count_m = cg_algo_m.getIterationCount();
                 residue_m         = cg_algo_m.getResidue();
             }
 
+            this->lhs_mp->fillHalo();
+            if (!dirichlet) *this->lhs_mp -= innerProduct(*volumeWeights_m,*this->lhs_mp)/volume_m;
             (this->lhs_mp)->fillHalo();
             IpplTimings::stopTimer(solveTimer);
         }
 
+    public:
         int getIterationCount() const { return iteration_count_m; }
         Tlhs getResidue() const { return residue_m; }
 
@@ -379,6 +576,8 @@ namespace ippl {
             this->params_m.add("max_iterations", 1000);
             this->params_m.add("tolerance", (Tlhs)1e-13);
             this->params_m.add("preconditioned", true);
+            this->params_m.add("fem_reuse",std::string("off"));
+            this->params_m.add("fem_detailed_timing",false);
             this->params_m.add("preconditioner_type", "jacobi");
             this->params_m.add("poisson_stiffness_mode", std::string("constant_preserving"));
             this->params_m.add("flexible_cg", false);

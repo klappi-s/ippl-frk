@@ -1,0 +1,48 @@
+if(NOT IPPL_ENABLE_SOLVERS)
+  message(FATAL_ERROR "IPPL_ENABLE_ELECTROSTATIC_FEM requires IPPL_ENABLE_SOLVERS=ON")
+endif()
+set(IPPL_ELECTROSTATIC_FEM_DIMS "1;2;3" CACHE STRING "Compiled dimensions for LandauDampingFEM")
+set(IPPL_ELECTROSTATIC_FEM_ORDERS "1;2;3;4;5" CACHE STRING "Compiled polynomial orders for LandauDampingFEM")
+foreach(_order IN LISTS IPPL_ELECTROSTATIC_FEM_ORDERS)
+  if(NOT _order MATCHES "^[12345]$")
+    message(FATAL_ERROR "Unsupported electrostatic FEM order: ${_order}")
+  endif()
+endforeach()
+execute_process(COMMAND git describe --always --dirty
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} OUTPUT_VARIABLE _revision OUTPUT_STRIP_TRAILING_WHITESPACE)
+configure_file(FEMBuildInfo.h.in FEMBuildInfo.h @ONLY)
+set(_dispatch "#pragma once\nnamespace electrostatic_fem {\n")
+set(_branches)
+set(_sources)
+foreach(_dim IN LISTS IPPL_ELECTROSTATIC_FEM_DIMS)
+  if(NOT _dim MATCHES "^[123]$")
+    message(FATAL_ERROR "Unsupported electrostatic FEM dimension: ${_dim}")
+  endif()
+  foreach(_order IN LISTS IPPL_ELECTROSTATIC_FEM_ORDERS)
+    set(_name run${_dim}D_P${_order})
+    string(APPEND _dispatch "void ${_name}(const ExperimentConfig&);\n")
+    string(APPEND _branches "if(c.dimension==${_dim} && c.order==${_order}) { ${_name}(c); return; }\n")
+    set(_source ${CMAKE_CURRENT_BINARY_DIR}/${_name}.cpp)
+    file(GENERATE OUTPUT ${_source} CONTENT
+      "#include \"LandauDampingFEMManager.h\"\nnamespace electrostatic_fem {\ntemplate<unsigned Q> void ${_name}Impl(const ExperimentConfig& c) { LandauDampingFEMManager<${_dim},${_order},Q> app(c); try { app.pre_run(); app.run(c.steps); app.finish(); } catch (...) { app.flush(); throw; } }\nvoid ${_name}(const ExperimentConfig& c) { if(c.quadrature==\"9\") ${_name}Impl<9>(c); else ${_name}Impl<${_order}+1>(c); }\n}\n")
+    list(APPEND _sources ${_source})
+  endforeach()
+endforeach()
+string(APPEND _dispatch "inline void dispatch(const ExperimentConfig& c) {\n${_branches}throw std::runtime_error(\"Requested dimension/order was not compiled.\");\n}\n}\n")
+file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FEMDemoDispatch.h CONTENT "${_dispatch}")
+add_executable(LandauDampingFEM LandauDampingFEM.cpp ${_sources})
+target_link_libraries(LandauDampingFEM PRIVATE IPPL::ippl)
+target_include_directories(LandauDampingFEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_definitions(LandauDampingFEM PRIVATE IPPL_FEM_SOURCE_REVISION="${_revision}")
+if(BUILD_TESTING AND "1" IN_LIST IPPL_ELECTROSTATIC_FEM_DIMS AND "3" IN_LIST IPPL_ELECTROSTATIC_FEM_ORDERS)
+  foreach(_ranks IN ITEMS 1 2)
+    add_test(NAME LandauDampingFEM_MPI${_ranks}
+      COMMAND ${CMAKE_COMMAND}
+        -DAPP=$<TARGET_FILE:LandauDampingFEM> -DMPIEXEC=${MPIEXEC_EXECUTABLE}
+        -DRANK_FLAG=${MPIEXEC_NUMPROC_FLAG} -DRANKS=${_ranks}
+        "-DPREFLAGS=${MPIEXEC_PREFLAGS}" "-DPOSTFLAGS=${MPIEXEC_POSTFLAGS}"
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/smoke-${_ranks}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/SmokeTest.cmake)
+    set_tests_properties(LandauDampingFEM_MPI${_ranks} PROPERTIES TIMEOUT 120 PROCESSORS ${_ranks} LABELS "FEM;demo")
+  endforeach()
+endif()

@@ -8,15 +8,20 @@ namespace detail {
 template <unsigned Dim, unsigned Order, unsigned NumDOFs, typename indices_t>
 KOKKOS_FUNCTION void fillLagrangeGlobalDOFIndices(Vector<size_t, NumDOFs>& globalDOFs,
                                                  const indices_t& elementPos,
-                                                 const Vector<size_t, Dim>& nr_m) {
+                                                 const Vector<size_t, Dim>& nr_m, bool periodic = false) {
     globalDOFs = Vector<size_t, NumDOFs>(0);
 
-    const size_t nx = (nr_m[0] - 1) * Order + 1;
+    const size_t nx = (nr_m[0] - 1) * Order + (periodic ? 0 : 1);
     const size_t bx = elementPos[0] * Order;
     const size_t by = (Dim >= 2) ? elementPos[1] * Order : 0;
     const size_t bz = (Dim >= 3) ? elementPos[2] * Order : 0;
 
     auto dof_index = [&](size_t ix, size_t iy = 0, size_t iz = 0) -> size_t {
+        if (periodic) {
+            ix %= (nr_m[0]-1)*Order;
+            if constexpr (Dim >= 2) iy %= (nr_m[1]-1)*Order;
+            if constexpr (Dim >= 3) iz %= (nr_m[2]-1)*Order;
+        }
         if constexpr (Dim == 1) {
             (void)iy;
             (void)iz;
@@ -25,7 +30,7 @@ KOKKOS_FUNCTION void fillLagrangeGlobalDOFIndices(Vector<size_t, NumDOFs>& globa
             (void)iz;
             return ix + nx * iy;
         } else {
-            const size_t ny = (nr_m[1] - 1) * Order + 1;
+            const size_t ny = (nr_m[1] - 1) * Order + (periodic ? 0 : 1);
             return ix + nx * (iy + ny * iz);
         }
     };
