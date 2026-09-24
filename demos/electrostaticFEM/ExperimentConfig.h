@@ -15,12 +15,13 @@ namespace electrostatic_fem {
         std::map<std::string, std::string> options;
         unsigned dimension = 1, order = 3, steps = 10, seed = 42, mode = 1, diagnosticsEvery = 1;
         size_t particles = 32768;
+        size_t timerSampleLimit = 1024;
         double dt = 0.05, alpha = 0.05, thermalSpeed = 1, tolerance = 1e-10;
         int maxIterations  = 10000;
         std::string solver = "plain", preconditioner = "jacobi", family = "gll", quadrature = "9";
         std::string stiffness = "constant_preserving", reuse = "full", initialGuess = "previous";
         std::string initialCondition = "single", output = "landau-fem", replay,
-                    timerLevel = "coarse";
+                    timerLevel = "coarse", timerRecording = "summary";
         std::vector<unsigned> cells;
         std::vector<double> lengths;
 
@@ -50,7 +51,7 @@ namespace electrostatic_fem {
                 "quadrature_points poisson_stiffness_mode reuse initial_guess initial_condition "
                 "output replay diagnostics_every newton_level chebyshev_degree "
                 "richardson_iterations gauss_seidel_inner_iterations gauss_seidel_outer_iterations "
-                "ssor_omega timer_level info ";
+                "ssor_omega timer_level timer_recording timer_sample_limit info ";
             for (int i = 1; i < argc; ++i) {
                 std::string key = argv[i];
                 if (!key.starts_with("--") || i + 1 == argc
@@ -91,6 +92,8 @@ namespace electrostatic_fem {
             // Preserve scientific notation: std::to_string(1e-10) would round to zero.
             c.tolerance        = real("tolerance", 1e-10);
             c.timerLevel       = c.get("timer_level", c.timerLevel);
+            c.timerRecording   = c.get("timer_recording", c.timerRecording);
+            c.timerSampleLimit = integer("timer_sample_limit", 1024);
             c.solver           = c.get("solver", c.solver);
             c.preconditioner   = c.get("preconditioner_type", c.preconditioner);
             c.family           = c.get("interpolation_nodes", c.family);
@@ -117,6 +120,9 @@ namespace electrostatic_fem {
             choice(c.quadrature, {"9", "exact"});
             choice(c.stiffness, {"standard", "constant_preserving"});
             choice(c.timerLevel, {"coarse", "detailed"});
+            choice(c.timerRecording, {"summary", "raw"});
+            if (c.timerSampleLimit == 0)
+                throw std::runtime_error("timer_sample_limit must be positive; use summary to disable raw capture.");
             choice(c.reuse, {"off", "operator", "full"});
             choice(c.initialGuess, {"zero", "previous"});
             choice(c.initialCondition, {"single", "alpine_product"});

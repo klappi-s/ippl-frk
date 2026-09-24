@@ -22,6 +22,7 @@ namespace ippl {
 
         KOKKOS_INLINE_FUNCTION
         T& operator[](int i) { return data[i]; }          // read/write access
+        KOKKOS_INLINE_FUNCTION
         const T& operator[](int i) const { return data[i]; } // read-only access
 
         KOKKOS_INLINE_FUNCTION

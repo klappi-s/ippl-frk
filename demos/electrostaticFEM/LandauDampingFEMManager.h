@@ -34,6 +34,35 @@ namespace electrostatic_fem {
         };
     };
 
+    // Named reduction functors also work when launched from private manager methods.
+    template <unsigned Dim, int Moment, typename Field, typename Positions, typename Weights>
+    struct FEMFieldMoment {
+        Field field;
+        Positions positions;
+        Weights weights;
+        double wave;
+        KOKKOS_INLINE_FUNCTION void operator()(size_t i, double& sum) const {
+            if constexpr (Moment == 0) {
+                for (unsigned d = 0; d < Dim; ++d)
+                    sum += 0.5 * weights(i) * field(i)[d] * field(i)[d];
+            } else if constexpr (Moment == 1)
+                sum += weights(i) * field(i)[0] * Kokkos::cos(wave * positions(i)[0]);
+            else sum += weights(i) * field(i)[0] * Kokkos::sin(wave * positions(i)[0]);
+        }
+    };
+    template <unsigned Dim, typename Velocities, typename Charges>
+    struct FEMParticleMoment {
+        Velocities velocity;
+        Charges charge;
+        int component; // -1: kinetic energy; otherwise momentum component
+        KOKKOS_INLINE_FUNCTION void operator()(size_t i, double& sum) const {
+            if (component < 0) {
+                for (unsigned d = 0; d < Dim; ++d)
+                    sum -= 0.5 * charge(i) * velocity(i)[d] * velocity(i)[d];
+            } else sum -= charge(i) * velocity(i)[component];
+        }
+    };
+
     template <unsigned Dim, unsigned Order, unsigned QuadPoints>
     class LandauDampingFEMManager : public ippl::BaseManager {
         using Fields = FEMFields<Dim, Order, QuadPoints>;
@@ -69,7 +98,7 @@ namespace electrostatic_fem {
             }
             Kokkos::fence();
             IpplTimings::stopTimer(timer);
-            const double seconds = IpplTimings::getMeasurements(timer).back();
+            const double seconds = IpplTimings::getLastMeasurement(timer);
             times_m[name] += seconds;
             return seconds;
         }
@@ -234,43 +263,36 @@ namespace electrostatic_fem {
                 double local = 0, energy = 0, real = 0, imaginary = 0, kinetic = 0;
                 Kokkos::parallel_reduce(
                     "FEM field energy", Policy(0, weights.extent(0)),
-                    KOKKOS_LAMBDA(size_t i, double& sum) {
-                        for (unsigned d = 0; d < Dim; ++d)
-                            sum += 0.5 * weights(i) * field(i)[d] * field(i)[d];
-                    },
+                    FEMFieldMoment<Dim, 0, decltype(field), decltype(positions), decltype(weights)>{
+                        field, positions, weights, 0},
                     local);
                 ippl::Comm->allreduce(local, energy, 1, std::plus<double>());
                 const double wave =
                     2 * Kokkos::numbers::pi_v<double> * config_m.mode / config_m.lengths[0];
                 Kokkos::parallel_reduce(
                     "FEM electric Fourier real", Policy(0, weights.extent(0)),
-                    KOKKOS_LAMBDA(size_t i, double& sum) {
-                        sum += weights(i) * field(i)[0] * Kokkos::cos(wave * positions(i)[0]);
-                    },
+                    FEMFieldMoment<Dim, 1, decltype(field), decltype(positions), decltype(weights)>{
+                        field, positions, weights, wave},
                     local);
                 ippl::Comm->allreduce(local, real, 1, std::plus<double>());
                 Kokkos::parallel_reduce(
                     "FEM electric Fourier imaginary", Policy(0, weights.extent(0)),
-                    KOKKOS_LAMBDA(size_t i, double& sum) {
-                        sum += weights(i) * field(i)[0] * Kokkos::sin(wave * positions(i)[0]);
-                    },
+                    FEMFieldMoment<Dim, 2, decltype(field), decltype(positions), decltype(weights)>{
+                        field, positions, weights, wave},
                     local);
                 ippl::Comm->allreduce(local, imaginary, 1, std::plus<double>());
                 const auto velocity = p.velocity.getView();
                 const auto charge   = p.charge.getView();
                 Kokkos::parallel_reduce(
                     "FEM kinetic energy", Policy(0, p.getLocalNum()),
-                    KOKKOS_LAMBDA(size_t i, double& sum) {
-                        for (unsigned d = 0; d < Dim; ++d)
-                            sum -= 0.5 * charge(i) * velocity(i)[d] * velocity(i)[d];
-                    },
+                    FEMParticleMoment<Dim, decltype(velocity), decltype(charge)>{velocity, charge, -1},
                     local);
                 ippl::Comm->allreduce(local, kinetic, 1, std::plus<double>());
                 Point momentum(0);
                 for (unsigned d = 0; d < Dim; ++d) {
                     Kokkos::parallel_reduce(
                         "FEM particle momentum", Policy(0, p.getLocalNum()),
-                        KOKKOS_LAMBDA(size_t i, double& sum) { sum -= charge(i) * velocity(i)[d]; },
+                        FEMParticleMoment<Dim, decltype(velocity), decltype(charge)>{velocity, charge, static_cast<int>(d)},
                         local);
                     ippl::Comm->allreduce(local, momentum[d], 1, std::plus<double>());
                 }
@@ -317,7 +339,10 @@ namespace electrostatic_fem {
                 << "\ntolerance=" << config_m.tolerance
                 << "\nmax_iterations=" << config_m.maxIterations << "\npic_method=" << method_m
                 << "\nsolver=" << config_m.solver << "\npreconditioner=" << config_m.preconditioner
-                << "\ntimer_level=" << config_m.timerLevel << "\nreplay=" << config_m.replay
+                << "\ntimer_level=" << config_m.timerLevel
+                << "\ntimer_recording=" << config_m.timerRecording
+                << "\ntimer_sample_limit=" << (config_m.timerRecording == "raw" ? config_m.timerSampleLimit : 0)
+                << "\nreplay=" << config_m.replay
                 << "\nload_balancing=disabled\nlayout_generation=0\n";
             size_t dofs = 1;
             for (unsigned d = 0; d < Dim; ++d) {
@@ -460,7 +485,9 @@ namespace electrostatic_fem {
             timed("output", [&] {
                 flush();
             });
-            IpplTimings::dumpToCSV(path("timers.csv"));
+            IpplTimings::dumpSummaryToCSV(path("timer-summary.csv"));
+            if (config_m.timerRecording == "raw")
+                IpplTimings::dumpToCSV(path("timers.csv"));
             if (ippl::Comm->rank() == 0)
                 std::cout << "LandauDampingFEM completed " << config_m.steps << " steps ("
                           << config_m.steps + 1 << " PIC solves). Results: " << config_m.output

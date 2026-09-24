@@ -23,13 +23,17 @@ def load_campaigns(directories):
     # Mesh selection, execution timeout and binary path/hash may differ. The
     # caller must assess source compatibility; differing binaries are disclosed.
     common = ['orders', 'particles', 'particles_per_cell', 'steps', 'repeats', 'ranks',
-              'family', 'quadrature', 'initial_guess', 'timer_level', 'tolerance',
+              'family', 'quadrature', 'initial_guess', 'timer_level', 'timer_recording',
+              'timer_sample_limit', 'tolerance',
               'max_iterations', 'batches', 'replay_runner_sha256']
     reference = campaigns[0][1]['config']
     seen = set()
     for directory, manifest in campaigns:
         for key in common:
-            if manifest['config'][key] != reference[key]:
+            # Missing recording keys identify legacy, unbounded raw capture.
+            value = manifest['config'].get(key) if key in ('timer_recording', 'timer_sample_limit') else manifest['config'][key]
+            baseline = reference.get(key) if key in ('timer_recording', 'timer_sample_limit') else reference[key]
+            if value != baseline:
                 raise ValueError(f'Incompatible campaign setting {key}: {directory}')
         for job in manifest['jobs']:
             key = tuple(job[field] for field in ['dimension', 'order', 'cells', 'repeat', 'batch'])
@@ -74,6 +78,7 @@ def main():
     expected = [(source, source_manifest, job) for source, source_manifest, job in expected
                 if (job['dimension'], job['cells']) not in excluded]
     records, missing, signatures, varied_loads = [], [], {}, []
+    max_fresh_residual = 0.0
     for source, source_manifest, job in expected:
         path = source / 'jobs' / (job['name'] + '.json')
         if not path.exists() or json.loads(path.read_text())['returncode']:
@@ -83,6 +88,9 @@ def main():
         directory = source / state['directory']
         run = json.loads((directory / 'runs.json').read_text())[0]
         config, rows, sequences, signature = read_replay(directory / run['name'])
+        # Include each tuned batch's CG control even though it is not plotted twice.
+        max_fresh_residual = max(max_fresh_residual,
+                                 max(data['max_fresh_residual'] for data in rows.values()))
         for field in ['dimension', 'order', 'particles']:
             if int(config[field]) != job[field]:
                 raise ValueError(f'Application {field} differs from manifest')
@@ -142,7 +150,7 @@ def main():
     (root / 'analysis_sources.json').write_text(json.dumps(sources, indent=2) + '\n')
     selection = dict(excluded_meshes=sorted(excluded), reason=a.exclusion_reason, omitted_jobs=omitted)
     (root / 'analysis_selection.json').write_text(json.dumps(selection, indent=2) + '\n')
-    report(root, manifest, records, missing, varied_loads, sources, selection)
+    report(root, manifest, records, missing, varied_loads, sources, selection, max_fresh_residual)
 
 
 def plot_order(root, order, records):
@@ -236,7 +244,7 @@ def save(fig, root, name):
     plt.close(fig)
 
 
-def report(root, manifest, records, missing, varied_loads, sources, selection):
+def report(root, manifest, records, missing, varied_loads, sources, selection, max_fresh_residual):
     config = manifest['config']
     text = ['# FEM mesh sweep', '',
             f"{'PARTIAL: ' + str(len(missing)) + ' jobs missing/failed. ' if missing else 'All included jobs completed. '}"
@@ -272,7 +280,7 @@ def report(root, manifest, records, missing, varied_loads, sources, selection):
         text += ['', f'![P{order} mesh trends](p{order}_mesh_trends.png)',
                  f'![P{order} setup and total](p{order}_setup_and_total.png)',
                  f'![P{order} cost normalized by DOFs](p{order}_dof_cost.png)']
-    text += ['', f"Maximum fresh relative residual: {max(r['max_fresh_residual'] for r in records):.6g}.", '',
+    text += ['', f"Maximum fresh relative residual across all replay batches, including their CG controls: {max_fresh_residual:.6g}.", '',
              'Source campaign manifests are preserved in `analysis_sources.json`; each source campaign '
              'retains its configurations, binary/runner hashes, commands and job exit statuses. '
              'Raw application files remain in their original attempt directories. '
@@ -299,6 +307,9 @@ def report(root, manifest, records, missing, varied_loads, sources, selection):
         text += ['', f'{len(varied_loads)} regenerated batch/repeat load sequences differed from the first '
                  'sequence at that mesh. Each candidate still used its paired CG loads. Between-batch '
                  'variation includes different sampled loads; these are not identical-input repeat timings.']
+    if config['repeats'] == 1:
+        text += ['', '**Single-repetition pilot:** no repetition spread is measured. '
+                 'One mesh per dimension cannot establish mesh-scaling trends.']
     (root / 'README.md').write_text('\n'.join(text) + '\n')
     (root / 'analysis_versions.json').write_text(json.dumps(dict(numpy=np.__version__, matplotlib=matplotlib.__version__), indent=2) + '\n')
 

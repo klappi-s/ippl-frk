@@ -103,6 +103,16 @@ int main(int argc, char* argv[]) {
   IpplTimings::print(std::string("timing.dat"));
   ```
   (`src/Utility/IpplTimings.h`)
+  `dumpToCSV` preserves rank-ordered raw measurements using 1 MiB messages on a
+  private MPI communicator; no int-sized cumulative displacement or root-wide
+  export buffer. Collective I/O error reporting; `unit_tests/Utility/IpplTimings.cpp`
+  tests chunking/empty ranks/custom formatting/open-write errors (MPI 2/4 locally).
+  `setSampleLimit(0)` retains online count/total/min/max/mean/variance/last duration
+  without raw samples; positive limits retain a prefix, legacy default is unlimited.
+  `getLastMeasurement` and `getCallCount` work with capture disabled;
+  `getMeasurementCount` continues to count stored samples. `dumpSummaryToCSV`
+  uses the same bounded MPI exporter. Changing the limit frees retained samples
+  but preserves statistics; `resetAllTimers` resets statistics and retains policy.
 - **Solver/config params:** `ippl::ParameterList` (`Utility/ParameterList.h`): `params.add("tolerance", 1e-13); solver.mergeParameters(params);`
 
 ---
@@ -380,6 +390,16 @@ Vector<Vector<T,dim>,numElementNodes> getIntegrationNodesForRefElement() const;
 
 Affine remap in `Quadrature.hpp` delegates to `nodes1d::affineMapPoint` / `affineMapWeight`.
 
+**Setup precision (2026-09-22):** native nodes/weights use `WorkingType =
+std::common_type_t<T,double>`. Default accessors still return T. Explicit
+`getIntegrationNodesForRefElementAs<Scalar>()` / `getWeightsForRefElementAs<Scalar>()`
+retain precision for Track B host assembly: evaluate basis/gradients at retained
+coordinates, cast tables to T for the generic integrand, accumulate in WorkingType,
+then cast the matrix to T before the existing diagonal policy. Interpolation nodes,
+fields and GPU arithmetic remain T. This repairs the cancellation-sensitive float
+P4/GLL oracle entry without relaxing its tolerance. GH200 job 4734848 passed all
+126 one-GPU oracle CTests, including the stricter P4 regression in both modes.
+
 **Unweighted FEM rules** (standalone `Quadrature` subclasses; ctor is `(const ElementType& ref)`):
 
 | Class | Native interval | Degree | Nodes1D call | Constraint |
@@ -519,7 +539,7 @@ There are **two independent fork tracks**. Don't confuse them:
 | `FEMInterpolate.hpp` | `FEM/FEMInterpolate.hpp` | P1 particle deposit/sample/gradient (`locate_element_nd_and_xi`, `assemble_rhs_from_particles`, `interpolate_to_diracs`) | working (classic Lagrange) |
 | `DOFHandler<T,SpaceTraits>` | `FEM/DOFHandler.h` | local-DOF → (entity, offset, local-DOF) mapping | **B — debugging** (`fillNedelecDOFMappingTable` is a TODO stub belonging to a *future* DOFHandler-based Nédélec path, unrelated to Track A) |
 | `FEMContainer<T,Dim,EntityTypes,DOFNums>` | `FEM/FEMContainer.h` | entity-split multi-field storage (vertices/edges/faces/volume), each a `Field<DOFArray<T,N>,...>` over a `SubFieldLayout` | **B — debugging** |
-| `LagrangeSpace_wfc` | `FEM/LagrangeSpace_wFEMContainer.h` | Lagrange space backed by `FEMContainer`+`DOFHandler` for **P≥2** / entity-split DOFs | **B — debugging** (periodic BC TODO; some DOF methods marked UNUSED) |
+| `LagrangeSpace_wfc` | `FEM/LagrangeSpace_wFEMContainer.h` | Lagrange space backed by `FEMContainer`+`DOFHandler` for **P≥1** / entity-split DOFs | **B — active development** (Dirichlet and fully periodic P1–P5 covered; redistribution unsupported) |
 | `FiniteElementSpaceTraits` | `FEM/FiniteElementSpaceTraits.h` | compile-time entity/DOF metadata per space | B — `LagrangeSpaceTag` defined; `NedelecSpaceTag` has no specialization (only relevant to the *future* Track-B Nédélec, not to the working Track-A `NedelecSpace`) |
 | `Entity.h`, `DOFArray.h`, `DOFLocations.h`, `FEMHelperStructs.h` | `FEM/` | entity tags (`Vertex`/`EdgeX`/`FaceXY`/...), per-cell DOF arrays, ref-element DOF coords, tuple metaprogramming | B — support |
 
@@ -565,8 +585,10 @@ remain ordinary integrals. The default reconstructs each complete physical
 element diagonal before BC restriction. The constant-preserving full action
 uses `K_ij*(x_j-x_i)`; Dirichlet columns contribute `K_ij*(0-x_i)` and must not
 be skipped. Lifting and L/U keep ordinary off-diagonal products; D/inverse-D use
-the corrected assembled diagonal. The default currently rejects periodic
-boundaries and multigrid; those paths require explicit `standard` selection.
+the corrected assembled diagonal. Fully periodic boundaries use unique periodic
+DOF ownership and nullspace projection (see the electrostatic FEM section below).
+The corrected mode rejects multigrid; its Dirichlet path requires explicit `standard`.
+Periodic multigrid is unsupported in either mode.
 The P1 multigrid evaluator inherits the selected mode, retaining standard assembly.
 `getStiffnessMode()` lets diagnostics use the same evaluator policy.
 All three manual convergence drivers accept
@@ -578,7 +600,8 @@ applications; a separate timer measures the full `solve()` call. Both exclude
 source sampling and error evaluation. Performance studies use the serial backend.
 
 Supported types: `jacobi`, `newton`, `chebyshev`, `richardson`, `richardson_alt`, `gauss-seidel`,
-`ssor`, `multigrid`. Newton/Chebyshev estimate `alpha`/`beta` via `powermethod` / `adapted_powermethod`.
+`ssor`, `multigrid`. Dirichlet Newton/Chebyshev estimate `alpha`/`beta` via
+`powermethod` / `adapted_powermethod`; the periodic path uses conservative positive-spectrum bounds.
 `multigrid`: **P1** uses geometric h-MG (`fem_multigrid_preconditioner`). **P2/P3** use
 **p-multigrid** (`fem_pmultigrid_preconditioner` + `FEMOrderTransfer`): same-mesh order coarsening
 to P1, then the P1 h-MG bottom solver. Design/plan: workspace
@@ -738,3 +761,72 @@ For a manager-free PIC reference, read `test/particle/PICnd.cpp`.
 *Generated for the `ippl-frk` fork at `ipplFEM/ippl-frk`, branch `FEMContainer` (Nodes1D merged
 `7d88383f`). Keep this file in sync with this tree; cite file:line so future agents can verify
 against source.*
+
+## Electrostatic FEM demo and periodic Track B additions (2026-09-17)
+
+- `demos/electrostaticFEM/README.md`: build/configuration/numerical and timer
+  contracts. `IPPL_ENABLE_ELECTROSTATIC_FEM=ON`; dimensions controlled by
+  `IPPL_ELECTROSTATIC_FEM_DIMS` (default `1;2;3`). One `LandauDampingFEM` executable,
+  P1–P5, GL9 or GL(p+1), both interpolation families. Build **-j 8**.
+  `IPPL_ELECTROSTATIC_FEM_ORDERS` selects compiled orders (default `1;2;3;4;5`).
+  `experiments/run_mesh_sweep.py` orchestrates resumable same-load comparisons;
+  `analyze_mesh_sweep.py` validates/plots mesh trends; `--include` combines disjoint
+  compatible campaigns into `--output` while retaining each source's provenance.
+  `test_mesh_campaigns.py` checks overlap/settings rejection. `MESH_STUDY.md` documents
+  local execution and Slurm/GH200 performance templates. [GH200 validation guide](../../ProjectManagement/2026-09-23_1609_GH200_VALIDATION_GUIDE.md)
+  records the passed one-GPU oracle suite, selected memcheck probes (with a
+  documented Cray MPI exception) and two-node checks (one GPU/rank per node).
+  [GH200 performance guide](../../ProjectManagement/2026-09-23_1608_GH200_PERFORMANCE_GUIDE.md) specifies exclusive 1x1/1x2/1x4/2x4 allocations and a targeted
+  2x1 placement comparison. `gh200_mesh.slurm` defaults to a one-GPU sizing pilot;
+  it snapshots stdlib-only runners and records placement/build/GPU provenance.
+- Periodic geometric vertex layout: cells+1 mesh points, `isAllPeriodic=true`.
+  `FEMContainer` entity layouts own cells indices per axis, including vertices;
+  upper endpoints are halo aliases. Independent DOFs = product(p*cells).
+  At least two cells/axis and nonempty element ownership/rank are required.
+  Dirichlet layouts retain the previous entity-dependent endpoint counts.
+- `FEMPoissonSolver_wFEMContainer::solveLoadVector(const rhs_type&)` takes a
+  preassembled weak load without mutating it; `solve()` retains nodal-load
+  assembly. Fully periodic CP/standard solves project compatible loads/residuals
+  to the algebraic mean-zero subspace, then impose physical zero-mean potential.
+  A periodic BC on a nonperiodic layout is explicitly rejected.
+- `fem_reuse=off|operator|full`, library default off, demo default full.
+  Operator signature includes geometry/families/BC/partition, preconditioner
+  signature includes numerical settings. Full retains diagonal, preconditioner
+  and workspaces. `invalidatePreparedData()` explicitly clears retained state;
+  `setRhs()` reinitializes the space. `getSolveStatistics()` reports per-solve
+  setup/Krylov/application counts and seconds. `applyOperator()` supports a
+  diagnostic action outside the counters. `fem_detailed_timing` opts into timed
+  preconditioner applications. Existing action timers remain available.
+- Periodic spectral bounds use conservative analytical Poincare/polynomial and
+  element row-sum bounds, not the constant power-method seed. Small projected
+  preconditioner tests classify tested settings; four-step Richardson is
+  indefinite for the periodic P3 probes.
+- `src/FEM/FEMContainerInterpolate.h`: `depositFEMLoad` and
+  `gatherFEMElectricField`, positions/charge/E Kokkos views plus particle count.
+  All entities use existing device basis and new shared device gradients.
+  Deposition is an assembled weak charge load (no mass division). Collective
+  ownership validation precedes local atomic scatter; periodic halo accumulation
+  follows. Gather fills potential halos then evaluates negative physical gradient.
+  Return statistics split ownership/local/halo costs. Host code does not access
+  device particle arrays directly. MPI summation/atomic order need not be bitwise
+  reproducible across backends or partitions.
+- `FEMPeriodic` tensors published 1D Basix mass/stiffness through 3D;
+  `FEMParticleCoupling` tensors published basis/gradient probes; `FEMReuse` checks
+  changing loads/invalidation and smooth source convergence;
+  `FEMPreconditionerProperties` probes projected matrices. See oracle catalog.
+- The demo retains the fixed partition. Particle migration remains active.
+  `FEMContainer::updateLayout()` is still not redistribution: do not uncomment
+  the repartition call until that path is implemented and validated.
+- `FEMContainer::cloneStructure()` allocates independent zeroed values, copies
+  prepared entity layouts, binds fields to its own layout array, and retains fresh
+  constructor `NO_FACE` BC defaults. Mesh/vertex-layout lifetime remains borrowed.
+  Track B stiffness/lifting/diagonal/triangular/load temporaries use this instead
+  of rerunning `SubFieldLayout::initialize` and neighbor discovery. No changed
+  numerical kernels or repartition semantics. `FEMReuse` tests independence,
+  destruction safety and zero neighbor discoveries across repeated actions.
+- The demo defaults to `timer_recording=summary`; `raw` requires a positive
+  `timer_sample_limit` (default1024 samples/timer/rank). Online `timer-summary.csv`
+  always covers all calls; `timers.csv` exists only in raw mode. Solve/step CSVs
+  remain unchanged. Mesh/replay runners record the policy and reject mixed-policy
+  resumes/pooling. `check_compact_timers.py` verifies matched summary/raw runs;
+  `gh200_efficiency.slurm` builds -j8 and runs wrapped native unit/PIC checks.

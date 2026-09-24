@@ -37,6 +37,8 @@ def main():
     p.add_argument('--quadrature', choices=['9', 'exact'], default='exact')
     p.add_argument('--initial-guess', choices=['zero', 'previous'], default='previous')
     p.add_argument('--timer-level', choices=['coarse', 'detailed'], default='coarse')
+    p.add_argument('--timer-recording', choices=['summary', 'raw'], default='summary')
+    p.add_argument('--timer-sample-limit', type=int, default=1024)
     p.add_argument('--tolerance', type=float, default=1e-10)
     p.add_argument('--max-iterations', type=int, default=10000)
     p.add_argument('--timeout', type=float, default=3600, help='Seconds per replay batch, including MPI launch')
@@ -44,7 +46,7 @@ def main():
     p.add_argument('--dry-run', action='store_true', help='Write/validate the manifest and list jobs only')
     p.add_argument('--job-index', type=int, help='Run one manifest job (e.g. a Slurm array task)')
     a = p.parse_args()
-    if min(a.ranks, a.repeats, a.particles, a.max_iterations) < 1 or a.steps < 1 or a.timeout <= 0:
+    if min(a.ranks, a.repeats, a.particles, a.max_iterations, a.timer_sample_limit) < 1 or a.steps < 1 or a.timeout <= 0:
         p.error('Positive sizes, repeats, timeout and at least one timestep are required.')
     if a.particles_per_cell is not None and a.particles_per_cell < 1:
         p.error('particles-per-cell must be positive')
@@ -65,7 +67,10 @@ def main():
             for n in grids[dim]:
                 for repeat in range(a.repeats):
                     # Alternate which batch runs first; run_reuse rotates method order.
-                    batches = list(BATCHES) if repeat % 2 == 0 else list(reversed(BATCHES))
+                    batches = list(BATCHES)
+                    if repeat % 2:
+                        # Dictionaries are not reversible on Python 3.6/3.7.
+                        batches.reverse()
                     for batch in batches:
                         jobs.append(dict(index=len(jobs), name=f'd{dim}_p{order}_n{n}_{batch}_r{repeat}',
                                          dimension=dim, order=order, cells=n, repeat=repeat, batch=batch,
@@ -108,6 +113,7 @@ def main():
                    '--particles', str(job['particles']), '--steps', str(a.steps), '--repeats', '1',
                    '--repeat-offset', str(job['repeat']), '--ranks', str(a.ranks), '--launcher', a.launcher,
                    '--reuse', 'full', '--timer-level', a.timer_level, '--quadrature', a.quadrature,
+                   '--timer-recording', a.timer_recording, '--timer-sample-limit', str(a.timer_sample_limit),
                    '--family', a.family, '--initial-guess', a.initial_guess, '--degree', str(batch['degree']),
                    '--gs-outer', str(batch['outer']), '--tolerance', str(a.tolerance),
                    '--max-iterations', str(a.max_iterations), '--methods', *batch['methods']]

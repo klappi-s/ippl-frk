@@ -1,5 +1,6 @@
 
 #include "Ippl.h"
+#include "FEM/Quadrature/SelectableQuadrature.h"
 
 #include "TestUtils.h"
 #include "gtest/gtest.h"
@@ -209,6 +210,30 @@ TYPED_TEST(GaussLobattoQuadratureRefElementTest, getWeightsForRefElement) {
 TYPED_TEST(GaussLobattoQuadratureRefElementTest, getIntegrationNodesForRefElement) {
     expectNodesAreTensorProduct(this->gaussLobattoQuadrature, TestFixture::numNodes1D,
                                 TestFixture::dim);
+}
+
+TEST(QuadraturePrecision, FloatRuleRetainsAccurateSetupMomentsAfterFamilyChanges) {
+    const ippl::EdgeElement<float> element;
+    ippl::SelectableQuadrature<float, 5, decltype(element)> rule(element);
+    using Family = ippl::QuadratureNodeFamily;
+    for (const auto family : {Family::GaussLegendre, Family::GaussLobatto,
+                              Family::Midpoint, Family::GaussLegendre}) {
+        rule.setFamily(family);
+        SCOPED_TRACE(ippl::toString(family));
+        const auto nodes = rule.getIntegrationNodesForRefElementAs<double>();
+        const auto weights = rule.getWeightsForRefElementAs<double>();
+        for (unsigned degree = 0; degree <= rule.getDegree(); ++degree) {
+            double integral = 0;
+            for (unsigned k = 0; k < 5; ++k)
+                integral += weights[k] * std::pow(nodes[k][0], degree);
+            EXPECT_NEAR(integral, 1.0 / (degree + 1), 2e-14) << "degree=" << degree;
+        }
+        // The default API remains float-valued, including after changing rules.
+        const auto fieldNodes = rule.getIntegrationNodesForRefElement();
+        static_assert(std::is_same_v<std::remove_cvref_t<decltype(fieldNodes[0][0])>, float>);
+        for (unsigned k = 0; k < 5; ++k)
+            EXPECT_FLOAT_EQ(fieldNodes[k][0], static_cast<float>(nodes[k][0]));
+    }
 }
 
 int main(int argc, char* argv[]) {

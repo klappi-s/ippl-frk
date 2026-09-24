@@ -215,6 +215,12 @@ namespace ippl {
         ///////////////////////////////////////////////////////////////////////
 
         using ElementMatrix = Vector<Vector<T, numElementDOFs>, numElementDOFs>;
+        using DeviceMatrix = Kokkos::View<const T**>;
+
+        // Host assembly remains available for diagnostics; kernels receive views.
+        static DeviceMatrix copyElementMatrixToDevice(const ElementMatrix& matrix);
+        template <typename F>
+        DeviceMatrix assembleDeviceElementMatrix(F& evalFunction) const;
 
         /// Physical element matrix before boundary restriction or splitting.
         template <typename F>
@@ -320,7 +326,8 @@ namespace ippl {
             Vector<size_t, Dim> nr_m;
             bool periodic_m = false;
             ElementType ref_element_m;
-            LagrangeDOFLocations<T, Dim, Order> dofLocations_m;
+            Kokkos::View<const point_t*> dofLocations_m;
+            Vector<T, Order + 1> nodes1d_m;
             
             // these are the functions needed for interpolation to the space
             KOKKOS_FUNCTION indices_t getMeshVertexNDIndex(const size_t& vertex_index) const;
@@ -390,6 +397,15 @@ namespace ippl {
         /// Precomputed DOF locations on reference element ////////////////////
         LagrangeDOFLocations<T, Dim, Order> dofLocations_m;
         LagrangeNodeFamily interpolationFamily_m = LagrangeNodeFamily::GLL;
+        mutable Kokkos::View<const point_t*> deviceLocations_m;
+
+        // Reference tables depend on interpolation and quadrature, not the mesh.
+        // Quadrature is held by reference and may be changed externally, so retain
+        // its 1D values as the cache key rather than relying on a setter alone.
+        void prepareReferenceTables() const;
+        mutable Kokkos::View<const T**> deviceBasis_m;
+        mutable Kokkos::View<const T*> deviceWeights_m;
+        mutable Vector<T, QuadratureType::numNodes1D> cachedNodes_m, cachedWeights_m;
     };
 
 }  // namespace ippl

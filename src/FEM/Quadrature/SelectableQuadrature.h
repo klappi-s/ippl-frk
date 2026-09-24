@@ -55,6 +55,7 @@ namespace ippl {
     class SelectableQuadrature : public Quadrature<T, NumNodes1D, ElementType> {
     public:
         using Family = QuadratureNodeFamily;
+        using WorkingType = typename Quadrature<T, NumNodes1D, ElementType>::WorkingType;
 
         SelectableQuadrature(const ElementType& ref_element, Family family = Family::GaussLegendre)
             : Quadrature<T, NumNodes1D, ElementType>(ref_element, 2 * NumNodes1D - 1, T(-1), T(1))
@@ -74,12 +75,12 @@ namespace ippl {
                 this->degree_m             = 1;
                 this->a_m                  = T(0);
                 this->b_m                  = T(1);
-                const T segment_length     = (this->b_m - this->a_m) / NumNodes1D;
-                this->weights_m            = Vector<T, NumNodes1D>(segment_length);
-                this->integration_nodes_m  = Vector<T, NumNodes1D>();
+                const WorkingType segment_length = WorkingType(1) / NumNodes1D;
+                this->weights_m            = Vector<WorkingType, NumNodes1D>(segment_length);
+                this->integration_nodes_m  = Vector<WorkingType, NumNodes1D>();
                 for (unsigned i = 0; i < NumNodes1D; ++i) {
                     this->integration_nodes_m[i] =
-                        T(0.5) * segment_length + i * segment_length + this->a_m;
+                        WorkingType(0.5) * segment_length + i * segment_length + this->a_m;
                 }
                 return;
             }

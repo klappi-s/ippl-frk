@@ -17,6 +17,37 @@ extern unsigned columnShard, columnShards;
 
 namespace {
 
+#if FEM_ORACLE_DIM == 1 && FEM_ORACLE_ORDER_SLOT == 3
+    TEST(FEMOperatorPrecision, FloatP4GllSetupRetainsQuadraturePrecision) {
+        using Context = support::Context<float, fem_oracle::CaseTag<1, 4, 5>>;
+        for (const auto& c : fem_oracle::operatorCases()) {
+            if (std::string_view(c.geometry.name) != "p4_1d_gll_gl5_unit") continue;
+            Context ctx(c.geometry);
+            auto stiffness = ctx.stiffness();
+            for (const size_t column : {size_t(1), size_t(4)}) {
+                std::vector<double> impulse(c.op.probe.size(), 0);
+                impulse[column] = 1;
+                auto field = ctx.field();
+                ctx.scatter(field, impulse);
+                field.fillHalo();
+                auto result = ctx.space_m.evaluateAx(field, stiffness);
+                const auto actual = ctx.gather(result);
+                const auto expected = support::apply(c.op.stiffness, impulse);
+                const size_t row = column == 1 ? 4 : 1;
+                // This cancellation-sensitive entry failed on GH200 when the
+                // quadrature coordinates were rounded before basis evaluation.
+                // Use the unchanged external oracle with a tighter regression
+                // bound than the general accumulated field-action tolerance.
+                EXPECT_NEAR(actual[row], expected[row],
+                            4 * std::numeric_limits<float>::epsilon() * std::abs(expected[row]))
+                    << "row=" << row << " column=" << column;
+            }
+            return;
+        }
+        FAIL() << "Missing P4 GLL precision regression case";
+    }
+#endif
+
     template <typename>
     class FEMOperatorOracle;
     template <typename Scalar, typename Tag>

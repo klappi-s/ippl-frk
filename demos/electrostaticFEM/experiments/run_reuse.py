@@ -32,9 +32,11 @@ p.add_argument('--methods',nargs='+',default=['plain','jacobi','gauss-seidel','c
 p.add_argument('--richardson-iterations',type=int,default=4)
 p.add_argument('--gs-outer',type=int,default=2)
 p.add_argument('--timer-level',choices=['coarse','detailed'],default='detailed')
+p.add_argument('--timer-recording',choices=['summary','raw'],default='summary')
+p.add_argument('--timer-sample-limit',type=int,default=1024)
 p.add_argument('--reuse',nargs='+',default=['off','operator','full'],choices=['off','operator','full'])
 a=p.parse_args()
-if min(a.ranks,a.repeats,a.particles,a.cells,a.max_iterations)<1 or a.steps<0 or a.repeat_offset<0 or not 0<a.tolerance<1:
+if min(a.ranks,a.repeats,a.particles,a.cells,a.max_iterations,a.timer_sample_limit)<1 or a.steps<0 or a.repeat_offset<0 or not 0<a.tolerance<1:
     p.error('Invalid size, repeat count, steps, or solver tolerance.')
 a.executable=a.executable.resolve();a.output=a.output.resolve()
 launch=shlex.split(a.launcher.format(ranks=a.ranks)) if a.launcher is not None else [a.mpiexec,'-n',str(a.ranks)]
@@ -52,6 +54,7 @@ for order in a.orders:
                      '--cells',str(a.cells),'--particles',str(a.particles),'--steps',str(a.steps),
                      '--lengths',a.lengths,'--interpolation_nodes',a.family,'--initial_guess',a.initial_guess,
                      '--quadrature_points',a.quadrature,'--reuse',reuse,'--timer_level',a.timer_level,'--replay',','.join(rotated),'--chebyshev_degree',str(a.degree),
+                     '--timer_recording',a.timer_recording,'--timer_sample_limit',str(a.timer_sample_limit),
                      '--richardson_iterations',str(a.richardson_iterations),
                      '--tolerance',str(a.tolerance),'--max_iterations',str(a.max_iterations),
                      '--gauss_seidel_outer_iterations',str(a.gs_outer),'--output',str(a.output/name)]
@@ -69,4 +72,4 @@ for order in a.orders:
     'launcher':launch,'tolerance':a.tolerance,'max_iterations':a.max_iterations,'repeat_offset':a.repeat_offset,
     'methods':methods,'richardson_iterations':a.richardson_iterations,'ranks':a.ranks,'repeats':a.repeats,'orders':a.orders,'cells':a.cells,'particles':a.particles,
     'dimension':a.dimension,'family':a.family,'initial_guess':a.initial_guess,'quadrature':a.quadrature,'lengths':a.lengths,
-    'steps':a.steps,'timer_level':a.timer_level,'chebyshev_degree':a.degree,'gauss_seidel_outer':a.gs_outer},indent=2)+'\n')
+    'steps':a.steps,'timer_level':a.timer_level,'timer_recording':a.timer_recording,'timer_sample_limit':a.timer_sample_limit,'chebyshev_degree':a.degree,'gauss_seidel_outer':a.gs_outer},indent=2)+'\n')

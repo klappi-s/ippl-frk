@@ -108,7 +108,10 @@ void assignSourceToField(Field_t& field, UniformCartesian<T, Dim>& mesh,
     ElementType refElement;
     LagrangeDOFLocations<T, Dim, Order> dofLocs;
     dofLocs.setFromFamily(family);
-    const auto elemIndices = dofHandler.getElementIndices();
+    // Sampling below is host-only, just like the field mirrors it fills. The
+    // handler's index view lives in the default execution space (Cuda on GPUs).
+    const auto elemIndices = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, dofHandler.getElementIndices());
     const int nghost       = field.getNghost();
 
     auto createMirrorViews = [&]<typename EntityType>() {

@@ -25,9 +25,17 @@ namespace ippl {
     template <typename T, unsigned NumNodes1D, typename ElementType>
     Vector<T, Quadrature<T, NumNodes1D, ElementType>::numElementNodes>
     Quadrature<T, NumNodes1D, ElementType>::getWeightsForRefElement() const {
-        Vector<T, NumNodes1D> w = this->getWeights1D(0.0, 1.0);
+        return getWeightsForRefElementAs<T>();
+    }
 
-        Vector<T, std::remove_reference_t<decltype(*this)>::numElementNodes> tensor_prod_w;
+    template <typename T, unsigned NumNodes1D, typename ElementType>
+    template <typename Scalar>
+    Vector<Scalar, Quadrature<T, NumNodes1D, ElementType>::numElementNodes>
+    Quadrature<T, NumNodes1D, ElementType>::getWeightsForRefElementAs() const {
+        const Vector<Scalar, NumNodes1D> w = nodes1d::affineMapWeight(
+            weights_m, WorkingType(a_m), WorkingType(b_m), WorkingType(0), WorkingType(1));
+
+        Vector<Scalar, numElementNodes> tensor_prod_w;
 
         Vector<unsigned, ElementType::dim> nd_index(0);
         for (unsigned i = 0; i < std::remove_reference_t<decltype(*this)>::numElementNodes; ++i) {
@@ -53,9 +61,18 @@ namespace ippl {
     Vector<Vector<T, Quadrature<T, NumNodes1D, ElementType>::dim>,
            Quadrature<T, NumNodes1D, ElementType>::numElementNodes>
     Quadrature<T, NumNodes1D, ElementType>::getIntegrationNodesForRefElement() const {
-        Vector<T, NumNodes1D> q = this->getIntegrationNodes1D(0.0, 1.0);
+        return getIntegrationNodesForRefElementAs<T>();
+    }
 
-        Vector<Vector<T, ElementType::dim>, std::remove_reference_t<decltype(*this)>::numElementNodes> tensor_prod_q;
+    template <typename T, unsigned NumNodes1D, typename ElementType>
+    template <typename Scalar>
+    Vector<Vector<Scalar, Quadrature<T, NumNodes1D, ElementType>::dim>,
+           Quadrature<T, NumNodes1D, ElementType>::numElementNodes>
+    Quadrature<T, NumNodes1D, ElementType>::getIntegrationNodesForRefElementAs() const {
+        const Vector<Scalar, NumNodes1D> q = nodes1d::affineMapPoint(
+            integration_nodes_m, WorkingType(a_m), WorkingType(b_m), WorkingType(0), WorkingType(1));
+
+        Vector<Vector<Scalar, ElementType::dim>, numElementNodes> tensor_prod_q;
 
         Vector<unsigned, ElementType::dim> nd_index(0);
         for (unsigned i = 0; i < std::remove_reference_t<decltype(*this)>::numElementNodes; ++i) {
@@ -81,14 +98,16 @@ namespace ippl {
         const T& a, const T& b) const {
         assert(b > a);
         // scale the integration nodes from the local domain [a_m, b_m] to the given one [a, b]
-        return nodes1d::affineMapPoint(this->integration_nodes_m, this->a_m, this->b_m, a, b);
+        return nodes1d::affineMapPoint(integration_nodes_m, WorkingType(a_m), WorkingType(b_m),
+                                       WorkingType(a), WorkingType(b));
     }
 
     template <typename T, unsigned NumNodes1D, typename ElementType>
     Vector<T, NumNodes1D> Quadrature<T, NumNodes1D, ElementType>::getWeights1D(const T& a,
                                                                                const T& b) const {
         assert(b > a);
-        return nodes1d::affineMapWeight(this->weights_m, this->a_m, this->b_m, a, b);
+        return nodes1d::affineMapWeight(weights_m, WorkingType(a_m), WorkingType(b_m),
+                                        WorkingType(a), WorkingType(b));
     }
 
 }  // namespace ippl

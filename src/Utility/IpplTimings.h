@@ -76,7 +76,21 @@ public:
             running              = false;
             const double elapsed = t.elapsed();
             wallTime += elapsed;
-            measurements.push_back(elapsed);
+            lastMeasurement = elapsed;
+            ++callCount;
+            if (callCount == 1) {
+                minMeasurement = maxMeasurement = elapsed;
+            } else {
+                if (elapsed < minMeasurement)
+                    minMeasurement = elapsed;
+                if (elapsed > maxMeasurement)
+                    maxMeasurement = elapsed;
+            }
+            const double delta = elapsed - meanMeasurement;
+            meanMeasurement += delta / callCount;
+            squaredDeviations += delta * (elapsed - meanMeasurement);
+            if (measurements.size() < sampleLimit)
+                measurements.push_back(elapsed);
         }
     }
 
@@ -88,7 +102,9 @@ public:
 
     void clearAll() {
         clear();
-        wallTime = 0.0;
+        wallTime        = 0.0;
+        callCount       = 0;
+        lastMeasurement = minMeasurement = maxMeasurement = meanMeasurement = squaredDeviations = 0;
         measurements.clear();
     }
 
@@ -108,6 +124,10 @@ public:
     TimerRef indx;
 
     std::vector<double> measurements;
+    size_t sampleLimit     = std::numeric_limits<size_t>::max();
+    size_t callCount       = 0;
+    double lastMeasurement = 0, minMeasurement = 0, maxMeasurement = 0;
+    double meanMeasurement = 0, squaredDeviations = 0;
 };
 
 struct Timing {
@@ -146,6 +166,15 @@ struct Timing {
 
     void resetAllTimers();
 
+    // Zero keeps online statistics only. Positive limits retain the first N
+    // samples per timer/rank. Legacy callers default to unlimited recording.
+    // Changing the limit discards stored samples, retaining aggregate statistics.
+    void setSampleLimit(size_t limit);
+    size_t getSampleLimit() const { return sampleLimit_m; }
+    double getLastMeasurement(TimerRef t) const;
+    size_t getCallCount(TimerRef t) const;
+    void dumpSummaryToCSV(const std::string& filename);
+
     // Format: timer_name,rank,measurement_id,duration
     void dumpToCSV(const std::string& filename);
 
@@ -171,6 +200,7 @@ private:
 
     // Returned by reference when a requested timer is not found.
     static const std::vector<double> emptyMeasurements;
+    size_t sampleLimit_m = std::numeric_limits<size_t>::max();
 };
 
 class IpplTimings {
@@ -211,15 +241,20 @@ public:
     // Use this after warmup iterations to get clean timing data
     static void resetAllTimers() { instance->resetAllTimers(); }
 
-    // Format: timer_name,rank,measurement_id,duration_seconds
-    // Perfect for creating violin plots in Python/R
-    static void dumpToCSV(const std::string& filename) {
-        instance->dumpToCSV(filename);
+    static void setSampleLimit(size_t limit) { instance->setSampleLimit(limit); }
+    static size_t getSampleLimit() { return instance->getSampleLimit(); }
+    static double getLastMeasurement(TimerRef t) { return instance->getLastMeasurement(t); }
+    static size_t getCallCount(TimerRef t) { return instance->getCallCount(t); }
+    static void dumpSummaryToCSV(const std::string& filename) {
+        instance->dumpSummaryToCSV(filename);
     }
 
-    static void dumpToCSV(const std::string& filename,
-                         const std::string& delimiter,
-                         bool includeHeader = true) {
+    // Format: timer_name,rank,measurement_id,duration_seconds
+    // Perfect for creating violin plots in Python/R
+    static void dumpToCSV(const std::string& filename) { instance->dumpToCSV(filename); }
+
+    static void dumpToCSV(const std::string& filename, const std::string& delimiter,
+                          bool includeHeader = true) {
         instance->dumpToCSV(filename, delimiter, includeHeader);
     }
 
@@ -230,13 +265,9 @@ public:
         return instance->getMeasurements(name);
     }
 
-    static size_t getMeasurementCount(TimerRef t) {
-        return instance->getMeasurementCount(t);
-    }
+    static size_t getMeasurementCount(TimerRef t) { return instance->getMeasurementCount(t); }
 
-    static std::vector<std::string> getTimerNames() {
-        return instance->getTimerNames();
-    }
+    static std::vector<std::string> getTimerNames() { return instance->getTimerNames(); }
 
 private:
     // type of storage for list of TimerInfo

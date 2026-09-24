@@ -44,6 +44,20 @@ class MeshCampaigns(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Incompatible campaign setting tolerance'):
             load_campaigns([a, b])
 
+    def test_recording_policy_changes_rejected(self):
+        later = copy.deepcopy(self.manifest)
+        later['jobs'][0].update(name='large', cells=16)
+        later['config'].update(timer_recording='summary', timer_sample_limit=1024)
+        a, b = self.write('a', self.manifest), self.write('b', later)
+        with self.assertRaisesRegex(ValueError, 'timer_recording'):
+            load_campaigns([a, b])
+        first = copy.deepcopy(later)
+        first['jobs'][0].update(name='small', cells=8)
+        first['config'].update(timer_recording='raw', timer_sample_limit=8)
+        c = self.write('c', first)
+        with self.assertRaisesRegex(ValueError, 'timer_recording'):
+            load_campaigns([b, c])
+
     def test_duplicate_measurements_rejected(self):
         a, b = self.write('a', self.manifest), self.write('b', self.manifest)
         with self.assertRaisesRegex(ValueError, 'Overlapping campaign job'):

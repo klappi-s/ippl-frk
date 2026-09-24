@@ -34,6 +34,8 @@ namespace ippl {
                   typename Values, typename DeviceSpace, typename Handler, unsigned Dim>
         struct FEMParticleCoupling {
             using T = typename Positions::value_type::value_type;
+            static constexpr size_t DOF_BEGIN = Handler::template getEntityDOFStart<Entity>();
+            static constexpr size_t DOF_END = Handler::template getEntityDOFEnd<Entity>();
             FieldView field;
             Positions positions;
             Values values;
@@ -50,9 +52,7 @@ namespace ippl {
                 Vector<size_t, Dim> local;
                 for (unsigned d = 0; d < Dim; ++d)
                     local[d] = cell[d] - first[d] + ghosts;
-                constexpr auto Begin = Handler::template getEntityDOFStart<Entity>();
-                constexpr auto End   = Handler::template getEntityDOFEnd<Entity>();
-                for (size_t i = Begin; i < End; ++i) {
+                for (size_t i = DOF_BEGIN; i < DOF_END; ++i) {
                     const auto map = handler.getElementDOFMapping(i);
                     auto& coefficient =
                         apply(field, local + map.entityLocalIndex)[map.entityLocalDOF];
@@ -141,7 +141,7 @@ namespace ippl {
             auto process = [&]<typename Entity>() {
                 auto view    = field.template getView<Entity>();
                 auto device  = space.getDeviceMirror();
-                auto handler = space.getDOFHandler();
+                auto handler = space.getDOFHandler().getDeviceMirror();
                 using Functor =
                     FEMParticleCoupling<Deposit, Entity, decltype(view), Positions, Values,
                                         decltype(device), decltype(handler), Dim>;

@@ -118,7 +118,7 @@ function(set_kokkos_options)
   if("CUDA" IN_LIST IPPL_PLATFORMS)
     if(Kokkos_VERSION VERSION_LESS 5.0.0)
       set(Kokkos_ENABLE_CUDA_LAMBDA ON CACHE BOOL "Enable Kokkos CUDA lambda support" FORCE)
-    endif( CACHE BOOL "Enable CUDA lambda support" FORCE)
+    endif()
 
     ########### Revisit this topic!!! ##########
     # Enable relaxed constexpr (allows calling constexpr __host__ functions from __device__)

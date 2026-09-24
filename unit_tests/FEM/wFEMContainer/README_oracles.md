@@ -400,9 +400,30 @@ new corner tests verify that contributions are neither lost nor duplicated. The
 intended numerical change is correct enforcement of prescribed values and their
 free-equation lift, without changing the raw stiffness or load discretization.
 
-GPU execution is still unverified: this workspace has a serial Kokkos build and
-no available HIP/ROCm toolchain or GPU-enabled IPPL build. Host inspection does
-find AMD compute device nodes; sandbox-only device inspection was insufficient. Host/device mirrors in the test
-adapter are explicit, but this does not establish whole-solver GPU portability.
-Multigrid, mixed/periodic boundary validation, and P6+ numerical stress remain
-outside this acceptance scope.
+GH200 validation now covers native CUDA smoke tests, the full oracle selection and
+small same-node two-GPU runs. The first complete oracle run passed 123/125 CTests;
+the two failures were the same float P4/GLL impulse entry in both stiffness modes.
+A host-setup precision repair now retains quadrature coordinates through basis
+evaluation and accumulates integrals in at least double, keeping float fields and
+GPU arithmetic. Existing oracle values and tolerances are unchanged; a new
+`FEMOperatorPrecision.FloatP4GllSetupRetainsQuadraturePrecision` regression reuses
+`p4_1d_gll_gl5_unit` with a tighter bound. GH200 job 4734848 passed all 126 one-rank
+CTest entries, including that regression in both modes and the quadrature-precision
+regression. A separate driver error occurred after CTest returned success; its fix
+does not alter these results. Sanitizer device P3/P5 probes passed with zero reports;
+the cache probe's 320 reports were all Cray MPI pointer queries. The
+optional sanitizer mode now uses explicit report review because native XML suppression
+matched none of the MPI reports in job 4735622. Job 4736021 verified the replacement:
+all three probes and their report reviews passed, overall exit 0, with the documented
+MPI exception and no unexpected reports. This covers selected memcheck probes,
+not the full oracle suite under sanitizer. Two-node job 4736170 subsequently passed
+18 selected unit tests and 56 PIC/replay solves per rank on two distinct hosts,
+one GPU each, including P3/P5 periodic oracles through 3D. See the current
+[GH200 validation guide](../../../demos/electrostaticFEM/experiments/GH200_VALIDATION.md).
+Multigrid, multi-node GPU validation and P6+ numerical stress remain outside this gate.
+
+The periodic FEM and particle-coupling suites also reuse the published **1D**
+reference matrices/basis tables, tensorizing them through 3D in the tests. Their
+case sequence and periodic numbering are documented in
+[the oracle catalog](Oracle/oracles.md#periodic-fem-and-particle-consumers-17-september-2026).
+The pinned package and regeneration procedure are unchanged.

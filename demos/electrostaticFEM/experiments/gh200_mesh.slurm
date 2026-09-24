@@ -1,37 +1,168 @@
 #!/usr/bin/env bash
-# Submit from an allocated/available GH200 software environment; account and uenv
-# are supplied by the caller. See MESH_STUDY.md before the first GPU run.
+# Exclusive GH200 timing pilot; account and uenv are supplied by the caller.
+# See ProjectManagement/2026-09-23_1608_GH200_PERFORMANCE_GUIDE.md in the FEM workspace.
 #SBATCH --job-name=fem-mesh
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=72
 #SBATCH --exclusive
+#SBATCH --mem=0
 #SBATCH --time=02:00:00
 #SBATCH --output=fem-mesh-%j.log
+#SBATCH --error=fem-mesh-%j.err
 
+# Parse before execution; sync this file by atomic replacement.
+{
 set -euo pipefail
-: "${FEM_EXPERIMENTS:?Set FEM_EXPERIMENTS to the absolute demos/electrostaticFEM/experiments directory}"
-: "${FEM_EXECUTABLE:?Set FEM_EXECUTABLE to the absolute CUDA LandauDampingFEM executable}"
-: "${FEM_OUTPUT:?Set FEM_OUTPUT to a new absolute campaign directory on shared scratch}"
+: "${FEM_ROOT:?Set FEM_ROOT to the cluster directory containing ippl-frk and build_cuda}"
 : "${SLURM_NTASKS:?Submit this script through Slurm}"
+: "${SLURM_JOB_NUM_NODES:?Submit this script through Slurm}"
+: "${SLURM_JOB_ID:?Submit this script through Slurm}"
+experiments=${FEM_EXPERIMENTS:-$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments}
+buildDir=${FEM_BUILD:-$FEM_ROOT/build_cuda}
+app=${FEM_EXECUTABLE:-$buildDir/demos/electrostaticFEM/LandauDampingFEM}
+nodes=$SLURM_JOB_NUM_NODES
+ranks=$SLURM_NTASKS
+cpus=${SLURM_CPUS_PER_TASK:-72}
+(( ranks > 0 && nodes > 0 && ranks % nodes == 0 )) || { echo 'Ranks must divide evenly across nodes.' >&2; exit 2; }
+perNode=$((ranks / nodes))
+case "$nodes:$perNode" in
+  1:1|1:2|1:4|2:1|2:4) ;;
+  *) echo 'Supported placements: 1x1, 1x2, 1x4, 2x1 or 2x4 (nodes x GPUs/node).' >&2; exit 2;;
+esac
+output=${FEM_OUTPUT:-$FEM_ROOT/gpu_performance/$(date -u +%Y%m%dT%H%M%SZ)-${nodes}n-${perNode}gpn-$SLURM_JOB_ID}
+mkdir -p "$output/allocations"
+runDir=$(mktemp -d "$output/allocations/${SLURM_JOB_ID}-XXXXXX")
+exec > >(tee "$runDir/session.log") 2>&1
+trap 'rc=$?; printf "exit_code=%s\n" "$rc" > "$runDir/status.txt"; exit "$rc"' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+printf 'Campaign: %s\nAllocation evidence: %s\n' "$output" "$runDir"
 
 export OMP_NUM_THREADS="${FEM_OMP_THREADS:-1}"
-# Slurm provides one visible GPU per rank. Do not replace CUDA_VISIBLE_DEVICES
-# with a global device index after Slurm has bound/restricted devices.
-launcher="${FEM_LAUNCHER:-srun -n {ranks} --cpu-bind=cores}"
 python_command="${FEM_PYTHON:-python3}"
-
-# Optional command-line sweep arguments override defaults, e.g.
-# sbatch ... gh200_mesh.slurm --cells-3d 32 48 64 --particles-per-cell 32
-# Each replay batch uses all allocated ranks; batches run sequentially.
-"$python_command" "$FEM_EXPERIMENTS/run_mesh_sweep.py" \
-    --executable "$FEM_EXECUTABLE" --output "$FEM_OUTPUT" \
-    --dimensions 3 --orders 3 --cells-3d 16 24 32 --particles-per-cell 64 \
-    --ranks "$SLURM_NTASKS" --launcher "$launcher" --resume "$@"
-
-# Plotting can instead be done after downloading the results. It needs NumPy
-# and Matplotlib, whereas run_mesh_sweep.py/run_reuse.py use only Python's stdlib.
-if [[ "${FEM_ANALYZE:-0}" == 1 ]]; then
-    "$python_command" "$FEM_EXPERIMENTS/analyze_mesh_sweep.py" "$FEM_OUTPUT"
+"$python_command" -c 'import sys; assert sys.version_info >= (3, 6), "Python 3.6+ required"'
+[[ -x "$app" ]] || { echo "Missing CUDA executable: $app" >&2; exit 2; }
+export WRAPPER="${WRAPPER:-/user-environment/wrapper-mpi.sh}"
+[[ $WRAPPER == /* && -f "$WRAPPER" && -r "$WRAPPER" && -x "$WRAPPER" ]] || {
+  echo "WRAPPER must name an absolute, readable executable file: $WRAPPER" >&2; exit 2;
+}
+# Every step uses the same explicit placement, including on an exclusive node
+# where the allocation itself may expose all four GPUs to the batch shell.
+launch=(srun --nodes="$nodes" --ntasks="$ranks" --ntasks-per-node="$perNode"
+  --cpus-per-task="$cpus" --gpus-per-task=1 --cpu-bind=cores --kill-on-bad-exit=1)
+# run_reuse.py parses with shlex.split and formats {ranks}. Preserve arbitrary
+# wrapper paths as one argument, including literal braces and shell metacharacters.
+launcher=$("$python_command" -c 'import shlex, sys; print(" ".join(shlex.quote(a) for a in sys.argv[1:]).replace("{", "{{").replace("}", "}}"))' \
+  "${launch[@]}" "$WRAPPER")
+{
+  date -u; hostname
+  printf 'nodes=%s\nranks=%s\nranks_per_node=%s\ncpus_per_rank=%s\n' "$nodes" "$ranks" "$perNode" "$cpus"
+  printf 'OMP_NUM_THREADS=%s\nCUDA_LAUNCH_BLOCKING=%s\nMPICH_GPU_SUPPORT_ENABLED=%s\n' \
+    "$OMP_NUM_THREADS" "${CUDA_LAUNCH_BLOCKING:-unset}" "${MPICH_GPU_SUPPORT_ENABLED:-unset}"
+  printf 'WRAPPER=%s\n' "$WRAPPER"
+  "$python_command" --version
+  scontrol show job "$SLURM_JOB_ID"
+} > "$runDir/allocation.txt" 2>&1
+cp "${BASH_SOURCE[0]}" "$runDir/driver.slurm"
+cp "$buildDir/CMakeCache.txt" "$runDir/CMakeCache.txt"
+git -C "$FEM_ROOT/ippl-frk" rev-parse HEAD > "$runDir/source-revision.txt"
+git -C "$FEM_ROOT/ippl-frk" diff --binary HEAD > "$runDir/source.patch"
+# Freeze both stdlib-only runners for this invocation, even if the source files
+# are updated later. No analysis/plotting packages are needed on the cluster.
+mkdir "$runDir/tools"
+cp "$experiments/run_mesh_sweep.py" "$experiments/run_reuse.py" "$runDir/tools/"
+if [[ ${FEM_REPLAY_CHECK:-0} == 1 ]]; then
+  cp "$experiments/run_replay_check.py" "$experiments/check_compact_timers.py" "$runDir/tools/"
+  cp "${FEM_REPLAY_CHECK_SCRIPT:-$experiments/gh200_replay_check.slurm}" "$runDir/replay-check-driver.slurm"
 fi
+sha256sum "$app" "$runDir/tools/"*.py > "$runDir/sha256.txt"
+"$python_command" - "$WRAPPER" "$runDir" "$output" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+wrapper, directory, campaign = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+data = wrapper.read_bytes()
+record = dict(path=str(wrapper), sha256=hashlib.sha256(data).hexdigest())
+text = json.dumps(record, indent=2) + '\n'
+(directory / 'mpi-wrapper.sh').write_bytes(data)
+(directory / 'mpi-wrapper.json').write_text(text)
+pin = campaign / 'mpi-wrapper.json'
+if pin.exists():
+    if json.loads(pin.read_text()) != record:
+        raise SystemExit('MPI wrapper changed; use a new campaign directory.')
+elif (campaign / 'campaign.json').exists():
+    raise SystemExit('Existing campaign has no MPI wrapper record; use a new directory.')
+else:
+    with pin.open('x') as stream:
+        stream.write(text)
+print('MPI wrapper: %s (SHA256 %s)' % (record['path'], record['sha256']))
+PY
+
+timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" "$WRAPPER" "$python_command" -c '
+import json, os, socket, sys
+from pathlib import Path
+rank = os.environ["SLURM_PROCID"]
+record = dict(rank=int(rank), local_rank=int(os.environ["SLURM_LOCALID"]),
+              host=socket.gethostname(), visible_gpu=os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+              cpus=sorted(os.sched_getaffinity(0)),
+              omp_num_threads=os.environ.get("OMP_NUM_THREADS", ""),
+              mpich_gpu_support=os.environ.get("MPICH_GPU_SUPPORT_ENABLED", ""))
+(Path(sys.argv[1]) / ("placement-rank" + rank + ".json")).write_text(json.dumps(record, indent=2) + "\n")
+' "$runDir"
+"$python_command" - "$runDir" "$nodes" "$perNode" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+directory, nodes, per_node = Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+rows = [json.loads((directory / ('placement-rank%d.json' % rank)).read_text())
+        for rank in range(nodes * per_node)]
+hosts = {row['host'] for row in rows}
+assert len(hosts) == nodes and {row['rank'] for row in rows} == set(range(len(rows)))
+for host in hosts:
+    local = [row for row in rows if row['host'] == host]
+    assert len(local) == per_node and {row['local_rank'] for row in local} == set(range(per_node))
+    assert all(row['cpus'] and row['visible_gpu'] not in ('', '-1')
+               and ',' not in row['visible_gpu'] for row in local)
+(directory / 'placement.json').write_text(json.dumps(rows, indent=2) + '\n')
+print('Verified %d nodes x %d GPU ranks/node.' % (nodes, per_node))
+PY
+timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" --label nvidia-smi > "$runDir/gpus-before.log"
+# A small 3D case has enough owned cells even for eight ranks. Its numerical
+# residual/charge/energy checks also provide a gate for each new allocation.
+timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" "$WRAPPER" "$app" \
+  --dim 3 --order 3 --cells 4 --particles 1024 --steps 1 --quadrature_points exact \
+  --replay plain,jacobi --output "$runDir/preflight" > "$runDir/preflight.log" 2>&1
+"$python_command" - "$runDir/preflight/configuration.txt" "$ranks" <<'PY'
+from pathlib import Path
+import sys
+
+config = dict(line.split('=', 1) for line in Path(sys.argv[1]).read_text().splitlines())
+assert config['backend'] == 'Cuda' and int(config['ranks']) == int(sys.argv[2]), 'Wrong backend/rank count'
+print('CUDA preflight passed on all allocated ranks.')
+PY
+
+# Defaults are a short sizing pilot: one mesh/dimension, four loads, one repeat.
+# Pass --steps 10 --repeats 3 and mesh lists for the measured sweep. Explicit
+# --ranks/--launcher/--output below protect the verified placement from overrides.
+status=0
+if [[ ${FEM_REPLAY_CHECK:-0} == 1 ]]; then
+  "$python_command" "$runDir/tools/run_replay_check.py" "$@" \
+    --executable "$app" --output "$output" --ranks "$ranks" --launcher "$launcher" \
+    --expected-backend Cuda --resume || status=$?
+else
+  "$python_command" "$runDir/tools/run_mesh_sweep.py" \
+    --dimensions 1 2 3 --orders 3 --cells-1d 512 --cells-2d 32 --cells-3d 8 \
+    --particles 32768 --steps 3 --repeats 1 --timeout 1800 "$@" \
+    --executable "$app" --output "$output" --ranks "$ranks" --launcher "$launcher" \
+    --timer-level coarse --resume || status=$?
+fi
+timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" --label nvidia-smi > "$runDir/gpus-after.log" || true
+exit "$status"
+}

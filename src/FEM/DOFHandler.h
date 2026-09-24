@@ -51,9 +51,55 @@ namespace ippl {
             size_t entityTypeIndex;                         // Index in the EntityTypes tuple
             indices_t entityLocalIndex;                     // Offset from the NDIndex of the element to the NDIndex of the DOF (0 or 1 in each dimension)
             size_t entityLocalDOF;                          // Local DOF number within the entity
+            unsigned directionMask = 0;                    // Bit d: entity extends along axis d
         };
 
         using DOFMapping_t = DOFMapping;
+
+        // Kernel argument: device-accessible mappings and geometry only. The owning
+        // handler, its mesh pointer and its host mirror remain on the host.
+        struct DeviceStruct {
+            using DOFMapping_t = DOFMapping;
+            using SpaceTraits = SpaceTraits_;
+            Kokkos::View<const DOFMapping*> mappings;
+            indices_t numElements, localFirst;
+
+            KOKKOS_INLINE_FUNCTION DOFMapping getElementDOFMapping(size_t i) const {
+                return mappings(i);
+            }
+            KOKKOS_INLINE_FUNCTION indices_t getElementNDIndex(size_t index) const {
+                indices_t result;
+                for (unsigned d = 0; d < Dim; ++d) {
+                    result[d] = index % numElements[d];
+                    index /= numElements[d];
+                }
+                return result;
+            }
+            KOKKOS_INLINE_FUNCTION indices_t getLocalElementNDIndex(size_t index, int ghosts) const {
+                return getElementNDIndex(index) - localFirst + indices_t(ghosts);
+            }
+            KOKKOS_INLINE_FUNCTION bool isDOFOnBoundary(size_t element, size_t dof, unsigned d) const {
+                const auto map = mappings(dof);
+                if (map.directionMask & (1u << d)) return false;
+                const auto coordinate = getElementNDIndex(element)[d] + map.entityLocalIndex[d];
+                return coordinate == 0 || coordinate == numElements[d];
+            }
+            KOKKOS_INLINE_FUNCTION bool isDOFOnBoundary(size_t element, size_t dof) const {
+                for (unsigned d = 0; d < Dim; ++d)
+                    if (isDOFOnBoundary(element, dof, d)) return true;
+                return false;
+            }
+            template <typename Entity>
+            static constexpr size_t getEntityDOFStart() { return SpaceTraits::template getEntityDOFStart<Entity>(); }
+            template <typename Entity>
+            static constexpr size_t getEntityDOFEnd() { return SpaceTraits::template getEntityDOFEnd<Entity>(); }
+        };
+
+        DeviceStruct getDeviceMirror() const {
+            indices_t first;
+            for (unsigned d = 0; d < Dim; ++d) first[d] = lElemDom_m[d].first();
+            return {dofMappingTable_m, ne_m, first};
+        }
 
         ///////////////////////////////////////////////////////////////////////
         // Constructors ///////////////////////////////////////////////////////

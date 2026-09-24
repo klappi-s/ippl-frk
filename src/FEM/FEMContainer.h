@@ -86,6 +86,11 @@ namespace ippl {
 
         FEMContainer<T, Dim, EntityTypes, DOFNums> deepCopy() const;
 
+        // Independent, zero-initialized values with copies of the prepared entity
+        // layouts. Like the mesh/layout constructor, starts with NO_FACE BCs.
+        // The mesh and original vertex layout must outlive the returned container.
+        FEMContainer cloneStructure() const;
+
         void deepCopyFrom(const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) {
             [&]<std::size_t... Is>(std::index_sequence<Is...>) {
                 ((Kokkos::deep_copy(std::get<Is>(this->data_m).getView(), std::get<Is>(other.data_m).getView())), ...);
@@ -207,10 +212,10 @@ namespace ippl {
 
         unsigned int getNumFields() { return NEntitys; }
 
-        KOKKOS_INLINE_FUNCTION Mesh_t& get_mesh() const { return *mesh_m; }
+        Mesh_t& get_mesh() const { return *mesh_m; }
 
-        KOKKOS_INLINE_FUNCTION Layout_t& getLayout() { return *VertexLayout_m; }
-        KOKKOS_INLINE_FUNCTION const Layout_t& getLayout() const { return *VertexLayout_m; }
+        Layout_t& getLayout() { return *VertexLayout_m; }
+        const Layout_t& getLayout() const { return *VertexLayout_m; }
 
         // Access individual layouts
         template <typename EntityType>
@@ -264,11 +269,9 @@ namespace ippl {
         }
 
         const ViewTuple getAllViews() const {
-            ViewTuple views;
-            for (unsigned i = 0; i < NEntitys; ++i) {
-                views[i] = std::get<i>(data_m).getView();
-            }
-            return views;
+            return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                return ViewTuple{std::get<Is>(data_m).getView()...};
+            }(std::make_index_sequence<NEntitys>{});
         }
 
         constexpr static auto getEntityTypes() { return EntityTypes{}; }

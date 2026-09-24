@@ -1,5 +1,12 @@
 # Mesh trends and later GH200 studies
 
+**23 September implementation:** new sweeps default to `--timer-recording summary`.
+They retain per-solve/step data and compact online internal-timer statistics.
+`--timer-recording raw --timer-sample-limit 1024` enables bounded diagnostic samples.
+The recording policy is part of the campaign identity; pooled analyses reject
+mixed policies, including older manifests with unbounded raw recording. Use fresh
+output directories after rebuilding for layout reuse and compact recording.
+
 The scripts use `LandauDampingFEM` and the existing replay machinery. They add no
 solver implementation. `run_mesh_sweep.py` calls `run_reuse.py` in two batches:
 
@@ -45,6 +52,12 @@ runner, and retains interrupted/failed attempts when retrying. `--job-index N`
 runs just one manifest job, allowing independent Slurm array allocations. Avoid
 running the same job index concurrently. `--timeout` bounds each whole batch;
 timeouts are failures, not timing samples. Default execution is sequential.
+
+The stdlib-only runner regression needs no MPI, GPU or FEM executable. From this
+directory, run `python3 -m unittest -v test_run_mesh_sweep`. It checks the full
+54-batch GH200 plan, old-Python dictionary behavior, rotated method launches
+through `run_reuse.py` with a mock application, and safe resume. This includes
+the multi-repetition branch that the one-repetition sizing pilot does not cover.
 
 To extend an existing study without rerunning or altering its measurements, run
 the additional meshes into a new directory and combine them during analysis:
@@ -125,9 +138,10 @@ cmake --build /path/to/build-gh200 --target LandauDampingFEM \
 
 The selectable order list reduces template compilation for a focused study;
 default remains P1–P5. Compiler/dependency prefixes and the CTest MPI launcher
-must match the selected site environment. This is a configure template, **not a
-GPU build already validated here**. No local CUDA or multi-node performance claim
-is made by the Serial measurements.
+must match the selected site environment. The native Daint build and one-GPU
+oracle checks now pass, as does the two-node/one-GPU-per-node check (job 4736170).
+See [GH200_VALIDATION.md](../../../../../ProjectManagement/2026-09-23_1609_GH200_VALIDATION_GUIDE.md). The Serial measurements do not
+establish GPU performance.
 
 First run the named unit tests and a small ten-step P3 demo on one GPU, then
 repeat on two GPUs and across nodes. Use the configured CTest MPI wrapper, with
@@ -138,29 +152,33 @@ the periodic/oracle suites when debugging numerical or halo differences.
 
 ## Slurm execution
 
-`gh200_mesh.slurm` follows the existing IPPL GH200 job structure: four ranks per
-node, one GPU per rank, and 72 allocated CPU cores per task. Account, partition,
-uenv/container and any MPI wrapper remain site/user choices. Current CSCS guidance
-uses `--ntasks-per-node=4 --gpus-per-task=1` for one GH200 GPU per rank;
-Slurm handles GPU visibility. See [CSCS Slurm documentation](https://docs.cscs.ch/running/slurm/#one-rank-per-gpu).
+`gh200_mesh.slurm` now defaults to a short **one-GPU pilot on an exclusive node**,
+with 72 allocated CPU cores per rank. The [performance guide](../../../../../ProjectManagement/2026-09-23_1608_GH200_PERFORMANCE_GUIDE.md)
+defines the progression: 1×1, 1×2, 1×4 and 2×4 GPUs, plus a targeted 2×1 comparison.
+All placements reserve whole nodes and use one GPU per MPI rank. Account/uenv remain
+site choices; the mounted root copy carries the settings from the validated jobs.
+Slurm handles GPU visibility; the script verifies host/rank placement before running.
+The FEM preflight and all replay applications use `srun ... "$WRAPPER" ...`,
+defaulting to `/user-environment/wrapper-mpi.sh`. The wrapper's path, contents and
+SHA-256 are retained; its identity must match when resuming a campaign.
 
 ```sh
-export FEM_EXPERIMENTS=/absolute/ippl-frk/demos/electrostaticFEM/experiments
-export FEM_EXECUTABLE=/absolute/build-gh200/demos/electrostaticFEM/LandauDampingFEM
-export FEM_OUTPUT=/shared/scratch/fem-gh200-one-node
+export FEM_ROOT=/absolute/directory-containing-ippl-frk-and-build_cuda
+export FEM_OUTPUT=/shared/scratch/fem-gh200-one-gpu-pilot
 # Add your site's environment/partition options to this submission:
-sbatch --account=YOUR_ACCOUNT --nodes=1 "$FEM_EXPERIMENTS/gh200_mesh.slurm"
+sbatch --account=YOUR_ACCOUNT "$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments/gh200_mesh.slurm"
 ```
 
 The batch shell runs one Python driver; **do not launch one driver per MPI rank**.
-Each child `srun` uses the allocation's ranks. The default GPU sweep is 3D P3,
-16³/24³/32³ cells, 64 particles/cell. These are starting workloads, not established
-saturation sizes. Override the mesh at submission and use distinct outputs:
+Each child `srun` uses the verified allocation's ranks. The pilot defaults are P3
+GLL, 512/32²/8³ cells in 1D/2D/3D, 32,768 particles, three timesteps and one repeat.
+Use distinct outputs and ten timesteps/three repeats for measured comparisons:
 
 ```sh
-export FEM_OUTPUT=/shared/scratch/fem-gh200-four-nodes
-sbatch --account=YOUR_ACCOUNT --nodes=4 "$FEM_EXPERIMENTS/gh200_mesh.slurm" \
-  --cells-3d 32 48 64 --particles-per-cell 32
+export FEM_OUTPUT=/shared/scratch/fem-gh200-two-full-nodes
+sbatch --account=YOUR_ACCOUNT --nodes=2 --ntasks=8 --ntasks-per-node=4 \
+  "$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments/gh200_mesh.slurm" \
+  --steps 10 --repeats 3 --dimensions 3 --cells-3d 4 8 16
 ```
 
 For strong scaling, keep global cells/particles fixed while changing node count.
@@ -171,10 +189,10 @@ identical global loads between CPU/GPU or different rank counts. Strict
 cross-backend same-load comparisons need an exported/replayed common load archive
 or a deterministic rank-independent source; that is a separate extension.
 
-Use a fresh output directory per backend/rank-count/configuration. Run plotting
-after measurement or after downloading the data; set `FEM_ANALYZE=1` only if the
-batch environment has NumPy and Matplotlib. Runners themselves use the standard
-Python library. Retained loads, field temporaries and buffered timers/CSV data
+Use a fresh output directory per backend/placement/configuration. Run plotting
+locally after measurement; the batch job does not import NumPy/Matplotlib.
+The launch runners use Python 3.6+ standard-library APIs. Retained loads, field
+temporaries and buffered timers/CSV data
 consume memory; scale in steps and record memory before very large runs.
 
 ## Expected GPU differences

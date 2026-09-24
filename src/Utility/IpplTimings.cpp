@@ -32,6 +32,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 
 #include "Utility/Inform.h"
 #include "Utility/IpplInfo.h"
@@ -80,9 +81,10 @@ Timing::TimerRef Timing::getTimer(const char* nm) {
     TimerInfo* tptr          = 0;
     TimerMap_t::iterator loc = TimerMap.find(s);
     if (loc == TimerMap.end()) {
-        tptr       = new TimerInfo;
-        tptr->indx = TimerList.size();
-        tptr->name = s;
+        tptr              = new TimerInfo;
+        tptr->indx        = TimerList.size();
+        tptr->name        = s;
+        tptr->sampleLimit = sampleLimit_m;
         TimerMap.insert(TimerMap_t::value_type(s, tptr));
         TimerList.push_back(my_auto_ptr<TimerInfo>(tptr));
     } else {
@@ -156,6 +158,70 @@ std::vector<std::string> Timing::getTimerNames() const {
     return names;
 }
 
+namespace {
+    // Both raw and summary exports use the same bounded, collective I/O path.
+    void writeRankOrderedCSV(const std::string& filename, const std::string& localStr,
+                             const std::string& header) {
+        const int rank     = ippl::Comm->rank();
+        const int numRanks = ippl::Comm->size();
+        // Export rank by rank in bounded chunks. A single Gatherv uses int
+        // displacements and can overflow even when every rank's count fits in int.
+        // Keep the CSV order and avoid allocating the entire export on rank zero.
+        // A private communicator prevents these messages from consuming application tags.
+        MPI_Comm exportComm;
+        MPI_Comm_dup(ippl::Comm->getCommunicator(), &exportComm);
+        MPI_Aint localSize = static_cast<MPI_Aint>(localStr.size());
+        std::vector<MPI_Aint> sizes(numRanks, 0);
+        MPI_Gather(&localSize, 1, MPI_AINT, sizes.data(), 1, MPI_AINT, 0, exportComm);
+
+        constexpr size_t chunkBytes = 1024 * 1024;
+        std::vector<char> buffer(rank == 0 ? chunkBytes : 0);
+        std::ofstream outFile;
+        int outputError = 0;
+        if (rank == 0) {
+            outFile.open(filename);
+            outputError = !outFile;
+        }
+        MPI_Bcast(&outputError, 1, MPI_INT, 0, exportComm);
+        if (outputError) {
+            MPI_Comm_free(&exportComm);
+            throw std::runtime_error("Timing::dumpToCSV: cannot open " + filename);
+        }
+        if (rank == 0) {
+            outFile << header;
+            for (int source = 0; source < numRanks; ++source) {
+                for (MPI_Aint offset = 0; offset < sizes[source];) {
+                    const int count  = static_cast<int>(std::min<MPI_Aint>(
+                        sizes[source] - offset, static_cast<MPI_Aint>(chunkBytes)));
+                    const char* data = localStr.data() + (source == 0 ? offset : 0);
+                    if (source != 0) {
+                        MPI_Recv(buffer.data(), count, MPI_CHAR, source, 0, exportComm,
+                                 MPI_STATUS_IGNORE);
+                        data = buffer.data();
+                    }
+                    // Continue receiving after an I/O failure so no sender is stranded.
+                    outFile.write(data, count);
+                    offset += count;
+                }
+            }
+            outFile.close();
+            outputError = !outFile;
+        } else {
+            for (MPI_Aint offset = 0; offset < localSize;) {
+                const int count = static_cast<int>(
+                    std::min<MPI_Aint>(localSize - offset, static_cast<MPI_Aint>(chunkBytes)));
+                MPI_Send(localStr.data() + offset, count, MPI_CHAR, 0, 0, exportComm);
+                offset += count;
+            }
+        }
+        MPI_Bcast(&outputError, 1, MPI_INT, 0, exportComm);
+        MPI_Comm_free(&exportComm);
+        if (outputError)
+            throw std::runtime_error("Timing::dumpToCSV: cannot write " + filename);
+    }
+
+}  // namespace
+
 // Dump all measurements to CSV (default format)
 void Timing::dumpToCSV(const std::string& filename) {
     dumpToCSV(filename, ",", true);
@@ -164,8 +230,7 @@ void Timing::dumpToCSV(const std::string& filename) {
 // Dump all measurements to CSV with custom options
 void Timing::dumpToCSV(const std::string& filename, const std::string& delimiter,
                        bool includeHeader) {
-    const int rank     = ippl::Comm->rank();
-    const int numRanks = ippl::Comm->size();
+    const int rank = ippl::Comm->rank();
 
     // Each rank serialises its measurements into a local buffer.
     std::ostringstream localData;
@@ -180,47 +245,44 @@ void Timing::dumpToCSV(const std::string& filename, const std::string& delimiter
     }
     const std::string localStr = localData.str();
 
-    // Gather sizes from every rank using a single collective rather than
-    // O(P) point-to-point pairs.
-    MPI_Aint localSize = static_cast<MPI_Aint>(localStr.size());
-    std::vector<MPI_Aint> sizes(numRanks, 0);
-    MPI_Gather(&localSize, 1, MPI_AINT, sizes.data(), 1, MPI_AINT, 0,
-               ippl::Comm->getCommunicator());
+    const std::string header = includeHeader
+                                   ? "timer_name" + delimiter + "rank" + delimiter
+                                         + "measurement_id" + delimiter + "duration_seconds\n"
+                                   : "";
+    writeRankOrderedCSV(filename, localStr, header);
+}
 
-    // Compute displacements and total size on rank 0; all ranks supply their
-    // bytes via MPI_Gatherv.
-    std::vector<int> intSizes(numRanks, 0);
-    std::vector<int> displs(numRanks, 0);
-    std::vector<char> all;
-    if (rank == 0) {
-        long long total = 0;
-        for (int r = 0; r < numRanks; ++r) {
-            // The MPI standard limits Gatherv counts to int. Real CSV blobs
-            // never exceed INT_MAX in practice; refuse rather than silently
-            // truncate if they do.
-            if (sizes[r] > static_cast<MPI_Aint>(std::numeric_limits<int>::max())) {
-                std::cerr << "Timing::dumpToCSV: rank " << r << " has " << sizes[r]
-                          << " bytes (> INT_MAX); truncating\n";
-            }
-            intSizes[r] = static_cast<int>(std::min<MPI_Aint>(
-                sizes[r], static_cast<MPI_Aint>(std::numeric_limits<int>::max())));
-            displs[r]   = static_cast<int>(total);
-            total += intSizes[r];
-        }
-        all.resize(static_cast<size_t>(total));
+void Timing::setSampleLimit(size_t limit) {
+    sampleLimit_m = limit;
+    for (auto& timer : TimerList) {
+        timer->sampleLimit = limit;
+        std::vector<double>().swap(timer->measurements);
     }
+}
 
-    MPI_Gatherv(localStr.data(), static_cast<int>(localStr.size()), MPI_CHAR, all.data(),
-                intSizes.data(), displs.data(), MPI_CHAR, 0, ippl::Comm->getCommunicator());
+double Timing::getLastMeasurement(TimerRef t) const {
+    return t < TimerList.size() ? TimerList[t]->lastMeasurement : 0.0;
+}
 
-    if (rank == 0) {
-        std::ofstream outFile(filename);
-        if (includeHeader) {
-            outFile << "timer_name" << delimiter << "rank" << delimiter << "measurement_id"
-                    << delimiter << "duration_seconds" << "\n";
-        }
-        outFile.write(all.data(), static_cast<std::streamsize>(all.size()));
+size_t Timing::getCallCount(TimerRef t) const {
+    return t < TimerList.size() ? TimerList[t]->callCount : 0;
+}
+
+void Timing::dumpSummaryToCSV(const std::string& filename) {
+    std::ostringstream localData;
+    localData << std::setprecision(17);
+    for (const auto& timer : TimerList) {
+        const auto count = timer->callCount;
+        const double stddev =
+            count > 1 ? std::sqrt(std::max(0.0, timer->squaredDeviations / (count - 1))) : 0.0;
+        localData << timer->name << ',' << ippl::Comm->rank() << ',' << count << ','
+                  << timer->wallTime << ',' << timer->minMeasurement << ',' << timer->maxMeasurement
+                  << ',' << timer->meanMeasurement << ',' << stddev << ','
+                  << timer->measurements.size() << '\n';
     }
+    writeRankOrderedCSV(filename, localData.str(),
+                        "timer_name,rank,count,total_seconds,min_seconds,max_seconds,mean_seconds,"
+                        "stddev_seconds,stored_samples\n");
 }
 
 // print out the timing results
@@ -268,10 +330,10 @@ void Timing::print() {
     msg << "     Measurement counts:\n";
     msg << "---------------------------------------------\n";
     for (unsigned int i = 0; i < TimerList.size(); ++i) {
-        TimerInfo* tptr = TimerList[i].get();
+        TimerInfo* tptr   = TimerList[i].get();
         size_t lengthName = std::min(tptr->name.length(), 19lu);
         msg << tptr->name.substr(0, lengthName) << std::string().assign(20 - lengthName, '.')
-            << " Count = " << std::setw(10) << tptr->measurements.size() << "\n";
+            << " Count = " << std::setw(10) << tptr->callCount << "\n";
     }
 
     msg << "---------------------------------------------";
@@ -282,34 +344,20 @@ void Timing::print() {
     msg << "     Per-occurrence statistics:\n";
     msg << "---------------------------------------------\n";
     for (unsigned int i = 0; i < TimerList.size(); ++i) {
-        TimerInfo* tptr = TimerList[i].get();
-        const std::vector<double>& m = tptr->measurements;
-        size_t count = m.size();
-        if (count == 0) continue;
-
-        double sum = 0.0, minVal = m[0], maxVal = m[0];
-        for (size_t j = 0; j < count; ++j) {
-            sum += m[j];
-            if (m[j] < minVal) minVal = m[j];
-            if (m[j] > maxVal) maxVal = m[j];
-        }
-        double mean = sum / count;
-
-        double varSum = 0.0;
-        for (size_t j = 0; j < count; ++j) {
-            double diff = m[j] - mean;
-            varSum += diff * diff;
-        }
-        double stddev = (count > 1) ? std::sqrt(varSum / (count - 1)) : 0.0;
+        TimerInfo* tptr    = TimerList[i].get();
+        const size_t count = tptr->callCount;
+        if (count == 0)
+            continue;
+        const double mean   = tptr->meanMeasurement;
+        const double minVal = tptr->minMeasurement, maxVal = tptr->maxMeasurement;
+        const double stddev =
+            count > 1 ? std::sqrt(std::max(0.0, tptr->squaredDeviations / (count - 1))) : 0.0;
 
         size_t lengthName = std::min(tptr->name.length(), 19lu);
         msg << tptr->name.substr(0, lengthName) << std::string().assign(20 - lengthName, '.')
-            << " n=" << std::setw(5) << count
-            << "  mean=" << std::setw(10) << mean
-            << "  std=" << std::setw(10) << stddev
-            << "  min=" << std::setw(10) << minVal
-            << "  max=" << std::setw(10) << maxVal
-            << "\n";
+            << " n=" << std::setw(5) << count << "  mean=" << std::setw(10) << mean
+            << "  std=" << std::setw(10) << stddev << "  min=" << std::setw(10) << minVal
+            << "  max=" << std::setw(10) << maxVal << "\n";
     }
     msg << "---------------------------------------------" << endl;
 }
@@ -383,6 +431,7 @@ void IpplTimings::stash() {
 
     stashedInstance.push(instance);
     instance = new Timing();
+    instance->setSampleLimit(stashedInstance.top()->getSampleLimit());
 }
 
 void IpplTimings::pop() {

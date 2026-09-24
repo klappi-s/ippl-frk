@@ -25,6 +25,53 @@ namespace oracle = fem_oracle::d3;
 #error "FEM_ORACLE_DIM must be 1, 2 or 3"
 #endif
 
+template <typename Device, typename Points, typename Values, typename Gradients>
+void launchBasisProbe(Device device, Points points, Values values, Gradients gradients) {
+    constexpr unsigned N = Device::numElementDOFs;
+    ippl::parallel_for("oracle device basis", Kokkos::RangePolicy<>(0, points.extent(0) * N),
+        KOKKOS_LAMBDA(const ippl::RangePolicy<1>::index_array_type& index) {
+            const auto k = index[0];
+            values(k / N, k % N) = device.evaluateRefElementShapeFunction(k % N, points(k / N));
+            gradients(k / N, k % N) = device.evaluateRefElementShapeFunctionGradient(k % N, points(k / N));
+        });
+}
+
+template <typename Device, typename Handler, typename Indices, typename Mappings>
+void launchMappingProbe(Device device, Handler handler, Indices indices, Mappings mappings) {
+    constexpr unsigned N = Device::numElementDOFs;
+    ippl::parallel_for("oracle device mapping", Kokkos::RangePolicy<>(0, indices.extent(0)),
+        KOKKOS_LAMBDA(const ippl::RangePolicy<1>::index_array_type& index) {
+            const auto cell = index[0];
+            const auto global = device.getGlobalDOFIndices(handler.getElementNDIndex(cell));
+            for (unsigned i = 0; i < N; ++i) {
+                indices(cell, i) = global[i];
+                if (cell == 0) mappings(i) = handler.getElementDOFMapping(i);
+            }
+        });
+}
+
+template <typename T, unsigned D, unsigned N, unsigned Q, typename Basis, typename Gradients>
+void launchElementIntegrals(Basis basis, Gradients gradients, ippl::Vector<T, Q> weights,
+                           ippl::EvalFunctor<T, D, N> reference, ippl::EvalFunctor<T, D, N> physical,
+                           T determinant, Kokkos::View<T***> matrices) {
+    using Point = ippl::Vector<T, D>;
+    ippl::parallel_for("oracle element integrals", Kokkos::RangePolicy<>(0, N * N),
+        KOKKOS_LAMBDA(const ippl::RangePolicy<1>::index_array_type& index) {
+            const unsigned i = index[0] / N, j = index[0] % N;
+            T stiffnessRef = 0, massRef = 0, stiffnessPhysical = 0;
+            for (unsigned q = 0; q < Q; ++q) {
+                const ippl::RefShapeFunctionData<T, Point, N> shape{basis(q), gradients(q)};
+                stiffnessRef += weights[q] * reference(i, j, shape);
+                massRef += weights[q] * shape.val_q[i] * shape.val_q[j];
+                stiffnessPhysical += weights[q] * physical(i, j, shape);
+            }
+            matrices(0, i, j) = stiffnessRef;
+            matrices(1, i, j) = massRef;
+            matrices(2, i, j) = stiffnessPhysical;
+            matrices(3, i, j) = massRef * determinant;
+        });
+}
+
 template <typename Tag>
 constexpr bool matches(const fem_oracle::ReferenceCase& c) {
     return c.dimension == Tag::DIM && c.order == Tag::ORDER
@@ -276,7 +323,7 @@ TYPED_TEST(FEMReferenceOracle, DeviceBasisAndMappings) {
         using T              = typename Fixture::T;
         constexpr unsigned N = Fixture::N, D = Fixture::DIM;
         auto device      = ctx.space_m.getDeviceMirror();
-        auto handler     = ctx.space_m.getDOFHandler();
+        auto handler     = ctx.space_m.getDOFHandler().getDeviceMirror();
         const auto count = c.reference.probePoints.size() / D;
         Kokkos::View<typename Fixture::Point*> points("oracle probes", count);
         auto pointsHost = Kokkos::create_mirror_view(points);
@@ -284,35 +331,27 @@ TYPED_TEST(FEMReferenceOracle, DeviceBasisAndMappings) {
             pointsHost(i) = Fixture::point(c.reference.probePoints, i);
         Kokkos::deep_copy(points, pointsHost);
         Kokkos::View<T**> values("device basis", count, N);
+        Kokkos::View<typename Fixture::Point**> gradients("device gradients", count, N);
         Kokkos::View<std::size_t**> indices("device global mapping", ctx.space_m.numElements(), N);
         Kokkos::View<typename Fixture::Handler::DOFMapping*> mappings("device entity mapping", N);
-        ippl::parallel_for(
-            "oracle device basis", Kokkos::RangePolicy<>(0, count * N),
-            KOKKOS_LAMBDA(const auto& index) {
-                const auto k         = index[0];
-                values(k / N, k % N) = device.evaluateRefElementShapeFunction(k % N, points(k / N));
-            });
-        ippl::parallel_for(
-            "oracle device mapping", Kokkos::RangePolicy<>(0, indices.extent(0)),
-            KOKKOS_LAMBDA(const auto& index) {
-                const auto cell   = index[0];
-                const auto global = device.getGlobalDOFIndices(handler.getElementNDIndex(cell));
-                for (unsigned i = 0; i < N; ++i) {
-                    indices(cell, i) = global[i];
-                    if (cell == 0)
-                        mappings(i) = handler.getElementDOFMapping(i);
-                }
-            });
+        launchBasisProbe(device, points, values, gradients);
+        launchMappingProbe(device, handler, indices, mappings);
+        auto hostGradients = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, gradients);
         auto hostValues      = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, values);
         auto hostIndices     = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, indices);
         auto hostMappings    = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, mappings);
         constexpr auto masks = Fixture::entityMasks();
         for (std::size_t probe = 0; probe < count; ++probe)
-            for (unsigned i = 0; i < N; ++i)
+            for (unsigned i = 0; i < N; ++i) {
                 Fixture::close(hostValues(probe, i), c.reference.basisValues[probe * N + i]);
+                for (unsigned d = 0; d < D; ++d)
+                    Fixture::close(hostGradients(probe, i)[d],
+                        c.reference.basisGradients[(probe * N + i) * D + d], true);
+            }
         for (unsigned i = 0; i < N; ++i) {
             ASSERT_LT(hostMappings(i).entityTypeIndex, masks.size());
             EXPECT_EQ(masks[hostMappings(i).entityTypeIndex], c.reference.entityAxisMasks[i]);
+            EXPECT_EQ(hostMappings(i).directionMask, c.reference.entityAxisMasks[i]);
             EXPECT_EQ(hostMappings(i).entityLocalDOF, c.reference.entityOffsets[i]);
             for (unsigned d = 0; d < D; ++d)
                 EXPECT_EQ(hostMappings(i).entityLocalIndex[d],
@@ -414,22 +453,8 @@ TYPED_TEST(FEMReferenceOracle, QuadratureAndElementMatrices) {
         Kokkos::View<T***> matrices("actual element matrices", 4, N, N);
         // Integrate production basis/gradient and EvalFunctor primitives. Expected
         // matrices are the immutable DOLFINx data; no field adapter is involved.
-        ippl::parallel_for(
-            "oracle element integrals", Kokkos::RangePolicy<>(0, N * N),
-            KOKKOS_LAMBDA(const auto& index) {
-                const unsigned i = index[0] / N, j = index[0] % N;
-                T stiffnessRef = 0, massRef = 0, stiffnessPhysical = 0;
-                for (unsigned q = 0; q < Q; ++q) {
-                    const ippl::RefShapeFunctionData<T, Point, N> shape{basis(q), gradients(q)};
-                    stiffnessRef += weights[q] * reference(i, j, shape);
-                    massRef += weights[q] * shape.val_q[i] * shape.val_q[j];
-                    stiffnessPhysical += weights[q] * physical(i, j, shape);
-                }
-                matrices(0, i, j) = stiffnessRef;
-                matrices(1, i, j) = massRef;
-                matrices(2, i, j) = stiffnessPhysical;
-                matrices(3, i, j) = massRef * determinant;
-            });
+        launchElementIntegrals<T, D, N, Q>(basis, gradients, weights, reference, physical,
+                                            determinant, matrices);
         const auto actual = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, matrices);
         const std::array<fem_oracle::Reals, 4> expected{c.reference.stiffness, c.reference.mass,
                                                         c.physicalStiffness, c.physicalMass};

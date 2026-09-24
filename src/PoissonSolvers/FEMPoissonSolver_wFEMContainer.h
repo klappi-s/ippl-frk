@@ -119,14 +119,14 @@ namespace ippl {
             const auto vertices=lagrangeSpace_m.getElementMeshVertexPoints(Vector<size_t,Dim>(0));
             PoissonEval raw(refElement_m.getInverseTransposeTransformationJacobian(vertices),
                 Kokkos::abs(refElement_m.getDeterminantOfTransformationJacobian(vertices)),getStiffnessMode());
-            PreparedEval eval{raw,elementMatrix_m};
+            PreparedEval eval{raw,elementMatrix_m,deviceElementMatrix_m};
             field.setFieldBC(this->lhs_mp->getFieldBC());
             field.fillHalo();
             return lagrangeSpace_m.evaluateAx(field,eval);
         }
         void invalidatePreparedData() {
             operatorKey_m.clear(); preconditionerKey_m.clear();
-            elementMatrix_m.reset(); diagonal_m.reset(); constant_m.reset(); volumeWeights_m.reset();
+            elementMatrix_m.reset(); deviceElementMatrix_m = {}; diagonal_m.reset(); constant_m.reset(); volumeWeights_m.reset();
             cg_algo_m.clearWorkspace(); pcg_algo_m.clearWorkspace();
         }
 
@@ -135,10 +135,13 @@ namespace ippl {
         using PoissonEval=EvalFunctor<Tlhs,Dim,LagrangeType::numElementDOFs>;
         struct PreparedEval : PoissonEval {
             std::shared_ptr<const ElementMatrix> matrix;
+            typename LagrangeType::DeviceMatrix deviceMatrix;
+            auto preparedDeviceMatrix() const { return deviceMatrix; }
             const ElementMatrix* preparedMatrix() const { return matrix.get(); }
         };
         std::string operatorKey_m, preconditionerKey_m;
         std::shared_ptr<const ElementMatrix> elementMatrix_m;
+        typename LagrangeType::DeviceMatrix deviceElementMatrix_m;
         std::shared_ptr<lhs_type> diagonal_m,constant_m,volumeWeights_m;
         Tlhs constantNormSquared_m=0,volume_m=0;
         double spectralLower_m=0,spectralUpper_m=0;
@@ -285,11 +288,12 @@ namespace ippl {
             if (reuse!="off" && !elementMatrix_m) {
                 Timer timer; Kokkos::fence(); timer.start();
                 elementMatrix_m=std::make_shared<ElementMatrix>(lagrangeSpace_m.assembleElementMatrix(rawEval));
+                deviceElementMatrix_m=LagrangeType::copyElementMatrixToDevice(*elementMatrix_m);
                 Kokkos::fence(); timer.stop();
                 statistics_m.operatorSetupSeconds+=timer.elapsed();
                 statistics_m.operatorSetups=1;
             }
-            PreparedEval poissonEquationEval{rawEval,elementMatrix_m};
+            PreparedEval poissonEquationEval{rawEval,elementMatrix_m,deviceElementMatrix_m};
 
             const auto algoOperator = [poissonEquationEval, bcTypes, this](rhs_type field) -> lhs_type {
                 if (pcg_algo_m.applyingPreconditioner()) ++statistics_m.preconditionerOperatorCalls;

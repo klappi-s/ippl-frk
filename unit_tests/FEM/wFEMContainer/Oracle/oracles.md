@@ -315,3 +315,38 @@ check the complete package, publish a new version, and update IPPL's lock. Basix
 supplies basis data, DOLFINx assembles matrices/loads, and SciPy solves constrained
 systems with a DOLFINx/PETSc cross-check. IPPL supplies no expected numerical
 values. See the [regeneration guide](../README_oracles.md#recreate-the-data).
+
+## Periodic FEM and particle consumers (17 September 2026)
+
+The package contents and case ordering above are unchanged. Two additional
+consumers read **`fem-1d.bin` / `FEMOracleBindings_1D.h`**, via the existing
+`FEMOracleData1D` loader:
+
+- `FEMPeriodic`: reference stiffness and mass matrices, tensorized in the test
+  and assembled with periodic endpoint identification. Test order is
+  `P1_1D`, `P2_1D`, `P3_1D`, `P4_1D`, `P5_1D`, then the same P1–P5 sequence in
+  2D, then 3D. Each tests GLL followed by equispaced nodes on four stretched cells
+  per axis. It checks unique ownership, the constant nullspace, full/triangular/
+  diagonal actions, load weights, symmetry, solves and physical gauge on 1/2 ranks.
+- `FEMParticleCoupling`: the reference basis and gradient probe arrays, tensorized
+  for particle values/gradients and work/charge identities. Cases are P3 1D,
+  P5 1D, P3 2D and P3 3D, each with both families and 1/2-rank coverage.
+
+Periodic global coordinates use `(cell*p + local_node) mod (cells*p)` per axis,
+with x fastest. The reference tensorization uses external 1D arrays and its own
+endpoint/interior-to-coordinate permutation; it does not read IPPL's element
+matrix or DOF mapping. No periodic global matrix is stored in the package.
+
+`FEMReuse` uses known discrete loads and an analytic sinusoidal refinement test.
+`FEMPreconditionerProperties` explicitly probes projected production
+preconditioners and checks symmetry/spectrum. Those two tests consume no external
+oracle arrays and are not additional records in the headers above.
+
+## Float setup regression (22 September 2026)
+
+`FEMOperatorPrecision.FloatP4GllSetupRetainsQuadraturePrecision`, compiled into
+`FEMOperatorOracle1D`, reuses the existing `p4_1d_gll_gl5_unit` record from
+`fem-1d.bin` / `FEMOracleBindings_1D.h`. It checks impulse column 1 / row 4 first,
+then column 4 / row 1, against the raw stiffness CSR values, in both CTest stiffness
+modes and on one/two ranks. Its tighter bound protects retained host quadrature
+precision. There is no new data record, package change or regeneration requirement.

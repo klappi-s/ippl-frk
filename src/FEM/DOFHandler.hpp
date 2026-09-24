@@ -48,6 +48,18 @@ namespace ippl {
             fillNedelecDOFMappingTable(dofMappingTable_h);
         }
 
+        // Resolve host entity metadata once; device code only reads the mask.
+        std::array<unsigned, numEntityTypes> masks{};
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (([&] {
+                constexpr auto dir = std::tuple_element_t<Is, EntityTypes>::dir;
+                for (unsigned d = 0; d < Dim; ++d)
+                    if (dir[d]) masks[Is] |= 1u << d;
+            }()), ...);
+        }(std::make_index_sequence<numEntityTypes>{});
+        for (size_t i = 0; i < dofsPerElement; ++i)
+            dofMappingTable_h(i).directionMask = masks[dofMappingTable_h(i).entityTypeIndex];
+
         // Deep copy from host to device
         Kokkos::deep_copy(dofMappingTable_m, dofMappingTable_h);
     }
@@ -336,13 +348,7 @@ namespace ippl {
         // Check if this entity type can touch boundaries perpendicular to dimension 'dim'
         // An entity can only touch such boundaries if it does NOT extend in dimension 'dim'
         // We need to get entityDir[dim] for the entity type at entityTypeIndex
-        bool entityExtendsInDim = false;
-
-        // Unroll at compile time over all entity types
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((dofMap.entityTypeIndex == Is ?
-                (entityExtendsInDim = std::tuple_element_t<Is, EntityTypes>{}.getDir()[dim], true) : false), ...);
-        }(std::make_index_sequence<numEntityTypes>{});
+        const bool entityExtendsInDim = dofMap.directionMask & (1u << dim);
 
         // If entity extends in this dimension, it cannot be on a boundary perpendicular to it
         if (entityExtendsInDim) {
@@ -384,17 +390,23 @@ namespace ippl {
         unsigned localElementCount = lElemDom_m.size();
 
         Kokkos::View<size_t*> localElementIndices("localElementIndices", localElementCount);
+        indices_t first, extent;
+        for (unsigned d = 0; d < Dim; ++d) {
+            first[d] = lElemDom_m[d].first();
+            extent[d] = lElemDom_m[d].length();
+        }
+        const auto ne = ne_m;
 
         Kokkos::parallel_for(
             "ComputeLocalElementsCount", localElementCount,
-            KOKKOS_CLASS_LAMBDA(const int i) {
+            KOKKOS_LAMBDA(const int i) {
                 int idx = i;
                 indices_t ndIndex;
 
                 // Convert linear index to NDIndex within local subdomain
                 for (unsigned int d = 0; d < Dim; ++d) {
-                    const int range = lElemDom_m[d].last() - lElemDom_m[d].first() + 1;
-                    ndIndex[d] = lElemDom_m[d].first() + (idx % range);
+                    const int range = extent[d];
+                    ndIndex[d] = first[d] + (idx % range);
                     idx /= range;
                 }
 
@@ -403,7 +415,7 @@ namespace ippl {
                 size_t multiplier = 1;
                 for (unsigned int d = 0; d < Dim; ++d) {
                     elementIndex += ndIndex[d] * multiplier;
-                    multiplier *= ne_m[d];
+                    multiplier *= ne[d];
                 }
 
                 localElementIndices(i) = elementIndex;

@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <type_traits>
 
 #include "Types/Vector.h"
 
@@ -36,6 +37,9 @@ namespace ippl {
     template <typename T, unsigned NumNodes1D, typename ElementType>
     class Quadrature {
     public:
+        // Retain the generator's precision for host-side FEM setup. Public data
+        // access still defaults to T; assembly may explicitly request this type.
+        using WorkingType = std::common_type_t<T, double>;
         // the number of quadrature nodes for one dimension
         static constexpr unsigned numNodes1D = NumNodes1D;
 
@@ -83,12 +87,18 @@ namespace ippl {
          */
         Vector<T, numElementNodes> getWeightsForRefElement() const;
 
+        template <typename Scalar>
+        Vector<Scalar, numElementNodes> getWeightsForRefElementAs() const;
+
         /**
          * @brief Get the integration (quadrature) nodes for the reference element.
          *
          * @return Vector<Vector<T, Dim>, numElementNodes>
          */
         Vector<Vector<T, dim>, numElementNodes> getIntegrationNodesForRefElement() const;
+
+        template <typename Scalar>
+        Vector<Vector<Scalar, dim>, numElementNodes> getIntegrationNodesForRefElementAs() const;
 
         /**
          * @brief Get the quadrature nodes for one dimension.
@@ -121,8 +131,8 @@ namespace ippl {
     protected:
         unsigned degree_m;
         const ElementType& ref_element_m;
-        Vector<T, NumNodes1D> integration_nodes_m;
-        Vector<T, NumNodes1D> weights_m;
+        Vector<WorkingType, NumNodes1D> integration_nodes_m;
+        Vector<WorkingType, NumNodes1D> weights_m;
 
         // local domain start
         T a_m;

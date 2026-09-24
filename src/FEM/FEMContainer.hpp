@@ -5,6 +5,15 @@
 
 namespace ippl {
 
+    template <typename View, typename IndexArray, bool Divide>
+    struct FEMContainerBinaryFunctor {
+        View result, other;
+        KOKKOS_INLINE_FUNCTION void operator()(const IndexArray& index) const {
+            if constexpr (Divide) apply(result, index) = apply(result, index) / apply(other, index);
+            else apply(result, index) = apply(result, index) * apply(other, index);
+        }
+    };
+
     // Functor for FEMContainer norm computation
     // Must be defined at namespace scope for CUDA compatibility
     template <typename ViewType, typename T, std::size_t NumDOFs, typename IndexArrayType>
@@ -77,6 +86,25 @@ namespace ippl {
     FEMContainer<T, Dim, EntityTypes, DOFNums> FEMContainer<T, Dim, EntityTypes, DOFNums>::deepCopy() const {
         // Use the copy constructor which already does deep copying
         return FEMContainer<T, Dim, EntityTypes, DOFNums>(*this);
+    }
+
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    FEMContainer<T, Dim, EntityTypes, DOFNums>
+    FEMContainer<T, Dim, EntityTypes, DOFNums>::cloneStructure() const {
+        FEMContainer result;
+        result.nghost_m = nghost_m;
+        result.mesh_m = mesh_m;
+        result.VertexLayout_m = VertexLayout_m;
+        result.bcTypes_m.fill(NO_FACE);
+        // Copy layout metadata, not field values. Each field must refer to the
+        // returned container's own layout, never to a temporary's layout array.
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (([&]() {
+                result.layout_m[Is] = layout_m[Is];
+                std::get<Is>(result.data_m).initialize(*mesh_m, result.layout_m[Is], nghost_m);
+            }()), ...);
+        }(std::make_index_sequence<NEntitys>{});
+        return result;
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
@@ -263,12 +291,12 @@ namespace ippl {
             (([&]() {
                 auto r_view   = std::get<Is>(result.data_m).getView();
                 auto oth_view = std::get<Is>(other.data_m).getView();
-                Kokkos::parallel_for(
+                using Exec = typename decltype(r_view)::execution_space;
+                using Index = typename RangePolicy<Dim, Exec>::index_array_type;
+                ippl::parallel_for(
                     "FEMContainer::operator*",
                     std::get<Is>(result.data_m).getFieldRangePolicy(0),
-                    KOKKOS_LAMBDA(const auto&... idx) {
-                        r_view(idx...) = r_view(idx...) * oth_view(idx...);
-                    });
+                    FEMContainerBinaryFunctor<decltype(r_view), Index, false>{r_view, oth_view});
                 Kokkos::fence();
             }()), ...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
@@ -284,12 +312,12 @@ namespace ippl {
             (([&]() {
                 auto r_view   = std::get<Is>(result.data_m).getView();
                 auto oth_view = std::get<Is>(other.data_m).getView();
-                Kokkos::parallel_for(
+                using Exec = typename decltype(r_view)::execution_space;
+                using Index = typename RangePolicy<Dim, Exec>::index_array_type;
+                ippl::parallel_for(
                     "FEMContainer::operator/",
                     std::get<Is>(result.data_m).getFieldRangePolicy(0),
-                    KOKKOS_LAMBDA(const auto&... idx) {
-                        r_view(idx...) = r_view(idx...) / oth_view(idx...);
-                    });
+                    FEMContainerBinaryFunctor<decltype(r_view), Index, true>{r_view, oth_view});
                 Kokkos::fence();
             }()), ...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});

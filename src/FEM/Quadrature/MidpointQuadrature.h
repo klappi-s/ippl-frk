@@ -18,6 +18,7 @@ namespace ippl {
     template <typename T, unsigned NumNodes1D, typename ElementType>
     class MidpointQuadrature : public Quadrature<T, NumNodes1D, ElementType> {
     public:
+        using WorkingType = typename Quadrature<T, NumNodes1D, ElementType>::WorkingType;
         /**
          * @brief Construct a midpoint quadrature rule on [0, 1].
          *
@@ -30,11 +31,12 @@ namespace ippl {
 
         /** @brief Fill equally spaced midpoints and uniform weights on [a_m, b_m]. */
         void computeNodesAndWeights() override {
-            const T segment_length = (this->b_m - this->a_m) / NumNodes1D;
+            const WorkingType segment_length =
+                (WorkingType(this->b_m) - WorkingType(this->a_m)) / NumNodes1D;
 
-            this->weights_m = Vector<T, NumNodes1D>(segment_length);
+            this->weights_m = Vector<WorkingType, NumNodes1D>(segment_length);
 
-            this->integration_nodes_m = Vector<T, NumNodes1D>();
+            this->integration_nodes_m = Vector<WorkingType, NumNodes1D>();
             for (unsigned i = 0; i < NumNodes1D; ++i) {
                 this->integration_nodes_m[i] =
                     0.5 * segment_length + i * segment_length + this->a_m;

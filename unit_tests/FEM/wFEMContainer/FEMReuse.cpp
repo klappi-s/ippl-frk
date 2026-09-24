@@ -61,6 +61,58 @@ TEST(FEMReuse, CopiedContainerOwnsItsEntityLayouts) {
     copy->fillHalo();
     EXPECT_DOUBLE_EQ(ippl::norm(*copy - p.b), 0);
 }
+
+TEST(FEMReuse, StructureCloneHasIndependentZeroValuesAndOwnedEntityLayouts) {
+    for (unsigned cells : {8u, 16u}) {
+        Problem p(cells);
+        auto source = std::make_unique<Field>(p.x);
+        p.fill(*source);
+        const auto internal = IpplTimings::getTimer("findInternal");
+        const auto periodic = IpplTimings::getTimer("findPeriodic");
+        const auto before =
+            IpplTimings::getCallCount(internal) + IpplTimings::getCallCount(periodic);
+        auto clone = source->cloneStructure();
+        EXPECT_EQ(IpplTimings::getCallCount(internal) + IpplTimings::getCallCount(periodic),
+                  before);
+        EXPECT_DOUBLE_EQ(ippl::norm(clone), 0);
+        for (auto bc : clone.getFieldBCTypes())
+            EXPECT_EQ(bc, ippl::NO_FACE);
+        clone.setFieldBC(source->getFieldBC());
+        source.reset();
+        p.fill(clone);
+        clone.fillHalo();  // Entity layouts cannot refer to the destroyed source.
+        p.fill(p.b);
+        EXPECT_DOUBLE_EQ(ippl::norm(clone - p.b), 0);
+        clone = 0;
+        EXPECT_GT(ippl::norm(p.b), 0);
+    }
+}
+
+TEST(FEMReuse, OperatorResultsDoNotRediscoverNeighbors) {
+    Problem p;
+    p.fill(p.x);
+    const double h = p.mesh.getMeshSpacing()[0];
+    ippl::EvalFunctor<double, 1, 4> eval(ippl::Vector<double, 1>(1 / h), h,
+                                         p.solver.getStiffnessMode());
+    auto& space         = p.solver.getSpace();
+    const auto internal = IpplTimings::getTimer("findInternal");
+    const auto periodic = IpplTimings::getTimer("findPeriodic");
+    const auto before   = IpplTimings::getCallCount(internal) + IpplTimings::getCallCount(periodic);
+    for (unsigned i = 0; i < 3; ++i) {
+        auto full    = space.evaluateAx(p.x, eval);
+        auto lower   = space.evaluateAx_lower(p.x, eval);
+        auto upper   = space.evaluateAx_upper(p.x, eval);
+        auto both    = space.evaluateAx_upperlower(p.x, eval);
+        auto inverse = space.evaluateAx_inversediag(p.x, eval);
+        p.b          = p.x;
+        space.evaluateLoadVector(p.b);
+        EXPECT_TRUE(std::isfinite(ippl::norm(full)));
+        EXPECT_TRUE(std::isfinite(ippl::norm(inverse)));
+        EXPECT_TRUE(std::isfinite(ippl::norm(p.b)));
+        EXPECT_LT(ippl::norm(lower + upper - both), 1e-11);
+    }
+    EXPECT_EQ(IpplTimings::getCallCount(internal) + IpplTimings::getCallCount(periodic), before);
+}
 TEST(FEMReuse, ChangingLoadsMatchRebuildAndParametersInvalidate) {
     Problem p;
     auto load = p.makeLoad();
@@ -149,7 +201,7 @@ TEST(FEMReuse, SmoothPeriodicSourceConvergesAtFourthOrder) {
             Kokkos::deep_copy(values, host);
             p.solver.getSpace().fillFromGlobalCoefficients(p.b, values);
             p.solver.solve();
-            const auto exact = KOKKOS_LAMBDA(const ippl::Vector<double, 1>& x) {
+            const auto exact = [wave](const ippl::Vector<double, 1>& x) {
                 return Kokkos::sin(wave * x[0]);
             };
             const double error = p.solver.getL2Error(exact);

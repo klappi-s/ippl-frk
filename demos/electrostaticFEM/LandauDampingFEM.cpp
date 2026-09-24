@@ -13,6 +13,7 @@ int main(int argc, char** argv) {
                "  --interpolation_nodes gll|equispaced --tolerance 1e-10 --max_iterations 10000\n"
                "  --timer_level coarse|detailed --replay plain,jacobi,chebyshev --output "
                "DIRECTORY\n"
+               "  --timer_recording summary|raw --timer_sample_limit 1024 (per timer/rank)\n"
                "See demos/electrostaticFEM/README.md for physics and preconditioner controls.\n";
         return 0;
     }
@@ -20,6 +21,7 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         const auto config = electrostatic_fem::ExperimentConfig::parse(argc, argv);
+        IpplTimings::setSampleLimit(config.timerRecording == "raw" ? config.timerSampleLimit : 0);
         electrostatic_fem::dispatch(config);
     } catch (const std::exception& error) {
         std::cerr << "LandauDampingFEM rank " << ippl::Comm->rank() << ": " << error.what() << '\n';
