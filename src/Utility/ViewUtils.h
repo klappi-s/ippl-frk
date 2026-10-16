@@ -11,6 +11,7 @@
 #include <iostream>
 
 #include "Types/ViewTypes.h"
+#include "Types/VectorView.h"
 
 namespace ippl {
     namespace detail {
@@ -94,8 +95,8 @@ namespace ippl {
          * @param view to write
          * @param out stream
          */
-        template <typename T, unsigned Dim, class... Properties>
-        void write(const typename ViewType<T, Dim, Properties...>::view_type& view,
+        template <typename T, unsigned Dim, class... Properties, typename View>
+        void write(const View& view,
                    std::ostream& out = std::cout) {
             auto hview = Kokkos::create_mirror_view(view);
             Kokkos::deep_copy(hview, view);
@@ -149,8 +150,8 @@ namespace ippl {
          * @param view to write
          * @param out stream
          */
-        template <typename T, unsigned Dim, class... Properties>
-        void write_as_list(const typename ViewType<T, Dim, Properties...>::view_type& view,
+        template <typename T, unsigned Dim, class... Properties, typename View>
+        void write_as_list(const View& view,
                            std::ostream& out = std::cout) {
             auto hview =
                 Kokkos::create_mirror_view_and_copy(Kokkos::DefaultHostExecutionSpace(), view);

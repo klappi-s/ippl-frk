@@ -59,6 +59,7 @@ option(IPPL_MARK_FAILING_TESTS
        OFF)
 option(IPPL_ENABLE_SCRIPTS "Generate job script templates for some benchmarks/tests" OFF)
 option(IPPL_ENABLE_BENCHMARK "Enable Google Benchmark-based benchmarks" OFF)
+option(IPPL_ENABLE_VECTOR_SOA "Store vector fields and particle attributes in component planes" OFF)
 
 
 option(IPPL_ENABLE_CATALYST "Enable ParaView Catalyst" OFF)

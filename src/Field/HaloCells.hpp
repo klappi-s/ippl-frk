@@ -305,9 +305,14 @@ namespace ippl {
         auto HaloCells<T, Dim, ViewArgs...>::makeSubview(const view_type& view,
                                                          const bound_type& intersect) {
             auto makeSub = [&]<size_t... Idx>(const std::index_sequence<Idx...>&) {
-                return Kokkos::submdspan(
-                    view.to_mdspan(),
-                    Kokkos::make_pair(intersect.lo[Idx], intersect.hi[Idx])...);
+                if constexpr (Kokkos::is_view<view_type>::value) {
+                    return Kokkos::submdspan(
+                        view.to_mdspan(),
+                        Kokkos::make_pair(intersect.lo[Idx], intersect.hi[Idx])...);
+                } else {
+                    return Kokkos::subview(
+                        view, Kokkos::make_pair(intersect.lo[Idx], intersect.hi[Idx])...);
+                }
             };
             return makeSub(std::make_index_sequence<Dim>{});
         }

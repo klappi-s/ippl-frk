@@ -118,11 +118,12 @@ namespace ippl {
          *
          * @return Subview of the buffered permute array, valid until next ensureCapacity
          */
-        template <unsigned Dim, typename T>
-        Kokkos::View<size_t*, Kokkos::HostSpace> sortParticlesHost(
-            Kokkos::View<Vector<T, Dim>*, Kokkos::HostSpace> positions,
-            const Vector<T, Dim>& origin, const Vector<T, Dim>& invdx,
-            const Vector<size_t, Dim>& ngrid, size_t n) {
+        template <unsigned Dim, typename T, typename PositionView>
+        Kokkos::View<size_t*, Kokkos::HostSpace> sortParticlesHost(PositionView positions,
+                                                                   const Vector<T, Dim>& origin,
+                                                                   const Vector<T, Dim>& invdx,
+                                                                   const Vector<size_t, Dim>& ngrid,
+                                                                   size_t n) {
             auto& bufs = ippl::detail::getDefaultBinSortBuffers<Kokkos::HostSpace>();
             bufs.ensureCapacity(n, /*n_bins_p1=*/1);
 
@@ -149,11 +150,12 @@ namespace ippl {
          *
          * @return Subview of the buffered permOut array containing sorted particle indices
          */
-        template <unsigned Dim, typename T>
-        Kokkos::View<size_t*, Kokkos::CudaSpace> sortParticlesCuda(
-            Kokkos::View<Vector<T, Dim>*, Kokkos::CudaSpace> positions,
-            const Vector<T, Dim>& origin, const Vector<T, Dim>& invdx,
-            const Vector<size_t, Dim>& ngrid, size_t n) {
+        template <unsigned Dim, typename T, typename PositionView>
+        Kokkos::View<size_t*, Kokkos::CudaSpace> sortParticlesCuda(PositionView positions,
+                                                                   const Vector<T, Dim>& origin,
+                                                                   const Vector<T, Dim>& invdx,
+                                                                   const Vector<size_t, Dim>& ngrid,
+                                                                   size_t n) {
             using size_type = size_t;
             auto& bufs      = ippl::detail::getDefaultBinSortBuffers<Kokkos::CudaSpace>();
             bufs.ensureCapacity(n, /*n_bins_p1=*/1);
@@ -197,10 +199,12 @@ namespace ippl {
          *
          * @return Subview of the buffered permOut array containing sorted particle indices
          */
-        template <unsigned Dim, typename T>
-        Kokkos::View<size_t*, Kokkos::HIPSpace> sortParticlesHip(
-            Kokkos::View<Vector<T, Dim>*, Kokkos::HIPSpace> positions, const Vector<T, Dim>& origin,
-            const Vector<T, Dim>& invdx, const Vector<size_t, Dim>& ngrid, size_t n) {
+        template <unsigned Dim, typename T, typename PositionView>
+        Kokkos::View<size_t*, Kokkos::HIPSpace> sortParticlesHip(PositionView positions,
+                                                                 const Vector<T, Dim>& origin,
+                                                                 const Vector<T, Dim>& invdx,
+                                                                 const Vector<size_t, Dim>& ngrid,
+                                                                 size_t n) {
             using size_type = size_t;
             auto& bufs      = ippl::detail::getDefaultBinSortBuffers<Kokkos::HIPSpace>();
             bufs.ensureCapacity(n, /*n_bins_p1=*/1);
@@ -240,10 +244,9 @@ namespace ippl {
         /**
          * @brief Generic sort dispatcher — selects CUDA/HIP/host implementation
          */
-        template <unsigned Dim, typename ExecSpace, typename T>
+        template <unsigned Dim, typename ExecSpace, typename T, typename PositionView>
         Kokkos::View<size_t*, typename ExecSpace::memory_space> sortParticles(
-            Kokkos::View<Vector<T, Dim>*, typename ExecSpace::memory_space> positions,
-            const Vector<T, Dim>& origin, const Vector<T, Dim>& invdx,
+            PositionView positions, const Vector<T, Dim>& origin, const Vector<T, Dim>& invdx,
             const Vector<size_t, Dim>& ngrid, size_t n) {
             using memory_space = typename ExecSpace::memory_space;
 

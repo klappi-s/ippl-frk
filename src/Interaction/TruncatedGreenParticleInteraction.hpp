@@ -88,7 +88,9 @@ namespace ippl {
 
                 // add force to particle i, don't do it for j as the ranges of i and j are
                 // asymmetric
-                Kokkos::atomic_sub(&Field(i), F_ij);
+                for (unsigned d = 0; d < Vector_t::dim; ++d) {
+                    Kokkos::atomic_sub(&Field(i)[d], F_ij[d]);
+                }
             });
         IpplTimings::stopTimer(solveTimer);
     }

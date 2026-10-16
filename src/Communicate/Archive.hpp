@@ -41,17 +41,18 @@ namespace ippl {
             }
         };
 
-        template <typename T, unsigned Dim, typename HashView, typename BufferPtr>
+        template <typename View, typename HashView, typename BufferPtr>
         struct SerializeHashVectorFunctor {
-            const Vector<T, Dim>* view_data;
+            using T                       = typename View::value_type::value_type;
+            static constexpr unsigned Dim = View::value_type::dim;
+            View view;
             HashView hash;
             BufferPtr buf;
             size_t elem_size;
             size_t wpos;
 
             KOKKOS_INLINE_FUNCTION void operator()(const size_t i, const size_t d) const {
-                const Vector<T, Dim>* vec = view_data + hash(i);
-                const T value             = (*vec)[d];
+                const T value             = view(hash(i))[d];
                 const char* src           = reinterpret_cast<const char*>(&value);
                 char* dst                 = buf + (Dim * i + d) * elem_size + wpos;
                 copyBytes(dst, src, elem_size);
@@ -190,6 +191,7 @@ namespace ippl {
 
         template <class... Properties>
         template <typename T, class... ViewArgs>
+            requires(!is_vector_v<T>)
         void Archive<Properties...>::serialize(const Kokkos::View<T*, ViewArgs...>& view,
                                                size_type nsends) {
             using exec_space  = typename Kokkos::View<T*, ViewArgs...>::execution_space;
@@ -216,6 +218,7 @@ namespace ippl {
 
         template <class... Properties>
         template <typename T, class... ViewArgs, typename HashView>
+            requires(!is_vector_v<T>)
         void Archive<Properties...>::serialize(const Kokkos::View<T*, ViewArgs...>& view,
                                                const HashView& hash, size_type nsends) {
             using exec_space  = HashView::execution_space;
@@ -235,10 +238,13 @@ namespace ippl {
         // =================================================================
 
         template <class... Properties>
-        template <typename T, unsigned Dim, class... ViewArgs>
-        void Archive<Properties...>::serialize(
-            const Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view, size_type nsends) {
-            using exec_space = typename Kokkos::View<T*, ViewArgs...>::execution_space;
+        template <typename View>
+            requires(is_vector_v<typename View::value_type>)
+        void Archive<Properties...>::serialize(const View& view, size_type nsends) {
+            static_assert(View::rank == 1);
+            using T                = typename View::value_type::value_type;
+            constexpr unsigned Dim = View::value_type::dim;
+            using exec_space       = typename View::execution_space;
 
             size_t size    = sizeof(T);
             auto base      = bufferData();
@@ -255,7 +261,7 @@ namespace ippl {
                 // to avoid compiler warnings
                 mdrange_t({0, 0}, {(long int)nsends, Dim}),
                 KOKKOS_LAMBDA(const size_type i, const size_t d) {
-                    const T value   = view.data()[i][d];
+                    const T value   = view(i)[d];
                     const char* src = reinterpret_cast<const char*>(&value);
                     char* dst       = base + (Dim * i + d) * size + writepos;
                     copyBytes(dst, src, size);
@@ -269,18 +275,21 @@ namespace ippl {
         // =================================================================
 
         template <class... Properties>
-        template <typename T, unsigned Dim, class... ViewArgs, typename HashView>
-        void Archive<Properties...>::serialize(
-            const Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view, const HashView& hash,
-            size_type nsends) {
+        template <typename View, typename HashView>
+            requires(is_vector_v<typename View::value_type>)
+        void Archive<Properties...>::serialize(const View& view, const HashView& hash,
+                                               size_type nsends) {
+            static_assert(View::rank == 1);
+            using T                = typename View::value_type::value_type;
+            constexpr unsigned Dim = View::value_type::dim;
             using exec_space = typename HashView::execution_space;
             size_t size      = sizeof(T);
             using BufferPtr  = pointer_type;
             using mdrange_t =
                 Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<size_type>, exec_space>;
 
-            SerializeHashVectorFunctor<T, Dim, HashView, BufferPtr> f{
-                view.data(), hash, bufferData(), size, writepos_m};
+            SerializeHashVectorFunctor<View, HashView, BufferPtr> f{view, hash, bufferData(), size,
+                                                                    writepos_m};
 
             Kokkos::parallel_for("Archive::serialize(hash, vector)",
                                  mdrange_t({0, 0}, {(long int)nsends, Dim}), f);
@@ -294,6 +303,7 @@ namespace ippl {
 
         template <class... Properties>
         template <typename T, class... ViewArgs>
+            requires(!is_vector_v<T>)
         void Archive<Properties...>::deserialize(Kokkos::View<T*, ViewArgs...>& view,
                                                  size_type nrecvs) {
             using exec_space  = typename Kokkos::View<T*, ViewArgs...>::execution_space;
@@ -325,10 +335,13 @@ namespace ippl {
         // =================================================================
 
         template <class... Properties>
-        template <typename T, unsigned Dim, class... ViewArgs>
-        void Archive<Properties...>::deserialize(Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view,
-                                                 size_type nrecvs) {
-            using exec_space = typename Kokkos::View<T*, ViewArgs...>::execution_space;
+        template <typename View>
+            requires(is_vector_v<typename View::value_type>)
+        void Archive<Properties...>::deserialize(View& view, size_type nrecvs) {
+            static_assert(View::rank == 1);
+            using T                = typename View::value_type::value_type;
+            constexpr unsigned Dim = View::value_type::dim;
+            using exec_space       = typename View::execution_space;
 
             size_t size = sizeof(T);
             if (nrecvs > view.extent(0)) {
@@ -342,7 +355,7 @@ namespace ippl {
                 "Archive::deserialize()", mdrange_t({0, 0}, {(long int)nrecvs, Dim}),
                 KOKKOS_LAMBDA(const size_type i, const size_t d) {
                     const char* src = base + (Dim * i + d) * size + readpos;
-                    char* dst       = reinterpret_cast<char*>(&view.data()[i](d));
+                    char* dst       = reinterpret_cast<char*>(&view(i)[d]);
                     copyBytes(dst, src, size);
                 });
             Kokkos::fence();
@@ -355,6 +368,7 @@ namespace ippl {
 
         template <class... Properties>
         template <typename T, class... ViewArgs>
+            requires(!is_vector_v<T>)
         void Archive<Properties...>::deserialize(Kokkos::View<T*, ViewArgs...>& view,
                                                  size_type offset, size_type nrecvs) {
             using exec_space  = typename Kokkos::View<T*, ViewArgs...>::execution_space;
@@ -381,10 +395,13 @@ namespace ippl {
         // =================================================================
 
         template <class... Properties>
-        template <typename T, unsigned Dim, class... ViewArgs>
-        void Archive<Properties...>::deserialize(Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view,
-                                                 size_type offset, size_type nrecvs) {
-            using exec_space = typename Kokkos::View<T*, ViewArgs...>::execution_space;
+        template <typename View>
+            requires(is_vector_v<typename View::value_type>)
+        void Archive<Properties...>::deserialize(View& view, size_type offset, size_type nrecvs) {
+            static_assert(View::rank == 1);
+            using T                = typename View::value_type::value_type;
+            constexpr unsigned Dim = View::value_type::dim;
+            using exec_space       = typename View::execution_space;
             size_t size      = sizeof(T);
             if (offset + nrecvs > view.extent(0)) {
                 Kokkos::resize(view, offset + nrecvs);
@@ -397,7 +414,7 @@ namespace ippl {
                 "Archive::deserialize(offset, vector)", mdrange_t({0, 0}, {(long int)nrecvs, Dim}),
                 KOKKOS_LAMBDA(const size_type i, const size_t d) {
                     const char* src = base + (Dim * i + d) * size + readpos;
-                    char* dst = reinterpret_cast<char*>(&view.data()[offset + i](d));
+                    char* dst       = reinterpret_cast<char*>(&view(offset + i)[d]);
                     copyBytes(dst, src, size);
                 });
             Kokkos::fence();

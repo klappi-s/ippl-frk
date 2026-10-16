@@ -8,7 +8,8 @@
 #include <array>
 
 #include "Types/IpplTypes.h"
-#include "Types/ViewTypes.h"
+
+#include "Types/VectorView.h"
 
 #include "Communicate/Archive.h"
 #include "FieldLayout/FieldLayout.h"
@@ -21,7 +22,7 @@ namespace ippl {
          */
         template <typename T, class... ViewArgs>
         struct FieldBufferData {
-            using view_type    = typename detail::ViewType<T, 1, ViewArgs...>::view_type;
+            using view_type    = Kokkos::View<T*, ViewArgs...>;
             using archive_type = Archive<typename view_type::memory_space>;
 
             void serialize(archive_type& ar, size_type nsends) { ar.serialize(buffer, nsends); }
@@ -38,7 +39,7 @@ namespace ippl {
         template <typename T, unsigned Dim, class... ViewArgs>
         class HaloCells {
         public:
-            using view_type       = typename detail::ViewType<T, Dim, ViewArgs...>::view_type;
+            using view_type = typename detail::ViewType<T, Dim, ViewArgs...>::view_type;
             using Layout_t        = FieldLayout<Dim>;
             using bound_type      = typename Layout_t::bound_type;
             using databuffer_type = FieldBufferData<T, ViewArgs...>;
@@ -101,7 +102,10 @@ namespace ippl {
              * This operator is used in case of INTERNAL_TO_HALO.
              */
             struct assign {
-                KOKKOS_INLINE_FUNCTION void operator()(T& lhs, const T& rhs) const { lhs = rhs; }
+                template <typename L, typename R>
+                KOKKOS_INLINE_FUNCTION void operator()(L&& lhs, R&& rhs) const {
+                    lhs = rhs;
+                }
             };
 
             /*!
@@ -109,7 +113,10 @@ namespace ippl {
              * This operator is used in case of HALO_TO_INTERNAL.
              */
             struct lhs_plus_assign {
-                KOKKOS_INLINE_FUNCTION void operator()(T& lhs, const T& rhs) const { lhs += rhs; }
+                template <typename L, typename R>
+                KOKKOS_INLINE_FUNCTION void operator()(L&& lhs, R&& rhs) const {
+                    lhs += rhs;
+                }
             };
 
             /*!
@@ -117,7 +124,10 @@ namespace ippl {
              * all periodic BCs application in BareField.
              */
             struct rhs_plus_assign {
-                KOKKOS_INLINE_FUNCTION void operator()(const T& lhs, T& rhs) const { rhs += lhs; }
+                template <typename L, typename R>
+                KOKKOS_INLINE_FUNCTION void operator()(L&& lhs, R&& rhs) const {
+                    rhs += lhs;
+                }
             };
 
             /*!

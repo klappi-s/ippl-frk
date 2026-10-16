@@ -2,6 +2,7 @@
 #include "Stream/InSitu/CatalystAdaptor.h"
 
 #include "Ippl.h"
+#include "Stream/ConduitVector.h"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -259,12 +260,8 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
         }
 
         const auto& fullDeviceView = field->getView(); // original view
-        using DeviceView_t = typename Field<T, Dim, ViewArgs...>::view_type;
-        using HostView_t = Kokkos::View<
-            typename DeviceView_t::data_type,
-            Kokkos::LayoutLeft,  
-            Kokkos::HostSpace
-        >;
+        using HostView_t = typename detail::ViewType<
+            T, Dim, Kokkos::LayoutLeft, Kokkos::HostSpace>::view_type;
 
         auto makeHostView = [&](const char* viewLabel) -> HostView_t {
             if constexpr (Dim == 1) {
@@ -546,14 +543,7 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
          
         HostView_t hostMirrorFinal = (useGhostMasks_m) ? getHostMirrorView_withGhosts() : getHostMirrorView_noGhosts();
             /* FOR BOTH CASES FINAL NODE SETTINGS ARE DONE AND WE HAVE THE DATA INSIDE hostMirrorFinal */
-        using elem_t = std::remove_pointer_t<decltype(hostMirrorFinal.data())>;
-            // will return size of vector and amounts of vectors (not size of multiple doubles)
         const auto n_elems = hostMirrorFinal.size();
-            // Use true element size as stride (handles padding)
-        static constexpr size_t stride_bytes = sizeof(elem_t);
-            // offset is zero?? guaranteed?
-        const size_t offset = 0;
-
 
         field_node["association"].set_string("element"); //associate_m);
         field_node["topology"].set_string("fmesh_topo");
@@ -562,28 +552,7 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
             // --- SCALAR FIELD CASE ---
             field_node["values"].set_external(hostMirrorFinal.data(), n_elems);
         } else if constexpr (is_vector_v<T>) {
-            // --- VECTOR FIELD CASE ---
-            if (n_elems > 0) {
-                field_node["values/x"].set_external(&hostMirrorFinal.data()[0][0], n_elems,
-                                                    offset, stride_bytes);
-                if constexpr (T::dim >= 2) {
-                    field_node["values/y"].set_external(&hostMirrorFinal.data()[0][1], n_elems,
-                                                        offset, stride_bytes);
-                }
-                if constexpr (T::dim >= 3) {
-                    field_node["values/z"].set_external(&hostMirrorFinal.data()[0][2], n_elems,
-                                                        offset, stride_bytes);
-                }
-            } else {
-                using component_type = typename T::value_type;
-                field_node["values/x"].set_external(static_cast<component_type*>(nullptr), 0);
-                if constexpr (T::dim >= 2) {
-                    field_node["values/y"].set_external(static_cast<component_type*>(nullptr), 0);
-                }
-                if constexpr (T::dim >= 3) {
-                    field_node["values/z"].set_external(static_cast<component_type*>(nullptr), 0);
-                }
-            }
+            detail::setConduitVectorValues(field_node["values"], hostMirrorFinal, n_elems);
         } 
         // else {
             // --- INVALID CASE ---
@@ -698,8 +667,7 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
         using PLayout_t = T::Layout_t;
         // using vector_t = T::Layout_t::vector_type;
         // using value_t  = T::Layout_t::value_type;
-        using R_elem_t = std::remove_pointer_t<decltype(R_hostMirror.data())>; //avoids padding etc  (?) Rattrib_t
-        static constexpr size_t R_stride_bytes = sizeof(R_elem_t);
+
 
         /* checks if playput it spatial or pure layout */
         if constexpr (has_getRegionLayout_v<PLayout_t>){
@@ -797,43 +765,9 @@ void CatalystAdaptor::ExecVizChannel(const T& entry, const std::string label)
         static_assert(ParticleDim >= 1 && ParticleDim <= 3,
                       "Catalyst visualization supports particles with one to three dimensions");
 
-        if (localNum > 0)
-        {   
-            /* COORDINATE DEFINITION... */
-            data["coordsets/p_explicit_coords/values/x"].set_external(&R_hostMirror.data()[0][0], particleContainer->getLocalNum(), 0, R_stride_bytes);
-            if constexpr (ParticleDim >= 2) {
-                data["coordsets/p_explicit_coords/values/y"].set_external(&R_hostMirror.data()[0][1], particleContainer->getLocalNum(), 0, R_stride_bytes);
-            }
-            if constexpr (ParticleDim >= 3) {
-                data["coordsets/p_explicit_coords/values/z"].set_external(&R_hostMirror.data()[0][2], particleContainer->getLocalNum(), 0, R_stride_bytes);
-            }
-            
-            /* POSITION ATTRIBUTE */
-            R_field["values/x"].set_external(&R_hostMirror.data()[0][0], particleContainer->getLocalNum(), 0, R_stride_bytes);
-            if constexpr (ParticleDim >= 2) {
-                R_field["values/y"].set_external(&R_hostMirror.data()[0][1], particleContainer->getLocalNum(), 0, R_stride_bytes);
-            }
-            if constexpr (ParticleDim >= 3) {
-                R_field["values/z"].set_external(&R_hostMirror.data()[0][2], particleContainer->getLocalNum(), 0, R_stride_bytes);
-            }
-            
-            /* concept for no copy in situ vis would be */
-            //mesh["topologies/p_unstructured_topo/elements/connectivity"].set_external(particleContainer->ID.getView().data(),particleContainer->getLocalNum());
-        }else 
-        {
-            // In case a rank has no particles-> data()[0] is nulllptr dereferencing !!!!!
-            using component_type = typename R_elem_t::value_type;
-            data["coordsets/p_explicit_coords/values/x"].set_external(static_cast<component_type*>(nullptr), 0);
-            R_field["values/x"].set_external(static_cast<component_type*>(nullptr), 0);
-            if constexpr (ParticleDim >= 2) {
-                data["coordsets/p_explicit_coords/values/y"].set_external(static_cast<component_type*>(nullptr), 0);
-                R_field["values/y"].set_external(static_cast<component_type*>(nullptr), 0);
-            }
-            if constexpr (ParticleDim >= 3) {
-                data["coordsets/p_explicit_coords/values/z"].set_external(static_cast<component_type*>(nullptr), 0);
-                R_field["values/z"].set_external(static_cast<component_type*>(nullptr), 0);
-            }
-        }
+        detail::setConduitVectorValues(data["coordsets/p_explicit_coords/values"],
+                                       R_hostMirror, localNum);
+        detail::setConduitVectorValues(R_field["values"], R_hostMirror, localNum);
 
         // Attribute containers are grouped by memory space, so their global ordinal is not
         // stable. Identify ParticleBase's built-ins by object identity instead.

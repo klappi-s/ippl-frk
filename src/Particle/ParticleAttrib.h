@@ -18,6 +18,8 @@
 
 #include <cstring>
 
+#include "Types/VectorView.h"
+
 #include "Expression/IpplExpressions.h"
 
 #ifdef IPPL_ENABLE_FFT
@@ -31,10 +33,11 @@ namespace ippl {
 
     // ParticleAttrib class definition
     template <typename T, class... Properties>
-    class ParticleAttrib : public detail::ParticleAttribBase<>::with_properties<Properties...>,
-                           public detail::Expression<
-                               ParticleAttrib<T, Properties...>,
-                               sizeof(typename detail::ViewType<T, 1, Properties...>::view_type)> {
+    class ParticleAttrib
+        : public detail::ParticleAttribBase<>::with_properties<Properties...>,
+          public detail::Expression<
+              ParticleAttrib<T, Properties...>,
+              sizeof(typename detail::ViewType<T, 1, Properties...>::view_type)> {
     public:
         typedef T value_type;
         constexpr static unsigned dim = 1;
@@ -130,7 +133,9 @@ namespace ippl {
             }
         }
 
-        KOKKOS_INLINE_FUNCTION T& operator()(const size_t i) const { return dview_m(i); }
+        KOKKOS_INLINE_FUNCTION decltype(auto) operator()(const size_t i) const {
+            return dview_m(i);
+        }
 
         /*!
          * Returns a subview of the underlying storage covering only the live

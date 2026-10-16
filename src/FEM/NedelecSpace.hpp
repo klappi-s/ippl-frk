@@ -872,7 +872,7 @@ namespace ippl {
         // Get field data and make it atomic,
         // since it will be added to during the kokkos loop
         AtomicViewType atomic_view = resultVector.getView();
-        typename detail::ViewType<point_t, 1>::view_type view = f.getView(); 
+        auto view = f.getView();
 
         using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
         using policy_type = Kokkos::RangePolicy<exec_space>;

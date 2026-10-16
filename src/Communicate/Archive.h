@@ -19,12 +19,12 @@
 #ifndef IPPL_ARCHIVE_H
 #define IPPL_ARCHIVE_H
 
-#include "Types/IpplTypes.h"
-#include "Types/ViewTypes.h"
-
 #include <type_traits>
 
+#include "Types/IpplTypes.h"
+
 #include "Types/Vector.h"
+#include "Types/VectorView.h"
 
 namespace ippl {
     namespace detail {
@@ -49,9 +49,11 @@ namespace ippl {
              * @param view to take data from.
              */
             template <typename T, class... ViewArgs>
+                requires(!is_vector_v<T>)
             void serialize(const Kokkos::View<T*, ViewArgs...>& view, size_type nsends);
 
             template <typename T, class... ViewArgs, typename HashView>
+                requires(!is_vector_v<T>)
             void serialize(const Kokkos::View<T*, ViewArgs...>& view, const HashView& hash,
                            size_type nsends);
 
@@ -63,28 +65,30 @@ namespace ippl {
              *
              * @param view to take data from.
              */
-            template <typename T, unsigned Dim, class... ViewArgs>
-            void serialize(const Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view,
-                           size_type nsends);
+            template <typename View>
+                requires(is_vector_v<typename View::value_type>)
+            void serialize(const View& view, size_type nsends);
 
-            template <typename T, unsigned Dim, class... ViewArgs, typename HashView>
-            void serialize(const Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view,
-                           const HashView& hash, size_type nsends);
+            template <typename View, typename HashView>
+                requires(is_vector_v<typename View::value_type>)
+            void serialize(const View& view, const HashView& hash, size_type nsends);
 
             /*!
              * Deserialize.
              * @param view to put data to
              */
             template <typename T, class... ViewArgs>
+                requires(!is_vector_v<T>)
             void deserialize(Kokkos::View<T*, ViewArgs...>& view, size_type nrecvs);
 
             template <typename T, class... ViewArgs>
+                requires(!is_vector_v<T>)
             void deserialize(Kokkos::View<T*, ViewArgs...>& view, size_type offset,
                              size_type nrecvs);
 
-            template <typename T, unsigned Dim, class... ViewArgs>
-            void deserialize(Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view, size_type offset,
-                             size_type nrecvs);
+            template <typename View>
+                requires(is_vector_v<typename View::value_type>)
+            void deserialize(View& view, size_type offset, size_type nrecvs);
 
             /*!
              * Deserialize vector attributes
@@ -94,8 +98,9 @@ namespace ippl {
              *
              * @param view to put data to
              */
-            template <typename T, unsigned Dim, class... ViewArgs>
-            void deserialize(Kokkos::View<Vector<T, Dim>*, ViewArgs...>& view, size_type nrecvs);
+            template <typename View>
+                requires(is_vector_v<typename View::value_type>)
+            void deserialize(View& view, size_type nrecvs);
 
             /*!
              * @returns a pointer to the data of the buffer.

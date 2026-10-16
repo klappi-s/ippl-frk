@@ -36,6 +36,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/IpplVersions.h.in
 add_library(ippl)
 
 target_compile_features(ippl PUBLIC cxx_std_20)
+target_compile_definitions(ippl PUBLIC $<$<BOOL:${IPPL_ENABLE_VECTOR_SOA}>:IPPL_ENABLE_VECTOR_SOA>)
 
 target_compile_options(
   ippl

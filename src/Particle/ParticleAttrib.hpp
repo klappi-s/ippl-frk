@@ -28,6 +28,10 @@
 #include "FFT/FFT.h"
 #endif
 #include "Particle/ParticleSort.h"
+
+#ifdef IPPL_ENABLE_CATALYST
+#include "Stream/ConduitVector.h"
+#endif
 #include "Particle/SortBuffer.h"
 
 namespace ippl {
@@ -568,31 +572,6 @@ namespace ippl {
 
 #ifdef IPPL_ENABLE_CATALYST
 
-    namespace detail {
-        /// Helper to map a pointer to a Conduit-bitwidth-compatible pointer type.
-        /// The Catalyst Conduit C++ wrapper exposes set_external() overloads for
-        /// C-native and Conduit bitwidth types, but not for long long on platforms
-        /// where Conduit's int64 is implemented as long.  Reinterpreting to the
-        /// matching bitwidth type is safe because the sizes and alignments match.
-        template <typename T>
-        auto conduitCompatiblePtr(T* ptr) {
-            if constexpr (std::is_same_v<T, long long>) {
-                static_assert(sizeof(T) == sizeof(conduit_int64),
-                              "long long size must match conduit_int64");
-                static_assert(alignof(T) == alignof(conduit_int64),
-                              "long long alignment must match conduit_int64");
-                return reinterpret_cast<conduit_int64*>(ptr);
-            } else if constexpr (std::is_same_v<T, unsigned long long>) {
-                static_assert(sizeof(T) == sizeof(conduit_uint64),
-                              "unsigned long long size must match conduit_uint64");
-                static_assert(alignof(T) == alignof(conduit_uint64),
-                              "unsigned long long alignment must match conduit_uint64");
-                return reinterpret_cast<conduit_uint64*>(ptr);
-            } else {
-                return ptr;
-            }
-        }
-    }  // namespace detail
 
     //////////////////////////////////////////////////////////////////////////////////////
     // Note:
@@ -635,36 +614,7 @@ namespace ippl {
                  << typeid(typename T::value_type).name() << "," << T::dim
                  << ">>::signConduitBlueprintNode()" << endl;
 
-            using elem_t              = std::remove_pointer_t<decltype(hostMirror.data())>;
-            const size_t stride_bytes = sizeof(elem_t);
-            // static constexpr size_t stride_bytes = sizeof(elem_t);
-
-            if (Np_local > 0) {
-                field["values/x"].set_external(
-                    detail::conduitCompatiblePtr(&hostMirror.data()[0][0]), Np_local, 0,
-                    stride_bytes);
-                if constexpr (T::dim >= 2) {
-                    field["values/y"].set_external(
-                        detail::conduitCompatiblePtr(&hostMirror.data()[0][1]), Np_local, 0,
-                        stride_bytes);
-                }
-                if constexpr (T::dim >= 3) {
-                    field["values/z"].set_external(
-                        detail::conduitCompatiblePtr(&hostMirror.data()[0][2]), Np_local, 0,
-                        stride_bytes);
-                }
-            } else /* (Np_local=0) */ {
-                // If Np_local is 0. We MUST provide valid, empty arrays for the gather to work.
-                using component_type = typename T::value_type;
-                field["values/x"].set_external(
-                    detail::conduitCompatiblePtr(static_cast<component_type*>(nullptr)), 0);
-                if constexpr (T::dim >= 2)
-                    field["values/y"].set_external(
-                        detail::conduitCompatiblePtr(static_cast<component_type*>(nullptr)), 0);
-                if constexpr (T::dim >= 3)
-                    field["values/z"].set_external(
-                        detail::conduitCompatiblePtr(static_cast<component_type*>(nullptr)), 0);
-            }
+            detail::setConduitVectorValues(field["values"], hostMirror, Np_local);
         } else {
             // --- INVALID CASE ---
             ca_warn << "::Execute()excute_entry() for attribute:" << this->name_m << endl

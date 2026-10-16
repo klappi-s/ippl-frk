@@ -202,7 +202,8 @@ namespace ippl {
         template <template <typename...> class Type, typename View>
         struct CreateUniformType {
             using view_type = typename View::uniform_type;
-            using type      = typename Forward<Type, view_type>::type;
+            using type = Type<typename view_type::array_layout, typename view_type::device_type,
+                              typename view_type::memory_traits>;
         };
 
         /*!

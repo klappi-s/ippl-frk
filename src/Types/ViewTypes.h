@@ -50,4 +50,7 @@ namespace ippl {
     }  // namespace detail
 }  // namespace ippl
 
+// Complete the vector storage specialization and its Kokkos adapter overloads.
+#include "Types/VectorView.h"
+
 #endif

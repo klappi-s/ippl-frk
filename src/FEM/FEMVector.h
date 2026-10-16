@@ -31,7 +31,7 @@ namespace ippl {
     template <typename T>
     class FEMVector : public detail::Expression<
                         FEMVector<T>,
-                        sizeof(typename detail::ViewType<T, 1>::view_type)>{
+                        sizeof(Kokkos::View<T*>)>{
     public:
         /**
          * @brief Dummy parameter in order for the \p detail::Expression defined

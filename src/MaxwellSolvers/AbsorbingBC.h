@@ -107,7 +107,7 @@ struct second_order_abc_face {
         // The main axis is the one that is normal to the face, so we need to apply the boundary
         // condition in the direction of the main axis, this means we need to offset the coordinates
         // by the sign of the main axis
-        return advanceBoundaryS(
+        return advanceBoundaryS<typename view_type::value_type>(
             A_nm1(i, j, k), A_n(i, j, k), apply(A_nm1, c + mainaxis_off),
             apply(A_n, c + mainaxis_off), apply(A_np1, c + mainaxis_off),
             apply(A_n, c + side_axis1_onehot + mainaxis_off),
@@ -237,7 +237,8 @@ struct second_order_abc_edge {
         ippl::Vector<uint32_t, 3> axisp{edge_axis == 0, edge_axis == 1, edge_axis == 2};
 
         // Apply the boundary condition
-        return advanceEdgeS(A_n(i, j, k), A_nm1(i, j, k), apply(A_np1, acc1), apply(A_n, acc1),
+        return advanceEdgeS<typename view_type::value_type>(
+                            A_n(i, j, k), A_nm1(i, j, k), apply(A_np1, acc1), apply(A_n, acc1),
                             apply(A_nm1, acc1), apply(A_np1, acc2), apply(A_n, acc2),
                             apply(A_nm1, acc2), apply(A_np1, acc3), apply(A_n, acc3),
                             apply(A_nm1, acc3), apply(A_n, acc0 - axisp), apply(A_n, acc1 - axisp),
@@ -358,7 +359,7 @@ struct second_order_abc_corner {
         };
 
         // Apply the boundary condition
-        return advanceCornerS(
+        return advanceCornerS<typename view_type::value_type>(
             apply(A_n, c), apply(A_nm1, c), apply(A_np1, c + offsets[1]),
             apply(A_n, c + offsets[1]), apply(A_nm1, c + offsets[1]), apply(A_np1, c + offsets[2]),
             apply(A_n, c + offsets[2]), apply(A_nm1, c + offsets[2]), apply(A_np1, c + offsets[3]),
