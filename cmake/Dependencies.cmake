@@ -28,6 +28,12 @@ include(FetchContent)
 find_package(MPI COMPONENTS CXX REQUIRED)
 colour_message(STATUS ${Green} "✅ MPI found ${MPI_CXX_VERSION}")
 
+if(IPPL_ENABLE_OPENPMD)
+  # The MPI/HDF5 package performs C-language dependency checks.
+  enable_language(C)
+  find_package(openPMD 0.17.1 CONFIG REQUIRED COMPONENTS MPI HDF5)
+endif()
+
 # ------------------------------------------------------------------------------
 # CUDA
 # ------------------------------------------------------------------------------

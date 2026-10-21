@@ -3,6 +3,16 @@
 include(CMakeFindDependencyMacro)
 find_dependency(MPI COMPONENTS CXX)
 
+if(@IPPL_ENABLE_OPENPMD@)
+  if(NOT CMAKE_C_COMPILER_LOADED)
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+        "IPPL's openPMD/HDF5 dependency requires project(... LANGUAGES C CXX).")
+    return()
+  endif()
+  find_dependency(openPMD 0.17.1 CONFIG COMPONENTS MPI HDF5)
+endif()
+
 # Source-built dependencies export packages in their build directories. Installed
 # dependencies should be found relative to this package, including relocated installs.
 set(_ipplPrefix "${PACKAGE_PREFIX_DIR}")
