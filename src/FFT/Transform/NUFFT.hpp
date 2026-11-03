@@ -382,10 +382,15 @@ namespace ippl {
     //=========================================================================
 
     template <typename RealField>
-    template <class... Properties>
+    template <class... Properties, class... PositionProperties>
     void FFT<NUFFTransform, RealField>::transform(
-        const ParticleAttrib<Vector<T, Dim>, Properties...>& R, ParticleAttrib<T, Properties...>& Q,
+        const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R, ParticleAttrib<T, Properties...>& Q,
         ComplexField& f) {
+        static_assert(Kokkos::SpaceAccessibility<ExecSpace,
+                          typename ParticleAttrib<Vector<T, Dim>, PositionProperties...>::memory_space>::accessible
+                      && Kokkos::SpaceAccessibility<ExecSpace,
+                          typename ParticleAttrib<T, Properties...>::memory_space>::accessible,
+                      "NUFFT execution space must access the positions and values");
         // The FINUFFT/cuFINUFFT path is hardcoded for Dim == 3 (3D mode-grid
         // scratch + Rank<3> MDRangePolicy in transformFinufft). For Dim != 3
         // we skip the constexpr branch entirely so the 3D-only template body
@@ -407,9 +412,9 @@ namespace ippl {
     //=========================================================================
 
     template <typename RealField>
-    template <class... Properties>
+    template <class... Properties, class... PositionProperties>
     void FFT<NUFFTransform, RealField>::transformNative(
-        const ParticleAttrib<Vector<T, Dim>, Properties...>& R, ParticleAttrib<T, Properties...>& Q,
+        const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R, ParticleAttrib<T, Properties...>& Q,
         ComplexField& f) {
         const auto localNp = R.getParticleCount();
         const auto& layout = f.getLayout();
@@ -455,9 +460,9 @@ namespace ippl {
     // FINUFFT Transform
     //=========================================================================
     template <typename RealField>
-    template <class... Properties>
+    template <class... Properties, class... PositionProperties>
     void FFT<NUFFTransform, RealField>::transformFinufft(
-        const ParticleAttrib<Vector<T, Dim>, Properties...>& R, ParticleAttrib<T, Properties...>& Q,
+        const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R, ParticleAttrib<T, Properties...>& Q,
         ComplexField& f) {
 #ifdef ENABLE_FINUFFT
         const auto localNp = R.getParticleCount();

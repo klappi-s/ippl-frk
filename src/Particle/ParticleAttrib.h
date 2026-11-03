@@ -19,6 +19,7 @@
 #include <cstring>
 
 #include "Types/VectorView.h"
+#include "Types/VectorComponent.h"
 
 #include "Expression/IpplExpressions.h"
 
@@ -154,6 +155,10 @@ namespace ippl {
 
         host_mirror_type getHostMirror() const { return Kokkos::create_mirror(getView()); }
 
+        auto component(unsigned d) const requires(is_vector_v<T>) {
+            return ippl::componentView(getView(), d);
+        }
+
         void set_name(const std::string& name_) override {
             size_t len = name_.size();
             if (len >= detail::ATTRIB_NAME_MAX_LEN) {
@@ -209,8 +214,8 @@ namespace ippl {
          * @param hash_array An optional `ippl::hash_type` array for index mapping. If empty, no map
          * is used.
          */
-        template <typename Field, typename P2, typename policy_type>
-        void scatter(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp,
+        template <typename Field, typename P2, typename policy_type, typename... PositionProperties>
+        void scatter(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, PositionProperties...>& pp,
                      policy_type iteration_policy, hash_type hash_array = {}) const;
 
         /**
@@ -231,22 +236,24 @@ namespace ippl {
          * @param addToAttribute If `true`, the gathered value is added to the current attribute
          * value; otherwise, the attribute value is overwritten.
          */
-        template <typename Field, typename P2>
-        void gather(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp,
+        template <typename Field, typename P2, typename... PositionProperties>
+        void gather(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, PositionProperties...>& pp,
                     const bool addToAttribute = false);
 
 #ifdef IPPL_ENABLE_FFT
-        template <unsigned Dim, class M, class C, typename P2, typename P3, typename P4>
+        template <unsigned Dim, class M, class C, typename P2, typename P3, typename P4,
+                  typename... PositionProperties>
         void scatterPIFNUFFT(Field<P2, Dim, M, C>& f, Field<P3, Dim, M, C>& Sk,
-                             const ParticleAttrib<Vector<P4, Dim>, Properties...>& pp,
+                             const ParticleAttrib<Vector<P4, Dim>, PositionProperties...>& pp,
                              FFT<NUFFTransform, Field<P3, Dim, M, C>>* nufft,
                              const MPI_Comm& spaceComm) const;
 
-        template <unsigned Dim, class M, class C, typename P2, typename P3, typename P4>
+        template <unsigned Dim, class M, class C, typename P2, typename P3, typename P4,
+                  typename... PositionProperties, typename... ChargeProperties>
         void gatherPIFNUFFT(Field<P2, Dim, M, C>& f, Field<P3, Dim, M, C>& Sk,
-                            const ParticleAttrib<Vector<P4, Dim>, Properties...>& pp,
+                            const ParticleAttrib<Vector<P4, Dim>, PositionProperties...>& pp,
                             FFT<NUFFTransform, Field<P3, Dim, M, C>>* nufft,
-                            ParticleAttrib<P4, Properties...>& q);
+                            ParticleAttrib<P4, ChargeProperties...>& q);
 #endif
 
         T sum();

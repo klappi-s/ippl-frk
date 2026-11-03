@@ -168,11 +168,11 @@ namespace ippl {
             /*!
              * @brief Functor that is used for generating samples.
              */
-            template <class GeneratorPool>
+            template <class GeneratorPool, class View = view_type>
             struct fill_random {
                 using value_type = T;
                 Distribution targetdist_m;
-                view_type sample_m;
+                View sample_m;
                 GeneratorPool pool_m;
                 Vector<T, Dim> minbound_m;
                 Vector<T, Dim> maxbound_m;
@@ -188,7 +188,7 @@ namespace ippl {
                  * @param umax_ Maximum cumulative distribution values.
                  */
                 KOKKOS_FUNCTION
-                fill_random(Distribution& dist_r, view_type& x_r, GeneratorPool& rand_pool_r,
+                fill_random(Distribution& dist_r, View& x_r, GeneratorPool& rand_pool_r,
                             Vector<T, Dim>& umin_r, Vector<T, Dim>& umax_r, unsigned int& d_r)
                     : targetdist_m(dist_r)
                     , sample_m(x_r)
@@ -242,13 +242,17 @@ namespace ippl {
              * @param view The view to fill with random samples.
              * @param rand_pool64 The random number generator pool.
              */
-            void generate(view_type view, Kokkos::Random_XorShift64_Pool<> rand_pool64) {
+            template <class View>
+            void generate(View view, Kokkos::Random_XorShift64_Pool<> rand_pool64) {
+                static_assert(Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace,
+                              typename View::memory_space>::accessible,
+                              "Sampling execution space must access the output view");
                 Vector<T, Dim> minbound_m = umin_m;
                 Vector<T, Dim> maxbound_m = umax_m;
                 Distribution targetdist_m = dist_m;
                 size_type numlocal_m      = nlocal_m;
                 for (unsigned d = 0; d < Dim; ++d) {
-                    Kokkos::parallel_for(numlocal_m, fill_random<Kokkos::Random_XorShift64_Pool<>>(
+                    Kokkos::parallel_for(numlocal_m, fill_random<Kokkos::Random_XorShift64_Pool<>, View>(
                                                          targetdist_m, view, rand_pool64,
                                                          minbound_m, maxbound_m, d));
                     Kokkos::fence();
@@ -264,15 +268,19 @@ namespace ippl {
              * @param endIndex The ending index of view.
              * @param rand_pool64 The random number generator pool.
              */
-            void generate(view_type view, size_type startIndex, size_type endIndex,
+            template <class View>
+            void generate(View view, size_type startIndex, size_type endIndex,
                           Kokkos::Random_XorShift64_Pool<> rand_pool64) {
+                static_assert(Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace,
+                              typename View::memory_space>::accessible,
+                              "Sampling execution space must access the output view");
                 Vector<T, Dim> minbound_m = umin_m;
                 Vector<T, Dim> maxbound_m = umax_m;
                 Distribution targetdist_m = dist_m;
                 for (unsigned d = 0; d < Dim; ++d) {
                     Kokkos::parallel_for(
                         Kokkos::RangePolicy<>(startIndex, endIndex),
-                        fill_random<Kokkos::Random_XorShift64_Pool<>>(
+                        fill_random<Kokkos::Random_XorShift64_Pool<>, View>(
                             targetdist_m, view, rand_pool64, minbound_m, maxbound_m, d));
                     Kokkos::fence();
                 }

@@ -22,7 +22,7 @@ namespace ippl {
          */
         template <typename T, class... ViewArgs>
         struct FieldBufferData {
-            using view_type    = Kokkos::View<T*, ViewArgs...>;
+            using view_type    = NativeView<T*, ViewArgs...>;
             using archive_type = Archive<typename view_type::memory_space>;
 
             void serialize(archive_type& ar, size_type nsends) { ar.serialize(buffer, nsends); }

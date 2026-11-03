@@ -10,6 +10,7 @@
 
 #include "Types/IpplTypes.h"  // for detail::size_type
 #include "Types/ViewTypes.h"  // for detail::ViewType
+#include "Types/VectorComponent.h"
 
 #include "Utility/Inform.h"            // for Inform
 #include "Utility/PAssert.h"           // for PAssert and PAssert_LE
@@ -51,6 +52,9 @@ namespace ippl {
         typedef typename view_type::memory_space memory_space;
         typedef typename view_type::execution_space execution_space;
         using host_mirror_type = typename view_type::host_mirror_type;
+        auto component(unsigned d) const requires(is_vector_v<T>) {
+            return ippl::componentView(getView(), d);
+        }
         template <class... PolicyArgs>
         using policy_type = typename RangePolicy<Dim, PolicyArgs...>::policy_type;
 

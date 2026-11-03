@@ -22,11 +22,14 @@ namespace ippl {
          * @tparam GeneratorPool Type of the random number generator pool.
          * @tparam Dim Dimensionality of the random numbers.
          */
-        template <typename T, unsigned Dim>
+        template <typename T, unsigned Dim,
+                  typename View = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type>
         struct randn {
-            using view_type =
-                typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
+            using view_type = View;
             using GeneratorPool = typename Kokkos::Random_XorShift64_Pool<>;
+            static_assert(Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace,
+                          typename View::memory_space>::accessible,
+                          "Sampling execution space must access the output view");
 
             // Output View for the random numbers
             view_type v;

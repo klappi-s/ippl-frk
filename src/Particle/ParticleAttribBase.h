@@ -36,7 +36,7 @@ namespace ippl {
         class ParticleAttribBase {
             template <class... Properties>
             struct WithMemSpace {
-                using memory_space = typename Kokkos::View<char*, Properties...>::memory_space;
+                using memory_space = typename NativeView<char*, Properties...>::memory_space;
                 using type         = ParticleAttribBase<memory_space>;
             };
 

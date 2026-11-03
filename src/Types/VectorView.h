@@ -203,17 +203,30 @@ namespace ippl {
     };
 
     namespace detail {
-#ifdef IPPL_ENABLE_VECTOR_SOA
+        template <typename T, unsigned Components, unsigned Rank, typename Storage,
+                  typename... Properties>
+        struct VectorStorageView;
+
         template <typename T, unsigned Components, unsigned Rank, typename... Properties>
-            requires(!is_vector_v<T>)
-        struct ViewType<Vector<T, Components>, Rank, Properties...> {
-            // Nested vectors represent tensors (e.g. FFT Hessians), outside this vector adapter.
-            using scalar_view = Kokkos::View<typename NPtr<T, Rank + 1>::type, Properties...>;
+        struct VectorStorageView<T, Components, Rank, AoS, Properties...> {
+            using view_type = NativeView<typename NPtr<Vector<T, Components>, Rank>::type,
+                                         Properties...>;
+        };
+
+        template <typename T, unsigned Components, unsigned Rank, typename... Properties>
+        struct VectorStorageView<T, Components, Rank, SoA, Properties...> {
+            using scalar_view = NativeView<typename NPtr<T, Rank + 1>::type, Properties...>;
             using view_type =
                 VectorView<scalar_view, Components,
                            std::is_same_v<typename scalar_view::array_layout, Kokkos::LayoutRight>>;
         };
-#endif
+
+        // Instantiate only the requested storage. AoS must not require an extra scalar rank.
+        template <typename T, unsigned Components, unsigned Rank, typename... Properties>
+            requires(!is_vector_v<T>)
+        struct ViewType<Vector<T, Components>, Rank, Properties...>
+            : VectorStorageView<T, Components, Rank,
+                                typename VectorStorage<Properties...>::layout, Properties...> {};
 
         template <typename Dst, typename Src>
         void checkVectorViewExtents(const Dst& dst, const Src& src) {

@@ -12,6 +12,33 @@ if(CMAKE_CURRENT_LIST_DIR STREQUAL "@PROJECT_BINARY_DIR@" OR
   set(_ipplBuildTree TRUE)
 endif()
 
+if(@IPPL_ENABLE_OPENPMD@ AND NOT TARGET openPMD::openPMD)
+  if(NOT CMAKE_C_COMPILER_LOADED)
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+        "IPPL's openPMD dependency requires project(... LANGUAGES C CXX).")
+    return()
+  endif()
+  # A bundled static HDF5 must be found before openPMD so its exported targets
+  # resolve to this installation (or build tree), including after relocation.
+  if("@IPPL_OPENPMD_HDF5_FETCHED@")
+    set(HDF5_USE_STATIC_LIBRARIES TRUE)
+    if(_ipplBuildTree)
+      find_dependency(HDF5 CONFIG COMPONENTS C
+        HINTS "@IPPL_OPENPMD_HDF5_PACKAGE_HINT@")
+    else()
+      find_dependency(HDF5 CONFIG COMPONENTS C static HINTS "${_ipplPrefix}")
+    endif()
+  endif()
+  if(_ipplBuildTree)
+    find_dependency(openPMD 0.17.1 CONFIG COMPONENTS @IPPL_OPENPMD_COMPONENTS@
+      HINTS "@IPPL_OPENPMD_PACKAGE_HINT@")
+  else()
+    find_dependency(openPMD 0.17.1 CONFIG COMPONENTS @IPPL_OPENPMD_COMPONENTS@
+      HINTS "${_ipplPrefix}" "@openPMD_DIR@")
+  endif()
+endif()
+
 if(NOT TARGET Kokkos::kokkos)
   if(_ipplBuildTree)
     find_dependency(Kokkos CONFIG HINTS "@IPPL_KOKKOS_PACKAGE_HINT@")

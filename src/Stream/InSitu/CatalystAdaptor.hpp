@@ -261,7 +261,8 @@ void CatalystAdaptor::ExecVizChannel(const Field<T, Dim, ViewArgs...>& entry, co
 
         const auto& fullDeviceView = field->getView(); // original view
         using HostView_t = typename detail::ViewType<
-            T, Dim, Kokkos::LayoutLeft, Kokkos::HostSpace>::view_type;
+            T, Dim, typename detail::VectorStorage<ViewArgs...>::layout,
+            Kokkos::LayoutLeft, Kokkos::HostSpace>::view_type;
 
         auto makeHostView = [&](const char* viewLabel) -> HostView_t {
             if constexpr (Dim == 1) {

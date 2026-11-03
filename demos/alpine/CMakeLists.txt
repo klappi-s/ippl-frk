@@ -55,6 +55,23 @@ endif()
 add_alpine_example(PenningTrap)
 add_alpine_example(BumponTailInstability)
 
+# Same application and kernels, independently selected particle/field storage.
+option(IPPL_ENABLE_LAYOUT_COMPARISON "Add the four Landau vector-layout comparison targets" OFF)
+if(IPPL_ENABLE_LAYOUT_COMPARISON)
+  add_custom_target(LandauDampingLayouts)
+  foreach(particle_layout AoS SoA)
+    foreach(field_layout AoS SoA)
+      set(layout_target "LandauDamping_${particle_layout}_${field_layout}")
+      add_executable(${layout_target} EXCLUDE_FROM_ALL LandauDamping.cpp)
+      add_dependencies(LandauDampingLayouts ${layout_target})
+      target_link_libraries(${layout_target} PRIVATE IPPL::ippl)
+      target_compile_definitions(${layout_target} PRIVATE
+        "IPPL_ALPINE_PARTICLE_LAYOUT=ippl::${particle_layout}"
+        "IPPL_ALPINE_FIELD_LAYOUT=ippl::${field_layout}")
+    endforeach()
+  endforeach()
+endif()
+
 add_subdirectory(validation)
 
 if(IPPL_ENABLE_BENCHMARK)

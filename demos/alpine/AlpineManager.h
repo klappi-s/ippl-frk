@@ -16,18 +16,17 @@
 #include "Random/NormalDistribution.h"
 #include "Random/Randn.h"
 
-using view_type = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
-
-template <typename T, unsigned Dim>
-class AlpineManager : public ippl::PicManager<T, Dim, ParticleContainer<T, Dim>,
-                                              FieldContainer<T, Dim>, LoadBalancer<T, Dim>> {
+template <typename T, unsigned Dim, typename... IDProperties>
+class AlpineManager : public ippl::PicManager<T, Dim, ParticleContainer<T, Dim, IDProperties...>,
+                                              FieldContainer<T, Dim>,
+                                              LoadBalancer<T, Dim, IDProperties...>> {
 public:
-    using ParticleContainer_t = ParticleContainer<T, Dim>;
+    using ParticleContainer_t = ParticleContainer<T, Dim, IDProperties...>;
     using FieldContainer_t    = FieldContainer<T, Dim>;
     using FieldSolver_t       = FieldSolver<T, Dim>;
-    using LoadBalancer_t      = LoadBalancer<T, Dim>;
+    using LoadBalancer_t      = LoadBalancer<T, Dim, IDProperties...>;
     using Base =
-        ippl::ParticleBase<ippl::ParticleSpatialLayout<T, Dim, ippl::UniformCartesian<T, Dim>>>;
+        ippl::ParticleBase<PLayout_t<T, Dim>>;
 
 protected:
     size_type totalP_m;
@@ -42,8 +41,8 @@ public:
     AlpineManager(size_type totalP_, int nt_, Vector_t<int, Dim>& nr_, double lbt_,
                   std::string& solver_, std::string& stepMethod_,
                   std::vector<std::string> preconditioner_params = {})
-        : ippl::PicManager<T, Dim, ParticleContainer<T, Dim>, FieldContainer<T, Dim>,
-                           LoadBalancer<T, Dim>>()
+        : ippl::PicManager<T, Dim, ParticleContainer<T, Dim, IDProperties...>, FieldContainer<T, Dim>,
+                           LoadBalancer<T, Dim, IDProperties...>>()
         , totalP_m(totalP_)
         , nt_m(nt_)
         , nr_m(nr_)

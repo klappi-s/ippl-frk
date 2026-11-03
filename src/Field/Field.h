@@ -17,7 +17,10 @@ namespace ippl {
     template <typename T, unsigned Dim, class Mesh, class Centering, class... ViewArgs>
     class Field : public BareField<T, Dim, ViewArgs...> {
         template <typename... Props>
-        using base_type = Field<T, Dim, Mesh, Centering, Props...>;
+        using base_type = std::conditional_t<detail::VectorStorage<ViewArgs...>::COUNT != 0,
+            Field<T, Dim, Mesh, Centering,
+                  typename detail::VectorStorage<ViewArgs...>::layout, Props...>,
+            Field<T, Dim, Mesh, Centering, Props...>>;
 
     public:
         using Mesh_t      = Mesh;

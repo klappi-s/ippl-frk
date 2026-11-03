@@ -12,7 +12,9 @@
 
 namespace ippl {
 
-    template <typename FieldLHS, typename FieldRHS>
+    template <typename FieldLHS, typename FieldRHS,
+              typename FieldGradient = Field<Vector<typename FieldLHS::value_type, FieldLHS::dim>,
+                  FieldLHS::dim, typename FieldLHS::Mesh_t, typename FieldLHS::Centering_t>>
     class Poisson {
         constexpr static unsigned Dim = FieldLHS::dim;
         typedef typename FieldLHS::Mesh_t Mesh;
@@ -26,7 +28,7 @@ namespace ippl {
         using Tlhs     = typename FieldLHS::value_type;
         using Trhs     = typename FieldRHS::value_type;
 
-        using grad_type = Field<Vector<Tlhs, Dim>, Dim, Mesh, Centering>;
+        using grad_type = FieldGradient;
 
         /*!
          * Represents the types of fields that should

@@ -271,7 +271,10 @@ public:
             // The CG solver and FEMPoissonSolver compute the potential
             // directly and use this to get the electric field
             solver.setLhs(*phi_m);
-            solver.setGradient(*E_m);
+            if constexpr (std::is_same_v<Solver, CGSolver_t<T, Dim>>) {
+                solver.setGradient(*E_m);
+            }
+            // FEM gathers the potential's gradient directly at particle positions.
         } else {
             // The periodic Poisson solver, Open boundaries solver,
             // and the TG solver compute the electric field directly

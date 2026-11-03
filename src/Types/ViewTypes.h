@@ -6,6 +6,7 @@
 #define IPPL_VIEW_TYPES_H
 
 #include <Kokkos_Core.hpp>
+#include "Types/VectorLayout.h"
 
 namespace ippl {
     /**
@@ -42,7 +43,7 @@ namespace ippl {
          */
         template <typename T, unsigned Dim, class... Properties>
         struct ViewType {
-            typedef Kokkos::View<typename NPtr<T, Dim>::type, Properties...> view_type;
+            using view_type = NativeView<typename NPtr<T, Dim>::type, Properties...>;
         };
 
         template <typename MemorySpace>

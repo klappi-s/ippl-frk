@@ -7,6 +7,7 @@
 
 #include "Field/BareField.h"
 #include "Field/Field.h"
+#include "Field/VectorField.h"
 #include "Field/BConds.h"
 
 // IPPL Utilities
@@ -32,6 +33,7 @@
 #include "Types/Vector.h"
 
 #include "Particle/ParticleBase.h"
+#include "Particle/VectorAttribute.h"
 #include "Particle/ParticleSpatialLayout.h"
 
 // // IPPL Load balancing

@@ -2,12 +2,15 @@
 # Dependencies.cmake
 # ~~~
 #
-# Resolves third-party libraries: Kokkos, Heffte, and Catalyst.
+# Resolves third-party libraries, including Kokkos, Heffte, Catalyst, openPMD,
+# HDF5, and ADIOS2.
 #
 # Responsibilities:
 #   - Fetch or find Kokkos, using version and backends from Platforms.cmake
 #   - Fetch Heffte if IPPL_ENABLE_FFT is ON, using CUDA or AVX2 based on platform
 #   - Fetch or find Catalyst when in-situ support or the FEL demo is enabled
+#   - Fetch or find openPMD when IPPL_ENABLE_OPENPMD is ON
+#   - Fetch or find parallel HDF5 and/or ADIOS2 for the selected openPMD backends
 #
 # Not responsible for:
 #   - Selecting platform backends            → Platforms.cmake
@@ -27,6 +30,7 @@ include(FetchContent)
 # ------------------------------------------------------------------------------
 find_package(MPI COMPONENTS CXX REQUIRED)
 colour_message(STATUS ${Green} "✅ MPI found ${MPI_CXX_VERSION}")
+
 
 # ------------------------------------------------------------------------------
 # CUDA
@@ -590,6 +594,18 @@ if(IPPL_ENABLE_CATALYST)
   unset(_catalyst_major_minor)
   unset(_ippl_catalyst_dir_is_in_build_tree)
   unset(_ippl_reuse_fetched_catalyst)
+endif()
+
+# ------------------------------------------------------------------------------
+# openPMD (MPI particle/field I/O with HDF5 and/or ADIOS2 BP5)
+# Prefer installed packages; fetch missing dependencies or requested git revisions.
+# Keep backend options and package-export handling in the dependency helper.
+# ------------------------------------------------------------------------------
+if(IPPL_ENABLE_OPENPMD)
+  # MPI-enabled HDF5 and ADIOS2 also require the C compiler and MPI C bindings.
+  enable_language(C)
+  include(OpenPMDDependency)
+  ippl_setup_openpmd()
 endif()
 
 # ------------------------------------------------------------------------------

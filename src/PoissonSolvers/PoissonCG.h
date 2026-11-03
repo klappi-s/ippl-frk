@@ -19,12 +19,13 @@ namespace ippl {
     // in the halo exchange (the realloc never propagates back to the original
     // Field). Keep a single by-reference definition.
 
-    template <typename FieldLHS, typename FieldRHS = FieldLHS>
-    class PoissonCG : public Poisson<FieldLHS, FieldRHS> {
+    template <typename FieldLHS, typename FieldRHS = FieldLHS,
+              typename FieldGradient = typename Poisson<FieldLHS, FieldRHS>::grad_type>
+    class PoissonCG : public Poisson<FieldLHS, FieldRHS, FieldGradient> {
         using Tlhs = typename FieldLHS::value_type;
 
     public:
-        using Base                    = Poisson<FieldLHS, FieldRHS>;
+        using Base                    = Poisson<FieldLHS, FieldRHS, FieldGradient>;
         constexpr static unsigned Dim = FieldLHS::dim;
         using typename Base::lhs_type, typename Base::rhs_type;
         using OperatorRet        = UnaryMinus<detail::meta_laplace<lhs_type>>;

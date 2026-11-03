@@ -1,3 +1,11 @@
+//
+// Unit test: Catalyst/Conduit vector export
+//
+// Checks AoS/SoA component values and strides, live/empty views, field packing order and
+// snapshot lifetime. Adaptor smoke tests exercise execution and refresh with ghost masks
+// enabled/disabled and empty MPI ranks.
+//
+
 #include "Ippl.h"
 
 #include "Stream/ConduitVector.h"
@@ -9,9 +17,9 @@ namespace {
     using SoA =
         ippl::VectorView<Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>, 3, false>;
 
-    template <typename Layout>
+    template <typename Layout, typename Storage = typename ippl::detail::VectorStorage<>::layout>
     struct Particles : ippl::ParticleBase<Layout> {
-        ippl::ParticleAttrib<Vector> velocity;
+        ippl::VectorAttribute<double, 3, Storage> velocity;
         explicit Particles(Layout& layout)
             : ippl::ParticleBase<Layout>(layout) {
             this->addAttribute(velocity);
@@ -24,10 +32,11 @@ namespace {
     }
 
     // NVCC extended lambdas must not be enclosed by GoogleTest's non-public TestBody.
+    template <typename Storage = typename ippl::detail::VectorStorage<>::layout>
     void checkFieldPackingOrder() {
-        using DeviceView = ippl::detail::ViewType<Vector, 2>::view_type;
+        using DeviceView = typename ippl::detail::ViewType<Vector, 2, Storage>::view_type;
         using HostView =
-            ippl::detail::ViewType<Vector, 2, Kokkos::LayoutLeft, Kokkos::HostSpace>::view_type;
+            typename ippl::detail::ViewType<Vector, 2, Storage, Kokkos::LayoutLeft, Kokkos::HostSpace>::view_type;
         DeviceView device("field with ghosts", 5, 6);
         using Index = ippl::RangePolicy<2>::index_array_type;
         ippl::parallel_for(
@@ -39,6 +48,8 @@ namespace {
                                                   Kokkos::pair<int, int>(1, 5)));
         conduit_cpp::Node node;
         ippl::detail::setConduitVectorValues(node["values"], packed, 12);
+        EXPECT_EQ(node["values/x"].dtype().stride(),
+                  (std::is_same_v<Storage, ippl::SoA> ? sizeof(double) : sizeof(Vector)));
         for (unsigned j = 0; j < 4; ++j) {
             for (unsigned i = 0; i < 3; ++i) {
                 EXPECT_EQ(element(node["values/x"], i + 3 * j), i + 1);
@@ -47,8 +58,38 @@ namespace {
             }
         }
     }
+    template <typename ParticleStorage, typename FieldStorage>
+    void checkMixedChannels() {
+        using Mesh = ippl::UniformCartesian<double, 3>;
+        using Layout = ippl::ParticleSpatialLayout<double, 3, Mesh, ParticleStorage>;
+        const ippl::NDIndex<3> domain(ippl::Index(8), ippl::Index(8), ippl::Index(8));
+        ippl::FieldLayout<3> layout(*ippl::Comm, domain, {true, true, true}, true);
+        Mesh mesh(domain, Vector(1.), Vector(0.));
+        ippl::VectorField<double, 3, FieldStorage> field(mesh, layout);
+        Layout particleLayout(layout, mesh);
+        Particles<Layout, ParticleStorage> particles(particleLayout);
+        particles.create(ippl::Comm->rank() == 0 ? 3 : 0);
+        particles.R = Vector(1.);
+        particles.velocity = Vector(2., 3., 4.);
+        for (const char* ghosts : {"OFF", "ON"}) {
+            setenv("IPPL_CATALYST_GHOST_MASKS", ghosts, 1);
+            field = Vector(1., 2., 3.);
+            auto vis = ippl::MakeVisRegistryRuntimePtr("field", field, "particles", particles);
+            auto steer = ippl::MakeVisRegistryRuntimePtr();
+            ippl::CatalystAdaptor adaptor;
+            adaptor.Initialize(vis, steer);
+            adaptor.Execute(0, 0.);
+            field = Vector(4., 5., 6.);
+            adaptor.rememberNow("field");
+            adaptor.rememberNow("particles");
+            adaptor.Execute(1, 0.1);
+            adaptor.Finalize();
+        }
+    }
 }  // namespace
 
+// Check component values and strides for live AoS/SoA subviews, direct SoA storage
+// references and zero-length exports.
 TEST(CatalystVectorExport, AoSAndSoAComponentsAndEmptyViews) {
     SoA soa("export capacity", 11);
     Kokkos::View<Vector*, Kokkos::HostSpace> aos("AoS export", 11);
@@ -75,10 +116,36 @@ TEST(CatalystVectorExport, AoSAndSoAComponentsAndEmptyViews) {
         EXPECT_EQ(node[std::string("empty/") + name].dtype().number_of_elements(), 0);
 }
 
+// Check ghost exclusion and component ordering when packing a field with the configured
+// default vector storage into a LayoutLeft host view.
 TEST(CatalystVectorExport, FieldPackingOrder) {
     checkFieldPackingOrder();
 }
 
+// Check owned-field packing order and AoS component strides with explicit AoS storage.
+TEST(CatalystVectorExport, ExplicitAoSFieldPackingOrder) {
+    checkFieldPackingOrder<ippl::AoS>();
+}
+
+// Check owned-field packing order and contiguous components with explicit SoA storage.
+TEST(CatalystVectorExport, ExplicitSoAFieldPackingOrder) {
+    checkFieldPackingOrder<ippl::SoA>();
+}
+
+// Exercise SoA particle/AoS field channels through execution and refresh with ghost masks
+// enabled and disabled.
+TEST(CatalystVectorExport, SoAParticlesAoSField) {
+    checkMixedChannels<ippl::SoA, ippl::AoS>();
+}
+
+// Exercise AoS particle/SoA field channels through execution and refresh with ghost masks
+// enabled and disabled.
+TEST(CatalystVectorExport, AoSParticlesSoAField) {
+    checkMixedChannels<ippl::AoS, ippl::SoA>();
+}
+
+// Check that a registry-held snapshot retains its values after source mutation/destruction,
+// including zero-length output on empty ranks.
 TEST(CatalystVectorExport, AttributeMirrorLifetimeAndEmptyRanks) {
     ippl::detail::size_type count = ippl::Comm->rank() == 0 ? 3 : 0;
     ippl::ViewRegistry registry;
@@ -99,6 +166,8 @@ TEST(CatalystVectorExport, AttributeMirrorLifetimeAndEmptyRanks) {
         EXPECT_EQ(element(node["velocity/values/y"], i), 2.);
 }
 
+// Exercise field/particle adaptor execution and refresh with ghost masks enabled and
+// disabled, including ranks with no particles.
 TEST(CatalystVectorExport, AdaptorChannelsAndRefresh) {
     using Mesh   = ippl::UniformCartesian<double, 3>;
     using Layout = ippl::ParticleSpatialLayout<double, 3, Mesh>;

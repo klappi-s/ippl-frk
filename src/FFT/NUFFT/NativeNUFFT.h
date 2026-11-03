@@ -228,8 +228,8 @@ namespace ippl {
              * @param upsampled_output Whether the output field is the usampeld grid. Required on
              * distributed for now
              */
-            template <class... Properties, typename OutField>
-            void type1(const ParticleAttrib<Vector<T, Dim>, Properties...>& R,
+            template <class... Properties, class... PositionProperties, typename OutField>
+            void type1(const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R,
                        const ParticleAttrib<T, Properties...>& Q, OutField& f,
                        bool upsampled_output = false) {
                 if (!initialized_) {
@@ -289,8 +289,8 @@ namespace ippl {
              *                          pruned-FFT path (false; required on
              *                          distributed runs).
              */
-            template <typename InField, class... Properties>
-            void type2(InField& f, const ParticleAttrib<Vector<T, Dim>, Properties...>& R,
+            template <typename InField, class... Properties, class... PositionProperties>
+            void type2(InField& f, const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R,
                        ParticleAttrib<T, Properties...>& Q, bool upsampled_output = false) {
                 if (!initialized_) {
                     throw IpplException("NativeNUFFT::type2",

@@ -65,6 +65,11 @@ namespace ippl {
                   typename policy_type, typename HashView>
         void particleAttribScatterImpl(Field& f, const ValuesView& dview, const PositionAttrib& pp,
                                        policy_type iteration_policy, HashView hash_array) {
+            using Exec = typename policy_type::execution_space;
+            static_assert(Kokkos::SpaceAccessibility<Exec, typename ValuesView::memory_space>::accessible
+                          && Kokkos::SpaceAccessibility<Exec, typename PositionAttrib::memory_space>::accessible
+                          && Kokkos::SpaceAccessibility<Exec, typename Field::memory_space>::accessible,
+                          "Scatter policy must access the values, positions and field memory spaces");
             constexpr unsigned Dim = Field::dim;
             using PositionType     = typename Field::Mesh_t::value_type;
 
@@ -212,9 +217,9 @@ namespace ippl {
     }
 
     template <typename T, class... Properties>
-    template <typename Field, class PT, typename policy_type>
+    template <typename Field, class PT, typename policy_type, typename... PositionProperties>
     void ParticleAttrib<T, Properties...>::scatter(
-        Field& f, const ParticleAttrib<Vector<PT, Field::dim>, Properties...>& pp,
+        Field& f, const ParticleAttrib<Vector<PT, Field::dim>, PositionProperties...>& pp,
         policy_type iteration_policy, hash_type hash_array) const {
         const bool useHashView = hash_array.extent(0) > 0;
         if (useHashView && std::cmp_greater(iteration_policy.end(), hash_array.extent(0))) {
@@ -232,10 +237,14 @@ namespace ippl {
     }
 
     template <typename T, class... Properties>
-    template <typename Field, typename P2>
+    template <typename Field, typename P2, typename... PositionProperties>
     void ParticleAttrib<T, Properties...>::gather(
-        Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp,
+        Field& f, const ParticleAttrib<Vector<P2, Field::dim>, PositionProperties...>& pp,
         const bool addToAttribute) {
+        using PositionAttrib = ParticleAttrib<Vector<P2, Field::dim>, PositionProperties...>;
+        static_assert(Kokkos::SpaceAccessibility<execution_space, typename PositionAttrib::memory_space>::accessible
+                      && Kokkos::SpaceAccessibility<execution_space, typename Field::memory_space>::accessible,
+                      "Gather execution space must access the positions and field memory spaces");
         constexpr unsigned Dim = Field::dim;
         using PositionType     = typename Field::Mesh_t::value_type;
 
@@ -400,10 +409,11 @@ namespace ippl {
 
 #ifdef IPPL_ENABLE_FFT
     template <typename T, class... Properties>
-    template <unsigned Dim, class M, class C, class FT, class ST, class PT>
+    template <unsigned Dim, class M, class C, class FT, class ST, class PT,
+              typename... PositionProperties>
     void ParticleAttrib<T, Properties...>::scatterPIFNUFFT(
         Field<FT, Dim, M, C>& f, Field<ST, Dim, M, C>& Sk,
-        const ParticleAttrib<Vector<PT, Dim>, Properties...>& pp,
+        const ParticleAttrib<Vector<PT, Dim>, PositionProperties...>& pp,
         FFT<NUFFTransform, Field<ST, Dim, M, C>>* nufft, const MPI_Comm&) const {
         static IpplTimings::TimerRef scatterPIFNUFFTTimer =
             IpplTimings::getTimer("ScatterPIFNUFFT");
@@ -447,11 +457,12 @@ namespace ippl {
     }
 
     template <typename T, class... Properties>
-    template <unsigned Dim, class M, class C, class FT, class ST, class PT>
+    template <unsigned Dim, class M, class C, class FT, class ST, class PT,
+              typename... PositionProperties, typename... ChargeProperties>
     void ParticleAttrib<T, Properties...>::gatherPIFNUFFT(
         Field<FT, Dim, M, C>& f, Field<ST, Dim, M, C>& Sk,
-        const ParticleAttrib<Vector<PT, Dim>, Properties...>& pp,
-        FFT<NUFFTransform, Field<ST, Dim, M, C>>* nufft, ParticleAttrib<PT, Properties...>& q) {
+        const ParticleAttrib<Vector<PT, Dim>, PositionProperties...>& pp,
+        FFT<NUFFTransform, Field<ST, Dim, M, C>>* nufft, ParticleAttrib<PT, ChargeProperties...>& q) {
         static IpplTimings::TimerRef gatherPIFNUFFTTimer = IpplTimings::getTimer("GatherPIFNUFFT");
         IpplTimings::startTimer(gatherPIFNUFFTTimer);
 
@@ -527,20 +538,20 @@ namespace ippl {
     }
 
     template <typename P1, unsigned Dim, class M, class C, typename P2, typename P3, typename P4,
-              class... Properties>
+              class... Properties, class... PositionProperties, class... ChargeProperties>
     inline void gatherPIFNUFFT(ParticleAttrib<P1, Properties...>& attrib, Field<P2, Dim, M, C>& f,
                                Field<P3, Dim, M, C>& Sk,
-                               const ParticleAttrib<Vector<P4, Dim>, Properties...>& pp,
+                               const ParticleAttrib<Vector<P4, Dim>, PositionProperties...>& pp,
                                ippl::FFT<ippl::NUFFTransform, Field<P3, Dim, M, C>>* nufft,
-                               ParticleAttrib<P4, Properties...>& q) {
+                               ParticleAttrib<P4, ChargeProperties...>& q) {
         attrib.gatherPIFNUFFT(f, Sk, pp, nufft, q);
     }
 
     template <typename P1, unsigned Dim, class M, class C, typename P2, typename P3, typename P4,
-              class... Properties>
+              class... Properties, class... PositionProperties>
     inline void scatterPIFNUFFT(const ParticleAttrib<P1, Properties...>& attrib,
                                 Field<P2, Dim, M, C>& f, Field<P3, Dim, M, C>& Sk,
-                                const ParticleAttrib<Vector<P4, Dim>, Properties...>& pp,
+                                const ParticleAttrib<Vector<P4, Dim>, PositionProperties...>& pp,
                                 FFT<NUFFTransform, Field<P3, Dim, M, C>>* nufft,
                                 const MPI_Comm& spaceComm = MPI_COMM_WORLD) {
         attrib.scatterPIFNUFFT(f, Sk, pp, nufft, spaceComm);

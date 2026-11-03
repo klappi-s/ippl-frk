@@ -273,20 +273,20 @@ namespace ippl {
          * @param Q Particle scalar values (input on Type 1, output on Type 2).
          * @param f Complex field on a uniform grid (output on Type 1, input on Type 2).
          */
-        template <class... Properties>
-        void transform(const ParticleAttrib<Vector<T, Dim>, Properties...>& R,
+        template <class... Properties, class... PositionProperties>
+        void transform(const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R,
                        ParticleAttrib<T, Properties...>& Q, ComplexField& f);
 
         //! Native (Kokkos / heFFTe) NUFFT path.
         //! @note Public because NVCC's extended lambda support disallows
         //!       lambdas inside private templated member functions.
-        template <class... Properties>
-        void transformNative(const ParticleAttrib<Vector<T, Dim>, Properties...>& R,
+        template <class... Properties, class... PositionProperties>
+        void transformNative(const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R,
                              ParticleAttrib<T, Properties...>& Q, ComplexField& f);
 
         //! FINUFFT / cuFINUFFT NUFFT path. Same NVCC public-visibility caveat.
-        template <class... Properties>
-        void transformFinufft(const ParticleAttrib<Vector<T, Dim>, Properties...>& R,
+        template <class... Properties, class... PositionProperties>
+        void transformFinufft(const ParticleAttrib<Vector<T, Dim>, PositionProperties...>& R,
                               ParticleAttrib<T, Properties...>& Q, ComplexField& f);
     private:
         //! Pick a backend (native vs. finufft) based on @p params and lock_method.

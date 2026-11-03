@@ -16,7 +16,11 @@ template <unsigned Dim>
 using Mesh_t = ippl::UniformCartesian<double, Dim>;
 
 template <typename T, unsigned Dim>
+#ifdef IPPL_ALPINE_PARTICLE_LAYOUT
+using PLayout_t = ippl::ParticleSpatialLayout<T, Dim, Mesh_t<Dim>, IPPL_ALPINE_PARTICLE_LAYOUT>;
+#else
 using PLayout_t = typename ippl::ParticleSpatialLayout<T, Dim, Mesh_t<Dim>>;
+#endif
 
 template <unsigned Dim>
 using Centering_t = typename Mesh_t<Dim>::DefaultCentering;
@@ -45,10 +49,15 @@ template <unsigned Dim, class... ViewArgs>
 using Field_t = Field<double, Dim, ViewArgs...>;
 
 template <typename T = double, unsigned Dim = 3, class... ViewArgs>
+#ifdef IPPL_ALPINE_FIELD_LAYOUT
+using VField_t = ippl::VectorField<T, Dim, IPPL_ALPINE_FIELD_LAYOUT, Mesh_t<Dim>,
+                                  Centering_t<Dim>, Dim, ViewArgs...>;
+#else
 using VField_t = Field<Vector_t<T, Dim>, Dim, ViewArgs...>;
+#endif
 
 template <typename T = double, unsigned Dim = 3>
-using CGSolver_t = ippl::PoissonCG<Field<T, Dim>, Field_t<Dim>>;
+using CGSolver_t = ippl::PoissonCG<Field<T, Dim>, Field_t<Dim>, VField_t<T, Dim>>;
 
 template <typename T = double, unsigned Dim = 3>
 using NullSolver_t = ippl::NullSolver<VField_t<T, Dim>, Field_t<Dim>>;

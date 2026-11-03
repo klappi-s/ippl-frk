@@ -11,6 +11,9 @@ message(STATUS "Configuring demos/")
 
 if(IPPL_ENABLE_ALPINE)
   add_subdirectory(alpine)
+  if(IPPL_ENABLE_OPENPMD)
+    add_subdirectory(alpineStream)
+  endif()
 endif()
 
 if(IPPL_ENABLE_ESPIF AND IPPL_ENABLE_FFT)
