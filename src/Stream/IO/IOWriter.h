@@ -1,18 +1,18 @@
-#ifndef IPPL_OPENPMD_WRITER_H
-#define IPPL_OPENPMD_WRITER_H
-#ifndef IPPL_ENABLE_OPENPMD
-#error "Configure IPPL with IPPL_ENABLE_OPENPMD=ON to use OpenPMDWriter"
+#ifndef IPPL_IO_WRITER_H
+#define IPPL_IO_WRITER_H
+#if !defined(IPPL_ENABLE_OPENPMD) && !defined(IPPL_ENABLE_H5HUT)
+#error "Enable openPMD or H5hut in IPPL to use IOWriter"
 #endif
 
 #include <memory>
 #include <mpi.h>
 #include <string_view>
 
-#include "Stream/OpenPMD/Storage.h"
+#include "Stream/IO/detail/Sources.h"
 #include "Stream/ParticleAttributeSelection.h"
 
 namespace ippl {
-    class OpenPMDWriter;
+    class IOWriter;
 
     /** Typed, borrowed attributes. The owning writer fixes registration at open(). */
     class ParticleOutputBinding {
@@ -22,18 +22,18 @@ namespace ippl {
         template <class Attribute>
         void bind(const Attribute& attribute, RecordMetadata metadata) {
             addAttribute(attribute.get_name(),
-                         detail::openpmd::attributeSource(attribute, std::move(metadata)));
+                         detail::io::attributeSource(attribute, std::move(metadata)));
         }
 
     private:
-        friend class OpenPMDWriter;
+        friend class IOWriter;
         ParticleOutputBinding() = default;
-        void addAttribute(std::string name, detail::openpmd::RecordSource source);
+        void addAttribute(std::string name, detail::io::RecordSource source);
         bool frozen_m = false;
         ParticleAttributeSelection selection_m;
         std::function<std::vector<std::pair<const void*, std::string>>()> attributes_m;
         std::function<std::uint64_t()> count_m;
-        std::map<std::string, detail::openpmd::RecordSource> records_m;
+        std::map<std::string, detail::io::RecordSource> records_m;
     };
 
     /**
@@ -41,12 +41,12 @@ namespace ippl {
      * keep those objects alive at stable addresses until close(). Reallocation is allowed.
      * All ranks call open/write/flush/close in the same order, before MPI finalization.
      */
-    class OpenPMDWriter {
+    class IOWriter {
     public:
-        OpenPMDWriter(OpenPMDOptions options, MPI_Comm communicator);
-        ~OpenPMDWriter();
-        OpenPMDWriter(const OpenPMDWriter&)            = delete;
-        OpenPMDWriter& operator=(const OpenPMDWriter&) = delete;
+        IOWriter(IOOptions options, MPI_Comm communicator);
+        ~IOWriter();
+        IOWriter(const IOWriter&)            = delete;
+        IOWriter& operator=(const IOWriter&) = delete;
 
         template <class ParticleContainer>
         ParticleOutputBinding& addParticles(std::string speciesName,
@@ -73,16 +73,16 @@ namespace ippl {
             const std::array<std::string, 3> axes{"x", "y", "z"};
             metadata.components.assign(axes.begin(), axes.begin() + Vector::dim);
             binding->records_m.emplace("position",
-                                       detail::openpmd::attributeSource(particles.R, metadata));
+                                       detail::io::attributeSource(particles.R, metadata));
             if constexpr (ParticleContainer::EnableIDs)
                 binding->records_m.emplace(
                     "ippl_id",
-                    detail::openpmd::attributeSource(particles.ID, RecordMetadata{{1.0, {}}, {}}));
+                    detail::io::attributeSource(particles.ID, RecordMetadata{{1.0, {}}, {}}));
             return addParticleSource(std::move(speciesName), std::move(binding));
         }
         template <class Field>
         void addField(std::string recordName, const Field& field, FieldMetadata metadata) {
-            auto source = detail::openpmd::fieldSource(recordName, field, std::move(metadata));
+            auto source = detail::io::fieldSource(recordName, field, std::move(metadata));
             addFieldSource(std::move(recordName), std::move(source));
         }
         void setParticleAttributeSelection(
@@ -98,7 +98,7 @@ namespace ippl {
         std::unique_ptr<Impl> impl_m;
         ParticleOutputBinding& addParticleSource(std::string name,
                                                  std::unique_ptr<ParticleOutputBinding> binding);
-        void addFieldSource(std::string name, detail::openpmd::FieldSource source);
+        void addFieldSource(std::string name, detail::io::FieldSource source);
     };
 }  // namespace ippl
 #endif

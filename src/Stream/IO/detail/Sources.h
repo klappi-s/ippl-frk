@@ -1,5 +1,5 @@
-#ifndef IPPL_OPENPMD_STORAGE_H
-#define IPPL_OPENPMD_STORAGE_H
+#ifndef IPPL_IO_SOURCES_H
+#define IPPL_IO_SOURCES_H
 
 #include <functional>
 #include <limits>
@@ -14,9 +14,14 @@
 
 #include "Expression/IpplOperations.h"
 
-#include "Stream/OpenPMD/Metadata.h"
+#include "Stream/IO/Metadata.h"
 
-namespace ippl::detail::openpmd {
+namespace ippl::detail::io {
+    enum class ArrayOrder {
+        C,
+        FirstIndexFastest
+    };
+
     using Buffer =
         std::variant<std::vector<std::int8_t>, std::vector<std::uint8_t>, std::vector<std::int16_t>,
                      std::vector<std::uint16_t>, std::vector<std::int32_t>,
@@ -46,7 +51,7 @@ namespace ippl::detail::openpmd {
         else if constexpr (std::is_same_v<T, double>)
             return DataType::FLOAT64;
         else
-            static_assert(!sizeof(T), "openPMD supports float, double and fixed-width integers");
+            static_assert(!sizeof(T), "I/O supports float, double and fixed-width integers");
     }
 
     template <class T>
@@ -68,7 +73,7 @@ namespace ippl::detail::openpmd {
 
     inline void require(bool condition, const std::string& message) {
         if (!condition)
-            throw IpplException("openPMD", message);
+            throw IpplException("I/O", message);
     }
     std::uint64_t volume(const std::vector<std::uint64_t>& extent);
 
@@ -79,7 +84,7 @@ namespace ippl::detail::openpmd {
         const void* identity_m = nullptr;
         std::function<std::string()> name_m;
         std::function<std::uint64_t()> size_m;
-        std::function<Buffer(unsigned, const Chunk&)> pack_m;
+        std::function<Buffer(unsigned, const Chunk&, ArrayOrder)> pack_m;
     };
     struct FieldSource {
         RecordSource values_m;
@@ -115,19 +120,20 @@ namespace ippl::detail::openpmd {
                 [&attribute] {
                     return attribute.getView().extent(0);
                 },
-                [&attribute](unsigned component, const Chunk& chunk) -> Buffer {
+                [&attribute](unsigned component, const Chunk& chunk, ArrayOrder order) -> Buffer {
+                    (void)order;
                     const auto view  = attribute.getView();
                     const auto start = chunk.offset[0];
                     const auto count = chunk.extent[0];
-                    Kokkos::View<Scalar*, typename Exec::memory_space> packed("openPMD particle",
+                    Kokkos::View<Scalar*, typename Exec::memory_space> packed("I/O particle",
                                                                               count);
                     Kokkos::parallel_for(
-                        "openPMD pack particle",
+                        "I/O pack particle",
                         Kokkos::RangePolicy<Exec, Kokkos::IndexType<std::uint64_t>>(0, count),
                         KOKKOS_LAMBDA(std::uint64_t i) {
                             packed(i) = Traits::get(view(start + i), component);
                         });
-                    Exec().fence("openPMD particle staging");
+                    Exec().fence("I/O particle staging");
                     return hostBuffer(packed);
                 }};
     }
@@ -173,7 +179,8 @@ namespace ippl::detail::openpmd {
         result.communicator_m = [&field] {
             return field.getCommunicator().getCommunicator();
         };
-        result.values_m.pack_m = [&field](unsigned component, const Chunk& chunk) -> Buffer {
+        result.values_m.pack_m = [&field](unsigned component, const Chunk& chunk,
+                                          ArrayOrder order) -> Buffer {
             const auto view = field.getView();
             using Index     = typename ippl::RangePolicy<DIM, Exec>::index_type;
             using Coords    = typename ippl::RangePolicy<DIM, Exec>::index_array_type;
@@ -182,21 +189,23 @@ namespace ippl::detail::openpmd {
                 begin[d] = field.getNghost() + chunk.offset[d];
                 end[d]   = begin[d] + chunk.extent[d];
             }
-            Kokkos::View<Scalar*, typename Exec::memory_space> packed("openPMD field",
+            Kokkos::View<Scalar*, typename Exec::memory_space> packed("I/O field",
                                                                       volume(chunk.extent));
-            // Use the IPPL field-policy factory for this owned subregion, with C file order.
+            // Pack directly in the backend file order using the source execution space.
             ippl::parallel_for(
-                "openPMD pack field", ippl::createRangePolicy<DIM, Exec>(begin, end),
+                "I/O pack field", ippl::createRangePolicy<DIM, Exec>(begin, end),
                 KOKKOS_LAMBDA(const Coords& index) {
                     std::uint64_t linear = 0;
-                    for (unsigned d = 0; d < DIM; ++d)
-                        linear = linear * (end[d] - begin[d]) + index[d] - begin[d];
+                    for (unsigned axis = 0; axis < DIM; ++axis) {
+                        const unsigned d = order == ArrayOrder::C ? axis : DIM - 1 - axis;
+                        linear           = linear * (end[d] - begin[d]) + index[d] - begin[d];
+                    }
                     packed(linear) = Traits::get(ippl::apply(view, index), component);
                 });
-            Exec().fence("openPMD field staging");
+            Exec().fence("I/O field staging");
             return hostBuffer(packed);
         };
         return result;
     }
-}  // namespace ippl::detail::openpmd
+}  // namespace ippl::detail::io
 #endif

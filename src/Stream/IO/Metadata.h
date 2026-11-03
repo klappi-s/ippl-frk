@@ -1,25 +1,42 @@
-#ifndef IPPL_OPENPMD_METADATA_H
-#define IPPL_OPENPMD_METADATA_H
+#ifndef IPPL_IO_METADATA_H
+#define IPPL_IO_METADATA_H
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace ippl {
+    enum class IOBackend {
+        OpenPMD,
+        H5hut
+    };
     enum class OpenPMDBackend {
         HDF5,
         BP5
     };
-    struct OpenPMDOptions {
-        std::filesystem::path directory;
+    enum class H5hutTransferMode {
+        Collective,
+        Independent
+    };
+    struct OpenPMDSettings {
         OpenPMDBackend backend    = OpenPMDBackend::HDF5;
-        double timeUnitSI         = 1.0;
         std::string backendConfig = "{}";
-        std::size_t stagingBytes  = 64 * 1024 * 1024;
+    };
+    struct H5hutSettings {
+        H5hutTransferMode transferMode = H5hutTransferMode::Collective;
+    };
+    struct IOOptions {
+        std::filesystem::path directory;
+        IOBackend backend        = IOBackend::OpenPMD;
+        double timeUnitSI        = 1.0;
+        std::size_t stagingBytes = 64 * 1024 * 1024;
+        OpenPMDSettings openPMD;
+        H5hutSettings h5hut;
     };
     struct StepInfo {
         std::uint64_t step;
@@ -90,8 +107,9 @@ namespace ippl {
         std::vector<ParticleInfo> particles;
         std::vector<FieldInfo> fields;
     };
-    struct SeriesInfo {
-        OpenPMDBackend backend;
+    struct IOSeriesInfo {
+        IOBackend backend;
+        std::optional<OpenPMDBackend> openPMDBackend;
         double timeUnitSI;
         std::vector<std::uint64_t> iterations;
     };

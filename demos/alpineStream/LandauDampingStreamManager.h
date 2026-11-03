@@ -11,15 +11,22 @@
 #include <type_traits>
 
 #include "Manager/datatypes.h"
-#include "Stream/OpenPMD/OpenPMDWriter.h"
+
 #include "Utility/IpplTimings.h"
+
 #include "../alpine/LandauDampingManager.h"
+#include "Stream/IO/IOWriter.h"
 
 namespace alpine_stream {
+    enum class OutputKind {
+        Particles,
+        Fields
+    };
     struct OutputOptions {
-        bool enabled = true;
+        bool enabled        = true;
+        OutputKind kind     = OutputKind::Particles;
         double lengthUnitSI = 1.0;
-        ippl::OpenPMDOptions writer{.directory = "openpmd"};
+        ippl::IOOptions writer{.directory = "openpmd", .openPMD = {}, .h5hut = {}};
     };
 
     // The existing ID allocator and migration paths keep IDs attached to particles.
@@ -29,7 +36,8 @@ namespace alpine_stream {
     class LandauDampingStreamManager : public LandauWithIds {
     public:
         static constexpr unsigned DIM = 3;
-        static constexpr std::uint64_t BYTES_PER_PARTICLE = 6 * sizeof(double) + sizeof(std::int64_t);
+        static constexpr std::uint64_t BYTES_PER_PARTICLE =
+            6 * sizeof(double) + sizeof(std::int64_t);
         static_assert(sizeof(double) == 8);
         static_assert(std::is_same_v<ParticleContainer_t::index_type, std::int64_t>);
 
@@ -54,20 +62,35 @@ namespace alpine_stream {
             Kokkos::fence("Landau output initialization");
             ippl::Comm->barrier();
             IpplTimings::startTimer(openTimer_m);
-            if (options_m.writer.backend == ippl::OpenPMDBackend::HDF5
-                && options_m.writer.backendConfig == "{}")
-                options_m.writer.backendConfig = R"({"hdf5":{"independent_stores":false}})";
-            writer_m = std::make_unique<ippl::OpenPMDWriter>(options_m.writer,
-                                                            ippl::Comm->getCommunicator());
-            auto& species = writer_m->addParticles("electrons", *this->pcontainer_m,
-                                                   {.lengthUnitSI = options_m.lengthUnitSI});
-            // Kick-drift-kick leaves both R and P at the completed step's time.
-            species.bind(this->pcontainer_m->P,
-                         {{options_m.lengthUnitSI / options_m.writer.timeUnitSI,
-                           {1, 0, -1, 0, 0, 0, 0}}, {"x", "y", "z"}});
-            writer_m->setParticleAttributeSelection(
-                "electrons", ippl::ParticleAttributeSelection::minimal({"velocity"})
-                                 .withParticleIds().withRankIds(false));
+            if (options_m.writer.backend == ippl::IOBackend::OpenPMD
+                && options_m.writer.openPMD.backend == ippl::OpenPMDBackend::HDF5
+                && options_m.writer.openPMD.backendConfig == "{}")
+                options_m.writer.openPMD.backendConfig = R"({"hdf5":{"independent_stores":false}})";
+            writer_m =
+                std::make_unique<ippl::IOWriter>(options_m.writer, ippl::Comm->getCommunicator());
+            if (options_m.kind == OutputKind::Particles) {
+                auto& species = writer_m->addParticles("electrons", *this->pcontainer_m,
+                                                       {.lengthUnitSI = options_m.lengthUnitSI});
+                // Kick-drift-kick leaves both R and P at the completed step's time.
+                species.bind(
+                    this->pcontainer_m->P,
+                    {{options_m.lengthUnitSI / options_m.writer.timeUnitSI, {1, 0, -1, 0, 0, 0, 0}},
+                     {"x", "y", "z"}});
+                writer_m->setParticleAttributeSelection(
+                    "electrons", ippl::ParticleAttributeSelection::minimal({"velocity"})
+                                     .withParticleIds()
+                                     .withRankIds(false));
+            } else {
+                // Landau's E and rho are normalized quantities, not SI-valued records.
+                const ippl::FieldMetadata electricMetadata{{{1.0, {}}, {"x", "y", "z"}},
+                                                           options_m.lengthUnitSI,
+                                                           {"x", "y", "z"},
+                                                           {0.5, 0.5, 0.5}};
+                auto densityMetadata = electricMetadata;
+                densityMetadata.record.components.clear();
+                writer_m->addField("electric_field", this->fcontainer_m->getE(), electricMetadata);
+                writer_m->addField("charge_density", this->fcontainer_m->getRho(), densityMetadata);
+            }
             writer_m->open();
             IpplTimings::stopTimer(openTimer_m);
         }
@@ -112,9 +135,25 @@ namespace alpine_stream {
 
         double getDt() const { return this->dt_m; }
 
+        std::uint64_t outputBytes() const {
+            if (!options_m.enabled)
+                return 0;
+            if (options_m.kind == OutputKind::Particles)
+                return this->totalP_m * BYTES_PER_PARTICLE;
+            std::uint64_t cells = 1;
+            for (unsigned d = 0; d < DIM; ++d) {
+                const auto extent = this->fcontainer_m->getE().getDomain()[d].length();
+                if (cells
+                    > std::numeric_limits<std::uint64_t>::max() / extent / (4 * sizeof(double)))
+                    throw IpplException("LandauDampingStream", "Field payload overflows uint64_t");
+                cells *= extent;
+            }
+            return cells * 4 * sizeof(double);
+        }
+
         // Collect after the run so reductions and CSV writes are outside timestep timers.
         void writeSummary(const std::string& path = "io_summary.csv") const {
-            const int rank = ippl::Comm->rank();
+            const int rank  = ippl::Comm->rank();
             const int ranks = ippl::Comm->size();
             std::ofstream output;
             int failed = 0;
@@ -126,17 +165,18 @@ namespace alpine_stream {
             if (failed)
                 throw IpplException("LandauDampingStream", "Cannot open timing summary " + path);
             if (rank == 0) {
-                output << "step,time,dt,ranks,nx,ny,nz,particles,io_enabled,io_backend,payload_bytes,"
+                output << "step,time,dt,ranks,nx,ny,nz,particles,io_enabled,io_backend,output_kind,"
+                          "payload_bytes,"
                           "advance_max_s,io_sync_max_s,io_write_min_s,io_write_mean_s,"
                           "io_write_max_s,step_max_s,payload_GiB_per_s\n";
                 output << std::setprecision(17);
             }
             const auto& advance = IpplTimings::getMeasurements(advanceTimer_m);
-            const auto& sync = IpplTimings::getMeasurements(syncTimer_m);
-            const auto& write = IpplTimings::getMeasurements(writeTimer_m);
-            const auto& step = IpplTimings::getMeasurements(stepTimer_m);
-            const auto bytes = options_m.enabled ? this->totalP_m * BYTES_PER_PARTICLE : 0;
-            double time = 0;
+            const auto& sync    = IpplTimings::getMeasurements(syncTimer_m);
+            const auto& write   = IpplTimings::getMeasurements(writeTimer_m);
+            const auto& step    = IpplTimings::getMeasurements(stepTimer_m);
+            const auto bytes    = outputBytes();
+            double time         = 0;
             for (std::size_t i = 0; i < step.size(); ++i) {
                 time += this->dt_m;
                 std::array<double, 4> local{advance.at(i), options_m.enabled ? sync.at(i) : 0,
@@ -147,11 +187,17 @@ namespace alpine_stream {
                 MPI_Reduce(local.data(), maximum.data(), 4, MPI_DOUBLE, MPI_MAX, 0, comm);
                 MPI_Reduce(local.data(), sum.data(), 4, MPI_DOUBLE, MPI_SUM, 0, comm);
                 if (rank == 0) {
-                    const double throughput = maximum[2] > 0 ? bytes / 1073741824.0 / maximum[2] : 0;
-                    output << i + 1 << ',' << time << ',' << this->dt_m << ','
-                           << ranks << ',' << this->nr_m[0] << ',' << this->nr_m[1] << ','
-                           << this->nr_m[2] << ',' << this->totalP_m << ',' << options_m.enabled
-                           << ',' << (options_m.writer.backend == ippl::OpenPMDBackend::BP5 ? "bp5" : "hdf5")
+                    const double throughput =
+                        maximum[2] > 0 ? bytes / 1073741824.0 / maximum[2] : 0;
+                    output << i + 1 << ',' << time << ',' << this->dt_m << ',' << ranks << ','
+                           << this->nr_m[0] << ',' << this->nr_m[1] << ',' << this->nr_m[2] << ','
+                           << this->totalP_m << ',' << options_m.enabled << ','
+                           << (options_m.writer.backend == ippl::IOBackend::H5hut ? "h5hut"
+                               : options_m.writer.openPMD.backend == ippl::OpenPMDBackend::BP5
+                                   ? "bp5"
+                                   : "hdf5")
+                           << ','
+                           << (options_m.kind == OutputKind::Particles ? "particles" : "fields")
                            << ',' << bytes << ',' << maximum[0] << ',' << maximum[1] << ','
                            << minimum[2] << ',' << sum[2] / ranks << ',' << maximum[2] << ','
                            << maximum[3] << ',' << throughput << '\n';
@@ -168,13 +214,13 @@ namespace alpine_stream {
 
     private:
         OutputOptions options_m;
-        std::unique_ptr<ippl::OpenPMDWriter> writer_m;
-        IpplTimings::TimerRef openTimer_m = IpplTimings::getTimer("ioOpen");
-        IpplTimings::TimerRef syncTimer_m = IpplTimings::getTimer("ioSync");
-        IpplTimings::TimerRef writeTimer_m = IpplTimings::getTimer("ioWrite");
-        IpplTimings::TimerRef closeTimer_m = IpplTimings::getTimer("ioClose");
+        std::unique_ptr<ippl::IOWriter> writer_m;
+        IpplTimings::TimerRef openTimer_m    = IpplTimings::getTimer("ioOpen");
+        IpplTimings::TimerRef syncTimer_m    = IpplTimings::getTimer("ioSync");
+        IpplTimings::TimerRef writeTimer_m   = IpplTimings::getTimer("ioWrite");
+        IpplTimings::TimerRef closeTimer_m   = IpplTimings::getTimer("ioClose");
         IpplTimings::TimerRef advanceTimer_m = IpplTimings::getTimer("advance");
-        IpplTimings::TimerRef stepTimer_m = IpplTimings::getTimer("timestep");
+        IpplTimings::TimerRef stepTimer_m    = IpplTimings::getTimer("timestep");
     };
 }  // namespace alpine_stream
 

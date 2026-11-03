@@ -12,30 +12,71 @@ if(CMAKE_CURRENT_LIST_DIR STREQUAL "@PROJECT_BINARY_DIR@" OR
   set(_ipplBuildTree TRUE)
 endif()
 
-if(@IPPL_ENABLE_OPENPMD@ AND NOT TARGET openPMD::openPMD)
+if(@IPPL_ENABLE_OPENPMD@ OR @IPPL_ENABLE_H5HUT@)
   if(NOT CMAKE_C_COMPILER_LOADED)
     set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
     set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
-        "IPPL's openPMD dependency requires project(... LANGUAGES C CXX).")
+        "IPPL's I/O dependencies require project(... LANGUAGES C CXX).")
     return()
   endif()
   # A bundled static HDF5 must be found before openPMD so its exported targets
   # resolve to this installation (or build tree), including after relocation.
-  if("@IPPL_OPENPMD_HDF5_FETCHED@")
+  if("@IPPL_IO_HDF5_FETCHED@")
     set(HDF5_USE_STATIC_LIBRARIES TRUE)
     if(_ipplBuildTree)
       find_dependency(HDF5 CONFIG COMPONENTS C
-        HINTS "@IPPL_OPENPMD_HDF5_PACKAGE_HINT@")
+        HINTS "@IPPL_IO_HDF5_PACKAGE_HINT@")
     else()
       find_dependency(HDF5 CONFIG COMPONENTS C static HINTS "${_ipplPrefix}")
     endif()
   endif()
+endif()
+
+if(@IPPL_ENABLE_OPENPMD@ AND NOT TARGET openPMD::openPMD)
   if(_ipplBuildTree)
     find_dependency(openPMD 0.17.1 CONFIG COMPONENTS @IPPL_OPENPMD_COMPONENTS@
       HINTS "@IPPL_OPENPMD_PACKAGE_HINT@")
   else()
     find_dependency(openPMD 0.17.1 CONFIG COMPONENTS @IPPL_OPENPMD_COMPONENTS@
       HINTS "${_ipplPrefix}" "@openPMD_DIR@")
+  endif()
+endif()
+
+if(@IPPL_ENABLE_H5HUT@ AND NOT TARGET H5hut::H5hut)
+  find_dependency(MPI COMPONENTS C)
+  set(HDF5_PREFER_PARALLEL TRUE)
+  find_dependency(HDF5 COMPONENTS C)
+  if(NOT HDF5_IS_PARALLEL)
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE "H5hut requires parallel HDF5")
+    return()
+  endif()
+  if("@IPPL_H5HUT_HEADER_LIBRARY@")
+    # Rediscover header/library-only installations without a separate find module.
+    find_path(H5hut_INCLUDE_DIR H5hut.h
+      HINTS ${H5hut_ROOT} ENV H5hut_ROOT ${H5HUT_ROOT} ENV H5HUT_ROOT
+      PATH_SUFFIXES include)
+    find_library(H5hut_LIBRARY NAMES H5hut h5hut
+      HINTS ${H5hut_ROOT} ENV H5hut_ROOT ${H5HUT_ROOT} ENV H5HUT_ROOT
+      PATH_SUFFIXES lib lib64)
+    mark_as_advanced(H5hut_INCLUDE_DIR H5hut_LIBRARY)
+    if(NOT H5hut_INCLUDE_DIR OR NOT H5hut_LIBRARY)
+      set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+      set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+        "H5hut headers or library not found. Set H5hut_ROOT or CMAKE_PREFIX_PATH.")
+      return()
+    endif()
+    add_library(H5hut::H5hut UNKNOWN IMPORTED)
+    set_target_properties(H5hut::H5hut PROPERTIES
+      IMPORTED_LOCATION "${H5hut_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${H5hut_INCLUDE_DIR}"
+      INTERFACE_LINK_LIBRARIES "HDF5::HDF5;MPI::MPI_C")
+  elseif(_ipplBuildTree)
+    find_dependency(H5hut CONFIG HINTS "@IPPL_H5HUT_PACKAGE_HINT@")
+  elseif("@IPPL_H5HUT_FETCHED@")
+    find_dependency(H5hut CONFIG HINTS "${_ipplPrefix}")
+  else()
+    find_dependency(H5hut CONFIG HINTS "${_ipplPrefix}" "@IPPL_H5HUT_PACKAGE_HINT@")
   endif()
 endif()
 

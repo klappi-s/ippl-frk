@@ -1,5 +1,5 @@
 //
-// Unit test: openPMD particle and field output/readback
+// Unit test: openPMD particle and field output/readback through the shared I/O API
 //
 // Checks exact component values, units, geometry, attribute selection, IDs and reader/writer
 // validation. Small staging budgets, changing particle counts and empty ranks exercise
@@ -14,8 +14,8 @@
 #include <gtest/gtest.h>
 #include <openPMD/openPMD.hpp>
 
-#include "Stream/OpenPMD/OpenPMDReader.h"
-#include "Stream/OpenPMD/OpenPMDWriter.h"
+#include "Stream/IO/IOReader.h"
+#include "Stream/IO/IOWriter.h"
 
 namespace {
     using Layout = ippl::detail::ParticleLayout<double, 3>;
@@ -88,7 +88,7 @@ namespace {
             });
     }
     template <class T>
-    void checkScalarType(ippl::OpenPMDOptions settings, const std::string& name, T value) {
+    void checkScalarType(ippl::IOOptions settings, const std::string& name, T value) {
         settings.directory /= name;
         Layout layout;
         ippl::ParticleBase<Layout> particles(layout);
@@ -99,13 +99,13 @@ namespace {
         fillPositions(particles, 0.0);
         Kokkos::deep_copy(attribute.getView(), value);
         const auto comm = ippl::Comm->getCommunicator();
-        ippl::OpenPMDWriter writer(settings, comm);
+        ippl::IOWriter writer(settings, comm);
         writer.addParticles("sample", particles, {.lengthUnitSI = 1.0}).bind(attribute, DEBUG);
         writer.open();
         writer.write({1, 1.0, 1.0});
         Kokkos::deep_copy(attribute.getView(), T{});
         writer.close();
-        ippl::OpenPMDReader reader(settings.directory, comm);
+        ippl::IOReader reader(settings.directory, comm);
         reader.open();
         const auto values = reader.readParticleComponent<T>(
             1, "sample", "value", "", 0, particles.getLocalNum());
@@ -126,12 +126,15 @@ namespace {
             ippl::Comm->barrier();
         }
         void TearDown() override { ippl::Comm->barrier(); }
-        ippl::OpenPMDOptions options() const {
+        ippl::IOOptions options() const {
             // Three doubles fit: forces repeated bounded chunks in the small arrays.
-            return {.directory = path_m,
-                    .backend = std::getenv("IPPL_TEST_BP5") ? ippl::OpenPMDBackend::BP5
-                                                          : ippl::OpenPMDBackend::HDF5,
-                    .timeUnitSI = 2.0, .stagingBytes = 72};
+            ippl::IOOptions settings;
+            settings.directory = path_m;
+            settings.openPMD.backend = std::getenv("IPPL_TEST_BP5") ? ippl::OpenPMDBackend::BP5
+                                                                  : ippl::OpenPMDBackend::HDF5;
+            settings.timeUnitSI = 2.0;
+            settings.stagingBytes = 72;
+            return settings;
         }
         MPI_Comm communicator() const { return ippl::Comm->getCommunicator(); }
     };
@@ -144,7 +147,7 @@ namespace {
         const auto rank = ippl::Comm->rank();
         particles.create(rank == 0 ? 5 : 0);
         fillParticles(particles, 0.25);
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         auto& species = output.addParticles("electrons", particles, {.lengthUnitSI = 7.0});
         species.bind(particles.P, VELOCITY);
         species.bind(particles.q, CHARGE);
@@ -162,9 +165,10 @@ namespace {
         output.close();
         output.close();
 
-        ippl::OpenPMDReader input(path_m, communicator());
+        ippl::IOReader input(path_m, communicator());
         input.open();
-        EXPECT_EQ(input.info().backend, options().backend);
+        EXPECT_EQ(input.info().backend, ippl::IOBackend::OpenPMD);
+        EXPECT_EQ(input.info().openPMDBackend, options().openPMD.backend);
         EXPECT_EQ(input.info().iterations, (std::vector<std::uint64_t>{1, 2}));
         EXPECT_DOUBLE_EQ(input.info().timeUnitSI, 2.0);
         const auto first = input.inspect(1);
@@ -220,7 +224,7 @@ namespace {
         Kokkos::deep_copy(electric.getView(), ippl::Vector<float, 2>(-999.0f));
         fillField(rho, 0.5);
         fillField(electric, 0.5);
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         output.addField("rho", rho, DENSITY);
         auto vectorMetadata              = DENSITY;
         vectorMetadata.record.components = {"y", "x"};  // preserve declared order
@@ -228,7 +232,7 @@ namespace {
         output.open();
         output.write({4, 1.0, 0.25});
         output.close();
-        ippl::OpenPMDReader input(path_m, communicator());
+        ippl::IOReader input(path_m, communicator());
         input.open();
         const auto info      = input.inspect(4);
         const auto& geometry = info.fields.at(1);
@@ -258,7 +262,7 @@ namespace {
             }
         input.close();
         // Inspect with the backend directly, independently of IPPL's reader.
-        ::openPMD::Series raw((path_m / (options().backend == ippl::OpenPMDBackend::BP5
+        ::openPMD::Series raw((path_m / (options().openPMD.backend == ippl::OpenPMDBackend::BP5
             ? "data_%T.bp5" : "data_%T.h5")).string(), ::openPMD::Access::READ_ONLY,
                               communicator());
         auto component = raw.iterations[4].meshes["rho"][::openPMD::RecordComponent::SCALAR];
@@ -275,7 +279,7 @@ namespace {
         Particles particles(layout);
         particles.create(3);
         fillParticles(particles, 0.25);
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         auto bind = [&](const std::string& name) {
             auto& species = output.addParticles(name, particles, {.lengthUnitSI = 1.0});
             species.bind(particles.P, VELOCITY);
@@ -289,7 +293,7 @@ namespace {
         output.open();
         output.write({0, 0.0, 0.0});
         output.close();
-        ippl::OpenPMDReader input(path_m, communicator());
+        ippl::IOReader input(path_m, communicator());
         input.open();
         const auto info = input.inspect(0);
         EXPECT_TRUE(info.particles[0].records.contains("debug"));
@@ -327,12 +331,12 @@ namespace {
         auto settings = options();
         settings.directory /= std::to_string(color);
         {
-            ippl::OpenPMDWriter output(settings, group);
+            ippl::IOWriter output(settings, group);
             output.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
             output.open();
             output.write({std::uint64_t(color), double(color), 0.1});
             output.close();
-            ippl::OpenPMDReader input(settings.directory, group);
+            ippl::IOReader input(settings.directory, group);
             input.open();
             const auto info = input.inspect(color).particles.at(0);
             EXPECT_EQ(info.count, std::uint64_t(size));
@@ -353,7 +357,7 @@ namespace {
     TEST_F(OpenPMDTest, RejectMissingBindingsAndUnknownNames) {
         Layout layout;
         Particles particles(layout);
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         output.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
         EXPECT_THROW(output.open(), IpplException);
         EXPECT_FALSE(std::filesystem::exists(path_m));
@@ -363,13 +367,13 @@ namespace {
         EXPECT_FALSE(std::filesystem::exists(path_m));
     }
 
-    // Reject an invalid backend enum before creating an output directory.
+    // Reject an invalid openPMD backend enum before creating an output directory.
     TEST_F(OpenPMDTest, RejectUnknownBackend) {
         Layout layout;
         ippl::ParticleBase<Layout> particles(layout);
         auto settings    = options();
-        settings.backend = static_cast<ippl::OpenPMDBackend>(99);
-        ippl::OpenPMDWriter output(settings, communicator());
+        settings.openPMD.backend = static_cast<ippl::OpenPMDBackend>(99);
+        ippl::IOWriter output(settings, communicator());
         output.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
         EXPECT_THROW(output.open(), IpplException);
         EXPECT_FALSE(std::filesystem::exists(path_m));
@@ -402,7 +406,7 @@ namespace {
             if (!ippl::Comm->rank())
                 std::ofstream(path_m / "ippl-series.txt") << descriptor;
             ippl::Comm->barrier();
-            ippl::OpenPMDReader reader(path_m, communicator());
+            ippl::IOReader reader(path_m, communicator());
             EXPECT_THROW(reader.open(), IpplException);
         }
     }
@@ -410,7 +414,7 @@ namespace {
     // Reject configuration that conflicts with the selected backend or synchronous BP5 output
     // before creating an output directory.
     TEST_F(OpenPMDTest, RejectConflictingConfigurationBeforeCreation) {
-        const std::vector<std::string> configs = options().backend == ippl::OpenPMDBackend::BP5
+        const std::vector<std::string> configs = options().openPMD.backend == ippl::OpenPMDBackend::BP5
             ? std::vector<std::string>{R"({"backend":"hdf5"})",
                   R"({"adios2":{"engine":{"type":"sst"}}})",
                   R"({"adios2":{"engine":{"parameters":{"AsyncWrite":"On"}}}})",
@@ -421,8 +425,8 @@ namespace {
             Layout layout;
             ippl::ParticleBase<Layout> particles(layout);
             auto settings = options();
-            settings.backendConfig = config;
-            ippl::OpenPMDWriter writer(settings, communicator());
+            settings.openPMD.backendConfig = config;
+            ippl::IOWriter writer(settings, communicator());
             writer.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
             EXPECT_THROW(writer.open(), IpplException) << config;
             EXPECT_FALSE(std::filesystem::exists(path_m));
@@ -437,9 +441,9 @@ namespace {
         particles.create(7, true);
         auto settings = options();
         // Exercise TOML and non-default parameter capitalization without a parser in IPPL.
-        if (settings.backend == ippl::OpenPMDBackend::BP5)
-            settings.backendConfig = "[adios2.engine.parameters]\nStatsLevel = '0'\n";
-        ippl::OpenPMDWriter writer(settings, communicator());
+        if (settings.openPMD.backend == ippl::OpenPMDBackend::BP5)
+            settings.openPMD.backendConfig = "[adios2.engine.parameters]\nStatsLevel = '0'\n";
+        ippl::IOWriter writer(settings, communicator());
         writer.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
         writer.open();
         for (unsigned step = 1; step <= 3; ++step) {
@@ -450,7 +454,7 @@ namespace {
         }
         fillPositions(particles, -999.0);
         writer.close();
-        ippl::OpenPMDReader reader(path_m, communicator());
+        ippl::IOReader reader(path_m, communicator());
         reader.open();
         for (const auto step : {3u, 1u, 2u, 1u}) {
             const std::uint64_t count = step == 1 ? 7 : (step == 2 ? 0 : 1);
@@ -469,7 +473,7 @@ namespace {
     TEST_F(OpenPMDTest, AgreeLocalMetadataErrors) {
         Layout layout;
         Particles particles(layout);
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         output.addParticles("electrons", particles,
                             {.lengthUnitSI = ippl::Comm->rank() == 0 ? -1.0 : 1.0});
         output.setParticleAttributeSelection("electrons",
@@ -485,7 +489,7 @@ namespace {
             GTEST_SKIP() << "Requires two ranks";
         Layout layout;
         Particles particles(layout);
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         auto& species = output.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
         species.bind(particles.q, CHARGE);
         species.bind(particles.P, VELOCITY);
@@ -505,7 +509,7 @@ namespace {
             std::ofstream(path_m / "keep.txt") << "existing data";
         }
         ippl::Comm->barrier();
-        ippl::OpenPMDWriter output(options(), communicator());
+        ippl::IOWriter output(options(), communicator());
         output.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
         output.setParticleAttributeSelection("electrons",
                                              ippl::ParticleAttributeSelection::minimal());

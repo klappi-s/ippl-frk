@@ -1,24 +1,24 @@
 //
-// Unit test: Landau damping openPMD output
+// Unit test: Landau damping file output
 //
 // Checks output against snapshots taken before each write, stable particle IDs during
 // MPI migration/repartitioning, selected records, metadata, timers and disabled output.
-// The selected demo layout is exercised with HDF5, or BP5 when IPPL_TEST_BP5 is set.
+// Uses openPMD/HDF5, BP5 with IPPL_TEST_BP5, or H5hut with IPPL_TEST_H5HUT.
 //
 
-#include <cstdlib>
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <filesystem>
 #include <gtest/gtest.h>
 
 #include "LandauDampingStreamManager.h"
-#include "Stream/OpenPMD/OpenPMDReader.h"
+#include "Stream/IO/IOReader.h"
 
 const char* TestName = "LandauDampingStreamTest";
 
 namespace {
-    using Manager = alpine_stream::LandauDampingStreamManager;
+    using Manager   = alpine_stream::LandauDampingStreamManager;
     using Particles = Manager::ParticleContainer_t;
     static_assert(!ParticleContainer<double, 3>::EnableIDs);
     static_assert(Particles::EnableIDs);
@@ -29,9 +29,12 @@ namespace {
     };
 
     Snapshot snapshot(Particles& particles) {
-        const auto r = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particles.R.getView());
-        const auto p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particles.P.getView());
-        const auto ids = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particles.ID.getView());
+        const auto r =
+            Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particles.R.getView());
+        const auto p =
+            Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particles.P.getView());
+        const auto ids =
+            Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), particles.ID.getView());
         Snapshot result;
         for (std::size_t i = 0; i < particles.getLocalNum(); ++i) {
             result.positions.push_back({r(i)[0], r(i)[1], r(i)[2]});
@@ -49,8 +52,8 @@ namespace {
         for (std::size_t i = 1; i < offsets.size(); ++i)
             offsets[i] = offsets[i - 1] + counts[i - 1];
         std::vector<std::int64_t> ids(offsets.back() + counts.back());
-        MPI_Allgatherv(data.ids.data(), count, MPI_INT64_T, ids.data(), counts.data(), offsets.data(),
-                      MPI_INT64_T, comm);
+        MPI_Allgatherv(data.ids.data(), count, MPI_INT64_T, ids.data(), counts.data(),
+                       offsets.data(), MPI_INT64_T, comm);
         std::sort(ids.begin(), ids.end());
         return ids;
     }
@@ -69,13 +72,15 @@ namespace {
         std::string solver = "FFT", method = "LeapFrog";
         alpine_stream::OutputOptions options;
         if (std::getenv("IPPL_TEST_BP5")) {
-            options.writer.backend = ippl::OpenPMDBackend::BP5;
-            options.writer.backendConfig = "{}";
+            options.writer.openPMD.backend       = ippl::OpenPMDBackend::BP5;
+            options.writer.openPMD.backendConfig = "{}";
         }
-        options.writer.directory = "particles";
+        if (std::getenv("IPPL_TEST_H5HUT"))
+            options.writer.backend = ippl::IOBackend::H5hut;
+        options.writer.directory    = "particles";
         options.writer.stagingBytes = 3072;  // Multiple chunks per component.
-        options.lengthUnitSI = 3.0;
-        options.writer.timeUnitSI = 5.0;
+        options.lengthUnitSI        = 3.0;
+        options.writer.timeUnitSI   = 5.0;
         // Exercise initial partitioning and rebalance whenever particle counts differ.
         Manager manager(4096, 2, grid, 0.0, solver, method, {}, options);
         manager.pre_run();
@@ -108,14 +113,14 @@ namespace {
             EXPECT_GT(migrated, 0u);
         }
 
-        ippl::OpenPMDReader reader("particles", ippl::Comm->getCommunicator());
+        ippl::IOReader reader("particles", ippl::Comm->getCommunicator());
         reader.open();
         EXPECT_EQ(reader.info().iterations, (std::vector<std::uint64_t>{1, 2}));
         EXPECT_DOUBLE_EQ(reader.info().timeUnitSI, 5.0);
         const std::array<std::string, 3> axes{"x", "y", "z"};
         for (std::uint64_t step = 1; step <= expected.size(); ++step) {
             const auto& values = expected[step - 1];
-            const auto info = reader.inspect(step);
+            const auto info    = reader.inspect(step);
             EXPECT_DOUBLE_EQ(info.step.time, step * manager.getDt());
             const auto& species = info.particles.at(0);
             EXPECT_EQ(species.count, 4096u);
@@ -129,7 +134,8 @@ namespace {
             if (ippl::Comm->rank() == 0)
                 offset = 0;
             EXPECT_EQ(reader.readParticleComponent<std::int64_t>(step, "electrons", "ippl_id", "",
-                                                                 offset, count), values.ids);
+                                                                 offset, count),
+                      values.ids);
             for (unsigned d = 0; d < axes.size(); ++d) {
                 const auto r = reader.readParticleComponent<double>(step, "electrons", "position",
                                                                     axes[d], offset, count);
@@ -146,7 +152,7 @@ namespace {
         reader.close();
 
         IpplTimings::resetAllTimers();
-        options.enabled = false;
+        options.enabled          = false;
         options.writer.directory = "disabled-output";
         Manager baseline(4096, 1, grid, 1.0, solver, method, {}, options);
         baseline.pre_run();

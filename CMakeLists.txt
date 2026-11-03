@@ -62,6 +62,7 @@ option(IPPL_ENABLE_BENCHMARK "Enable Google Benchmark-based benchmarks" OFF)
 
 
 option(IPPL_ENABLE_CATALYST "Enable ParaView Catalyst" OFF)
+option(IPPL_ENABLE_H5HUT "Enable H5hut particle and field I/O" OFF)
 option(IPPL_ENABLE_OPENPMD "Enable openPMD particle and field I/O" OFF)
 set(IPPL_OPENPMD_BACKENDS "HDF5" CACHE STRING "openPMD backends: HDF5;ADIOS2")
 set(Catalyst_DIR "" CACHE PATH "Catalyst cmake package directory or install prefix (catalyst_DIR and CATALYST_DIR also accepted)")

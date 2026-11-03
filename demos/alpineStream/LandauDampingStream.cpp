@@ -11,14 +11,18 @@ const char* TestName = "LandauDampingStream";
 
 namespace {
     void usage() {
-        std::cout << "LandauDampingStream nx ny nz totalParticles steps solver lbThreshold LeapFrog\n"
-                     "  [preconditioner arguments] [--output-dir PATH] [--io-backend hdf5|bp5] [--no-output]\n"
-                     "  [--staging-mib 64] [--length-unit-si 1] [--time-unit-si 1] [IPPL options]\n"
-                     "Writes positions, velocities and persistent IDs after every timestep.\n"
-                     "totalParticles is a global count, not particles per cell.\n"
-                     "For PCG, supply a preconditioner such as jacobi after LeapFrog.\n"
-                     "Output path: --output-dir overrides IPPL_OPENPMD_OUTPUT_DIR; default openpmd.\n"
-                     "HDF5 is the default; BP5 uses ADIOS2. PATH must not already exist.\n";
+        std::cout
+            << "LandauDampingStream nx ny nz totalParticles steps solver lbThreshold LeapFrog\n"
+               "  [preconditioner arguments] [--output-dir PATH] [--io-backend "
+               "openpmd-hdf5|openpmd-bp5|h5hut] [--no-output]\n"
+               "  [--output-kind particles|fields] [--staging-mib 64] [--length-unit-si 1] "
+               "[--time-unit-si 1] [IPPL options]\n"
+               "Writes particles (positions, velocities, IDs) or fields after every timestep.\n"
+               "totalParticles is a global count, not particles per cell.\n"
+               "For PCG, supply a preconditioner such as jacobi after LeapFrog.\n"
+               "Output path: CLI > IPPL_IO_OUTPUT_DIR > IPPL_OPENPMD_OUTPUT_DIR > openpmd.\n"
+               "openPMD/HDF5 is the default; H5hut must be enabled at build time. PATH must not "
+               "already exist.\n";
     }
 
     template <class Integer>
@@ -56,9 +60,9 @@ int main(int argc, char* argv[]) {
         int arg = 1;
         for (unsigned d = 0; d < 3; ++d)
             grid[d] = integer<int>(argv[arg++], "grid extent");
-        const auto particles = integer<size_type>(argv[arg++], "totalParticles");
-        const auto steps = integer<int>(argv[arg++], "steps");
-        std::string solver = argv[arg++];
+        const auto particles   = integer<size_type>(argv[arg++], "totalParticles");
+        const auto steps       = integer<int>(argv[arg++], "steps");
+        std::string solver     = argv[arg++];
         const double threshold = number(argv[arg++], "lbThreshold");
         if (threshold < 0 || threshold > 1)
             throw IpplException(TestName, "lbThreshold must be between 0 and 1");
@@ -74,12 +78,13 @@ int main(int argc, char* argv[]) {
             throw IpplException(TestName, "PCG requires a preconditioner, for example jacobi");
 
         alpine_stream::OutputOptions options;
-        if (const char* outputDir = std::getenv("IPPL_OPENPMD_OUTPUT_DIR");
-            outputDir && *outputDir)
+        if (const char* outputDir = std::getenv("IPPL_OPENPMD_OUTPUT_DIR"); outputDir && *outputDir)
+            options.writer.directory = outputDir;
+        if (const char* outputDir = std::getenv("IPPL_IO_OUTPUT_DIR"); outputDir && *outputDir)
             options.writer.directory = outputDir;
         while (arg < argc) {
             const std::string token = argv[arg++];
-            auto next = [&]() -> std::string {
+            auto next               = [&]() -> std::string {
                 if (arg == argc)
                     throw IpplException(TestName, "Missing value for " + token);
                 return argv[arg++];
@@ -88,16 +93,29 @@ int main(int argc, char* argv[]) {
                 options.writer.directory = next();
             else if (token == "--io-backend") {
                 const auto backend = next();
-                if (backend == "hdf5")
-                    options.writer.backend = ippl::OpenPMDBackend::HDF5;
-                else if (backend == "bp5")
-                    options.writer.backend = ippl::OpenPMDBackend::BP5;
+                if (backend == "hdf5" || backend == "openpmd-hdf5") {
+                    options.writer.backend         = ippl::IOBackend::OpenPMD;
+                    options.writer.openPMD.backend = ippl::OpenPMDBackend::HDF5;
+                } else if (backend == "bp5" || backend == "openpmd-bp5") {
+                    options.writer.backend         = ippl::IOBackend::OpenPMD;
+                    options.writer.openPMD.backend = ippl::OpenPMDBackend::BP5;
+                } else if (backend == "h5hut")
+                    options.writer.backend = ippl::IOBackend::H5hut;
                 else
-                    throw IpplException(TestName, "io-backend must be hdf5 or bp5");
+                    throw IpplException(TestName,
+                                        "io-backend must be openpmd-hdf5, openpmd-bp5 or h5hut");
+            } else if (token == "--output-kind") {
+                const auto kind = next();
+                if (kind == "particles")
+                    options.kind = alpine_stream::OutputKind::Particles;
+                else if (kind == "fields")
+                    options.kind = alpine_stream::OutputKind::Fields;
+                else
+                    throw IpplException(TestName, "output-kind must be particles or fields");
             } else if (token == "--no-output")
                 options.enabled = false;
             else if (token == "--staging-mib") {
-                const auto mib = integer<std::size_t>(next(), "staging-mib");
+                const auto mib            = integer<std::size_t>(next(), "staging-mib");
                 constexpr std::size_t MIB = 1024 * 1024;
                 if (mib > std::numeric_limits<std::size_t>::max() / MIB)
                     throw IpplException(TestName, "staging-mib overflows size_t");
@@ -113,13 +131,13 @@ int main(int argc, char* argv[]) {
                 throw IpplException(TestName, "Unknown argument: " + token);
         }
 
-        const auto total = IpplTimings::getTimer("total");
-        const auto initialize = IpplTimings::getTimer("initialize");
+        const auto total        = IpplTimings::getTimer("total");
+        const auto initialize   = IpplTimings::getTimer("initialize");
         const auto timestepping = IpplTimings::getTimer("timestepping");
         IpplTimings::startTimer(total);
         IpplTimings::startTimer(initialize);
-        alpine_stream::LandauDampingStreamManager manager(
-            particles, steps, grid, threshold, solver, method, preconditioner, options);
+        alpine_stream::LandauDampingStreamManager manager(particles, steps, grid, threshold, solver,
+                                                          method, preconditioner, options);
         manager.pre_run();
         Kokkos::fence("Landau initialization end");
         IpplTimings::stopTimer(initialize);
