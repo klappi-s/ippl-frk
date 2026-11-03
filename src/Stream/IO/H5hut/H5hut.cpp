@@ -35,6 +35,12 @@ namespace ippl::detail::io {
                 MPI_Comm comm        = session.comm_m;
                 try {
                     collective(session, [&] {
+                        // Reject missing payloads before H5hut enters its native error path.
+                        // Some installations abort or crash instead of returning an error.
+                        if (!write)
+                            require(std::filesystem::is_regular_file(path),
+                                    "H5hut payload is missing or not a regular file: "
+                                        + path.string());
                         require(properties != static_cast<h5_prop_t>(H5_ERR),
                                 "Cannot create H5hut file properties");
                         check(mode == H5hutTransferMode::Collective
