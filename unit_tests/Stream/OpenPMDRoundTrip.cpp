@@ -1,3 +1,12 @@
+//
+// Unit test: openPMD particle and field output/readback
+//
+// Checks exact component values, units, geometry, attribute selection, IDs and reader/writer
+// validation. Small staging budgets, changing particle counts and empty ranks exercise
+// chunk writes and MPI collectives. IPPL_TEST_BP5 selects BP5; otherwise the suite uses HDF5.
+//
+
+#include <cstdlib>
 #include "Ippl.h"
 
 #include <filesystem>
@@ -69,14 +78,43 @@ namespace {
             "fill output field", field.getFieldRangePolicy(), KOKKOS_LAMBDA(const Index& index) {
                 const double value =
                     bias + 100 * (index[0] - ghost + firstX) + index[1] - ghost + firstY;
+                auto& cell = ippl::apply(view, index);
                 if constexpr (std::is_same_v<typename F::value_type, double>)
-                    ippl::apply(view, index) = value;
+                    cell = value;
                 else {
-                    ippl::apply(view, index)[0] = value;
-                    ippl::apply(view, index)[1] = -value;
+                    cell[0] = value;
+                    cell[1] = -value;
                 }
             });
     }
+    template <class T>
+    void checkScalarType(ippl::OpenPMDOptions settings, const std::string& name, T value) {
+        settings.directory /= name;
+        Layout layout;
+        ippl::ParticleBase<Layout> particles(layout);
+        ippl::ParticleAttrib<T> attribute;
+        attribute.set_name("value");
+        particles.addAttribute(attribute);
+        particles.create(ippl::Comm->rank() == 0 ? 5 : 0);
+        fillPositions(particles, 0.0);
+        Kokkos::deep_copy(attribute.getView(), value);
+        const auto comm = ippl::Comm->getCommunicator();
+        ippl::OpenPMDWriter writer(settings, comm);
+        writer.addParticles("sample", particles, {.lengthUnitSI = 1.0}).bind(attribute, DEBUG);
+        writer.open();
+        writer.write({1, 1.0, 1.0});
+        Kokkos::deep_copy(attribute.getView(), T{});
+        writer.close();
+        ippl::OpenPMDReader reader(settings.directory, comm);
+        reader.open();
+        const auto values = reader.readParticleComponent<T>(
+            1, "sample", "value", "", 0, particles.getLocalNum());
+        EXPECT_EQ(values.size(), particles.getLocalNum());
+        for (const auto stored : values)
+            EXPECT_EQ(stored, value) << name;
+        reader.close();
+    }
+
     class OpenPMDTest : public ::testing::Test {
     public:
         std::filesystem::path path_m;
@@ -90,11 +128,16 @@ namespace {
         void TearDown() override { ippl::Comm->barrier(); }
         ippl::OpenPMDOptions options() const {
             // Three doubles fit: forces repeated bounded chunks in the small arrays.
-            return {.directory = path_m, .timeUnitSI = 2.0, .stagingBytes = 72};
+            return {.directory = path_m,
+                    .backend = std::getenv("IPPL_TEST_BP5") ? ippl::OpenPMDBackend::BP5
+                                                          : ippl::OpenPMDBackend::HDF5,
+                    .timeUnitSI = 2.0, .stagingBytes = 72};
         }
         MPI_Comm communicator() const { return ippl::Comm->getCommunicator(); }
     };
 
+    // Check exact selected-particle readback and metadata over two writes, including empty
+    // ranks/species and source reallocation; reject duplicate steps and late bindings.
     TEST_F(OpenPMDTest, ParticleRoundTripAndReallocation) {
         Layout layout;
         Particles particles(layout), empty(layout);
@@ -121,6 +164,7 @@ namespace {
 
         ippl::OpenPMDReader input(path_m, communicator());
         input.open();
+        EXPECT_EQ(input.info().backend, options().backend);
         EXPECT_EQ(input.info().iterations, (std::vector<std::uint64_t>{1, 2}));
         EXPECT_DOUBLE_EQ(input.info().timeUnitSI, 2.0);
         const auto first = input.inspect(1);
@@ -163,6 +207,8 @@ namespace {
         EXPECT_EQ(q.size(), local);  // returned storage outlives the reader
     }
 
+    // Check owned scalar/vector values, shifted mesh geometry and component order, excluding
+    // halos; independently inspect the stored metadata with the openPMD API.
     TEST_F(OpenPMDTest, FieldsExcludeHalosAndPreserveGeometry) {
         ippl::NDIndex<2> domain(ippl::Index(3, 9), ippl::Index(-2, 2));
         std::array<bool, 2> decomposition{true, true};
@@ -212,7 +258,8 @@ namespace {
             }
         input.close();
         // Inspect with the backend directly, independently of IPPL's reader.
-        ::openPMD::Series raw((path_m / "data_%T.h5").string(), ::openPMD::Access::READ_ONLY,
+        ::openPMD::Series raw((path_m / (options().backend == ippl::OpenPMDBackend::BP5
+            ? "data_%T.bp5" : "data_%T.h5")).string(), ::openPMD::Access::READ_ONLY,
                               communicator());
         auto component = raw.iterations[4].meshes["rho"][::openPMD::RecordComponent::SCALAR];
         EXPECT_EQ(component.getExtent(), (::openPMD::Extent{7, 5}));
@@ -221,6 +268,8 @@ namespace {
         raw.close();
     }
 
+    // Check default all() and allExcept() selections for separate species, preserving particle
+    // IDs and including rank IDs only where requested.
     TEST_F(OpenPMDTest, AllAndAllExceptWithIds) {
         Layout layout;
         Particles particles(layout);
@@ -261,6 +310,8 @@ namespace {
         input.close();
     }
 
+    // Check independent output on split communicators: counts and rank IDs use the subgroup,
+    // and particle IDs are absent when disabled in the container.
     TEST_F(OpenPMDTest, SubcommunicatorsAndIdsDisabled) {
         const int color = ippl::Comm->rank() % 2;
         MPI_Comm group;
@@ -297,6 +348,8 @@ namespace {
         MPI_Comm_free(&group);
     }
 
+    // Reject selected attributes without metadata bindings and unknown selection names before
+    // creating an output directory.
     TEST_F(OpenPMDTest, RejectMissingBindingsAndUnknownNames) {
         Layout layout;
         Particles particles(layout);
@@ -310,17 +363,109 @@ namespace {
         EXPECT_FALSE(std::filesystem::exists(path_m));
     }
 
-    TEST_F(OpenPMDTest, RejectUnavailableBackend) {
+    // Reject an invalid backend enum before creating an output directory.
+    TEST_F(OpenPMDTest, RejectUnknownBackend) {
         Layout layout;
         ippl::ParticleBase<Layout> particles(layout);
         auto settings    = options();
-        settings.backend = ippl::OpenPMDBackend::BP5;
+        settings.backend = static_cast<ippl::OpenPMDBackend>(99);
         ippl::OpenPMDWriter output(settings, communicator());
         output.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
         EXPECT_THROW(output.open(), IpplException);
         EXPECT_FALSE(std::filesystem::exists(path_m));
     }
 
+    // Round-trip all supported signed/unsigned integer widths and floating-point types exactly,
+    // including empty ranks and reuse of the source storage after writing.
+    TEST_F(OpenPMDTest, AllScalarTypes) {
+        checkScalarType<std::int8_t>(options(), "int8", -7);
+        checkScalarType<std::uint8_t>(options(), "uint8", 250);
+        checkScalarType<std::int16_t>(options(), "int16", -2345);
+        checkScalarType<std::uint16_t>(options(), "uint16", 65530);
+        checkScalarType<std::int32_t>(options(), "int32", -12345678);
+        checkScalarType<std::uint32_t>(options(), "uint32", 4000000000u);
+        checkScalarType<std::int64_t>(options(), "int64", -1234567890123LL);
+        checkScalarType<std::uint64_t>(options(), "uint64", 12345678901234567890ULL);
+        checkScalarType<float>(options(), "float32", -1.25f);
+        checkScalarType<double>(options(), "float64", 1.23456789);
+    }
+
+    // Reject unsupported series versions, paths outside the series directory and trailing
+    // descriptor tokens when opening a reader.
+    TEST_F(OpenPMDTest, RejectInvalidDescriptors) {
+        if (!ippl::Comm->rank())
+            std::filesystem::create_directories(path_m);
+        ippl::Comm->barrier();
+        for (const auto& descriptor : {"IPPL_OPENPMD 3 BP5 data_%T.bp5",
+                                      "IPPL_OPENPMD 2 BP5 ../data_%T.bp5",
+                                      "IPPL_OPENPMD 1 data_%T.h5 extra"}) {
+            if (!ippl::Comm->rank())
+                std::ofstream(path_m / "ippl-series.txt") << descriptor;
+            ippl::Comm->barrier();
+            ippl::OpenPMDReader reader(path_m, communicator());
+            EXPECT_THROW(reader.open(), IpplException);
+        }
+    }
+
+    // Reject configuration that conflicts with the selected backend or synchronous BP5 output
+    // before creating an output directory.
+    TEST_F(OpenPMDTest, RejectConflictingConfigurationBeforeCreation) {
+        const std::vector<std::string> configs = options().backend == ippl::OpenPMDBackend::BP5
+            ? std::vector<std::string>{R"({"backend":"hdf5"})",
+                  R"({"adios2":{"engine":{"type":"sst"}}})",
+                  R"({"adios2":{"engine":{"parameters":{"AsyncWrite":"On"}}}})",
+                  R"({"adios2":{"engine":{"preferred_flush_target":"buffer"}}})",
+                  R"({"adios2":{"engine":{"access_mode":"append"}}})"}
+            : std::vector<std::string>{R"({"backend":"adios2"})"};
+        for (const auto& config : configs) {
+            Layout layout;
+            ippl::ParticleBase<Layout> particles(layout);
+            auto settings = options();
+            settings.backendConfig = config;
+            ippl::OpenPMDWriter writer(settings, communicator());
+            writer.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
+            EXPECT_THROW(writer.open(), IpplException) << config;
+            EXPECT_FALSE(std::filesystem::exists(path_m));
+        }
+    }
+
+    // Check writes after live counts shrink to zero and grow again, then read iterations out
+    // of order and repeatedly after the source values have been overwritten.
+    TEST_F(OpenPMDTest, ChangingCountsAndRandomReads) {
+        Layout layout;
+        ippl::ParticleBase<Layout> particles(layout);
+        particles.create(7, true);
+        auto settings = options();
+        // Exercise TOML and non-default parameter capitalization without a parser in IPPL.
+        if (settings.backend == ippl::OpenPMDBackend::BP5)
+            settings.backendConfig = "[adios2.engine.parameters]\nStatsLevel = '0'\n";
+        ippl::OpenPMDWriter writer(settings, communicator());
+        writer.addParticles("electrons", particles, {.lengthUnitSI = 1.0});
+        writer.open();
+        for (unsigned step = 1; step <= 3; ++step) {
+            // Export reads live counts, including ranks that shrink to zero.
+            particles.setLocalNum(step == 1 ? 7 : (step == 2 ? 0 : 1));
+            fillPositions(particles, 10.0 * step);
+            writer.write({step, double(step), 1.0});
+        }
+        fillPositions(particles, -999.0);
+        writer.close();
+        ippl::OpenPMDReader reader(path_m, communicator());
+        reader.open();
+        for (const auto step : {3u, 1u, 2u, 1u}) {
+            const std::uint64_t count = step == 1 ? 7 : (step == 2 ? 0 : 1);
+            EXPECT_EQ(reader.inspect(step).particles[0].count, count * ippl::Comm->size());
+            const auto values = reader.readParticleComponent<double>(
+                step, "electrons", "position", "y", count * ippl::Comm->rank(), count);
+            EXPECT_EQ(values.size(), count);
+            for (const auto value : values)
+                EXPECT_DOUBLE_EQ(value, 10.0 * step);
+        }
+        reader.close();
+    }
+
+    // Check that invalid units supplied on rank zero cause every rank to reject open(),
+    // without creating an output directory.
     TEST_F(OpenPMDTest, AgreeLocalMetadataErrors) {
         Layout layout;
         Particles particles(layout);
@@ -333,6 +478,8 @@ namespace {
         EXPECT_FALSE(std::filesystem::exists(path_m));
     }
 
+    // With at least two MPI ranks, reject differing attribute selections collectively before
+    // creating output.
     TEST_F(OpenPMDTest, RejectSchemaDisagreement) {
         if (ippl::Comm->size() < 2)
             GTEST_SKIP() << "Requires two ranks";
@@ -349,6 +496,7 @@ namespace {
         EXPECT_FALSE(std::filesystem::exists(path_m));
     }
 
+    // Refuse an existing output directory and retain the file already stored in it.
     TEST_F(OpenPMDTest, RefuseExistingDirectory) {
         Layout layout;
         Particles particles(layout);

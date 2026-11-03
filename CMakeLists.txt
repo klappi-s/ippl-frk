@@ -63,6 +63,7 @@ option(IPPL_ENABLE_BENCHMARK "Enable Google Benchmark-based benchmarks" OFF)
 
 option(IPPL_ENABLE_CATALYST "Enable ParaView Catalyst" OFF)
 option(IPPL_ENABLE_OPENPMD "Enable openPMD particle and field I/O" OFF)
+set(IPPL_OPENPMD_BACKENDS "HDF5" CACHE STRING "openPMD backends: HDF5;ADIOS2")
 set(Catalyst_DIR "" CACHE PATH "Catalyst cmake package directory or install prefix (catalyst_DIR and CATALYST_DIR also accepted)")
 set(Catalyst_VERSION "" CACHE STRING "Catalyst version or git.<tag/branch/sha> (default 2.1.0)")
 # "Build IPPL as a shared library (ON) or static library (OFF)" OFF) if(IPPL_DYL)

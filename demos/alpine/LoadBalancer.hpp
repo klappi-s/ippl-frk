@@ -5,7 +5,7 @@
 
 #include "ParticleContainer.hpp"
 
-template <typename T, unsigned Dim>
+template <typename T, unsigned Dim, typename... IDProperties>
 class LoadBalancer {
     using Base =
         ippl::ParticleBase<ippl::ParticleSpatialLayout<T, Dim, ippl::UniformCartesian<T, Dim>>>;
@@ -16,14 +16,15 @@ private:
     Field_t<Dim>* rho_m;
     VField_t<T, Dim>* E_m;
     Field<T, Dim>* phi_m;
-    std::shared_ptr<ParticleContainer<T, Dim>> pc_m;
+    std::shared_ptr<ParticleContainer<T, Dim, IDProperties...>> pc_m;
     std::shared_ptr<FieldSolver_t> fs_m;
     unsigned int loadbalancefreq_m;
     ORB<T, Dim> orb;
 
 public:
     LoadBalancer(double lbs, std::shared_ptr<FieldContainer<T, Dim>>& fc,
-                 std::shared_ptr<ParticleContainer<T, Dim>>& pc, std::shared_ptr<FieldSolver_t>& fs)
+                 std::shared_ptr<ParticleContainer<T, Dim, IDProperties...>>& pc,
+                 std::shared_ptr<FieldSolver_t>& fs)
         : loadbalancethreshold_m(lbs)
         , rho_m(&fc->getRho())
         , E_m(&fc->getE())
@@ -45,8 +46,12 @@ public:
     Field<T, Dim>* getPhi() { return phi_m; }
     void setPhi(Field<T, Dim>* phi) { phi_m = phi; }
 
-    std::shared_ptr<ParticleContainer<T, Dim>> getParticleContainer() const { return pc_m; }
-    void setParticleContainer(std::shared_ptr<ParticleContainer<T, Dim>> pc) { pc_m = pc; }
+    std::shared_ptr<ParticleContainer<T, Dim, IDProperties...>> getParticleContainer() const {
+        return pc_m;
+    }
+    void setParticleContainer(std::shared_ptr<ParticleContainer<T, Dim, IDProperties...>> pc) {
+        pc_m = pc;
+    }
 
     std::shared_ptr<FieldSolver_t> getFieldSolver() const { return fs_m; }
     void setFieldSolver(std::shared_ptr<FieldSolver_t> fs) { fs_m = fs; }

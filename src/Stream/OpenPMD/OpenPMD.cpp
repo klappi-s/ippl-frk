@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <climits>
+#include <cstdlib>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -7,6 +8,7 @@
 #include <locale>
 #include <numeric>
 #include <openPMD/openPMD.hpp>
+#include <openPMD/auxiliary/JSON.hpp>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -97,6 +99,58 @@ namespace ippl {
             collective(session, [&] {
                 require(value == first, description + " differs between ranks");
             });
+        }
+        const char* seriesPattern(OpenPMDBackend backend) {
+            switch (backend) {
+                case OpenPMDBackend::HDF5:
+                    require(IPPL_OPENPMD_HAVE_HDF5, "IPPL was built without openPMD HDF5 support");
+                    return "data_%T.h5";
+                case OpenPMDBackend::BP5:
+                    require(IPPL_OPENPMD_HAVE_ADIOS2, "IPPL was built without openPMD ADIOS2 support");
+                    return "data_%T.bp5";
+            }
+            throw IpplException("openPMD", "Unknown output backend");
+        }
+        std::string backendConfiguration(OpenPMDBackend backend, const std::string& input,
+                                         bool reading = false) {
+            seriesPattern(backend); // Check build capabilities before creating any files.
+            const std::string required = backend == OpenPMDBackend::HDF5
+                ? R"({"backend":"hdf5","iteration_encoding":"file_based"})"
+                : std::string(R"({"backend":"adios2","iteration_encoding":"file_based","adios2":{"engine":{"type":"bp5","preferred_flush_target":"disk","access_mode":")")
+                    + (reading ? "readrandomaccess" : "write")
+                    + R"(","parameters":{"asyncwrite":"off"}}}})";
+            // Resolve files/TOML locally, then agree the resulting JSON on all ranks.
+            // Lowercase only the validation copy: ADIOS2 parameter names are case insensitive.
+            const auto canonical = ::openPMD::json::merge(input, "{}");
+            auto folded = canonical;
+            for (auto& c : folded)
+                if (c >= 'A' && c <= 'Z')
+                    c += 'a' - 'A';
+            const auto requested = ::openPMD::json::merge(required, folded);
+            require(::openPMD::json::merge(requested, required) == requested,
+                    "backendConfig conflicts with the selected backend, file-based encoding "
+                    "or synchronous disk output");
+            if (backend == OpenPMDBackend::BP5) {
+                require(::openPMD::json::merge(requested,
+                            R"({"adios2":{"engine":{"treat_unsupported_engine_like":null}}})")
+                            == requested,
+                        "Engine emulation is unsupported for BP5 output");
+                const auto pretend = std::getenv("OPENPMD_ADIOS2_PRETEND_ENGINE");
+                require(!pretend || !*pretend,
+                        "OPENPMD_ADIOS2_PRETEND_ENGINE is unsupported for BP5 output");
+            }
+            // Explicit engine/AsyncWrite settings take precedence over environment defaults.
+            return ::openPMD::json::merge(required, canonical);
+        }
+        void checkBackend(const ::openPMD::Series& series, OpenPMDBackend backend) {
+            require(series.backend() == (backend == OpenPMDBackend::HDF5 ? "MPI_HDF5" : "ADIOS2"),
+                    "openPMD did not select the requested parallel backend");
+            require(series.iterationEncoding() == ::openPMD::IterationEncoding::fileBased,
+                    "openPMD must use file-based iteration encoding");
+        }
+        void flushOutput(::openPMD::Series& series) {
+            series.flush(series.backend() == "ADIOS2"
+                ? R"({"adios2":{"engine":{"preferred_flush_target":"disk"}}})" : "{}");
         }
         std::ostringstream stream() {
             std::ostringstream result;
@@ -268,7 +322,7 @@ namespace ippl {
                         component.storeChunk(values, offset, local.extent);
                     },
                     data);
-                series.flush();
+                flushOutput(series);
             }
         }
         template <class Record>
@@ -329,8 +383,7 @@ namespace ippl {
                 << static_cast<int>(options_m.backend) << ' ' << options_m.timeUnitSI << ' '
                 << std::quoted(options_m.backendConfig) << ' ' << options_m.stagingBytes << ' ';
             require(!options_m.directory.empty(), "An output directory is required");
-            require(options_m.backend == OpenPMDBackend::HDF5,
-                    "This initial implementation supports HDF5 only");
+            seriesPattern(options_m.backend);
             require(std::isfinite(options_m.timeUnitSI) && options_m.timeUnitSI > 0,
                     "Invalid timeUnitSI");
             require(options_m.stagingBytes >= 3 * sizeof(double),
@@ -456,6 +509,8 @@ namespace ippl {
         self.session_m.start(self.requested_m);
         try {
             collective(self.session_m, [&] {
+                self.options_m.backendConfig = backendConfiguration(
+                    self.options_m.backend, self.options_m.backendConfig);
                 self.schema_m = self.validate();
             });
             agree(self.session_m, self.schema_m, "Output schema/options");
@@ -468,19 +523,20 @@ namespace ippl {
                 require(std::filesystem::create_directory(self.options_m.directory),
                         "Output directory already exists");
                 std::ofstream descriptor(self.options_m.directory / "ippl-series.txt");
-                descriptor << "IPPL_OPENPMD 1 data_%T.h5\n";
+                descriptor << (self.options_m.backend == OpenPMDBackend::HDF5
+                    ? "IPPL_OPENPMD 1 data_%T.h5\n" : "IPPL_OPENPMD 2 BP5 data_%T.bp5\n");
                 descriptor.close();
                 require(!descriptor.fail(), "Cannot write series descriptor");
+                std::ofstream config(self.options_m.directory / "ippl-backend.json");
+                config << self.options_m.backendConfig << '\n';
+                config.close();
+                require(!config.fail(), "Cannot write backend configuration");
             });
             self.series_m = std::make_unique<::openPMD::Series>(
-                (self.options_m.directory / "data_%T.h5").string(), ::openPMD::Access::CREATE,
+                (self.options_m.directory / seriesPattern(self.options_m.backend)).string(), ::openPMD::Access::CREATE,
                 self.session_m.comm_m, self.options_m.backendConfig);
             collective(self.session_m, [&] {
-                require(self.series_m->backend() == "MPI_HDF5",
-                        "backendConfig must preserve the parallel HDF5 backend");
-                require(
-                    self.series_m->iterationEncoding() == ::openPMD::IterationEncoding::fileBased,
-                    "backendConfig must preserve file-based iteration encoding");
+                checkBackend(*self.series_m, self.options_m.backend);
             });
             self.series_m->setAttribute("ippl_schema", std::uint32_t{1});
             for (auto& [name, binding] : self.particles_m)
@@ -616,12 +672,12 @@ namespace ippl {
             }
         }
         iteration.close();
-        self.series_m->flush();
+        flushOutput(*self.series_m);
         self.lastStep_m = step.step;
     }
     void OpenPMDWriter::flush() {
         require(bool(impl_m->series_m), "flush() requires an open writer");
-        impl_m->series_m->flush();
+        flushOutput(*impl_m->series_m);
     }
     void OpenPMDWriter::close() {
         if (impl_m->closed_m)
@@ -660,19 +716,33 @@ namespace ippl {
         self.session_m.start(self.requested_m);
         try {
             agree(self.session_m, self.directory_m.string(), "Input directory");
+            std::string pattern, config;
             collective(self.session_m, [&] {
                 std::ifstream file(self.directory_m / "ippl-series.txt");
-                std::string header, pattern;
+                std::string header, token, extra;
                 unsigned version = 0;
-                file >> header >> version >> pattern;
-                require(bool(file) && header == "IPPL_OPENPMD" && version == 1
-                            && pattern == "data_%T.h5",
-                        "Invalid/unsupported IPPL series descriptor");
+                file >> header >> version >> token;
+                require(bool(file) && header == "IPPL_OPENPMD", "Invalid IPPL series descriptor");
+                if (version == 1 && token == "data_%T.h5") {
+                    self.info_m.backend = OpenPMDBackend::HDF5;
+                    pattern = token;
+                } else if (version == 2 && token == "BP5") {
+                    self.info_m.backend = OpenPMDBackend::BP5;
+                    file >> pattern;
+                    require(bool(file), "Missing BP5 series pattern");
+                } else
+                    throw IpplException("openPMD", "Unsupported IPPL series descriptor");
+                require(pattern == seriesPattern(self.info_m.backend) && !(file >> extra),
+                        "Invalid IPPL series pattern or trailing descriptor data");
+                config = backendConfiguration(self.info_m.backend, "{}", true);
             });
+            agree(self.session_m, pattern, "Input series pattern");
+            agree(self.session_m, config, "Input backend configuration");
             self.series_m = std::make_unique<::openPMD::Series>(
-                (self.directory_m / "data_%T.h5").string(), ::openPMD::Access::READ_ONLY,
-                self.session_m.comm_m);
+                (self.directory_m / pattern).string(), ::openPMD::Access::READ_ONLY,
+                self.session_m.comm_m, config);
             collective(self.session_m, [&] {
+                checkBackend(*self.series_m, self.info_m.backend);
                 require(self.series_m->containsAttribute("ippl_schema")
                             && self.series_m->getAttribute("ippl_schema").get<std::uint32_t>() == 1,
                         "Unsupported IPPL output schema");
