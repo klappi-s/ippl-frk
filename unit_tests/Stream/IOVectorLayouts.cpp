@@ -1,16 +1,18 @@
 //
-// Unit test: openPMD output for independent AoS/SoA particle and field layouts
+// Unit test: shared I/O for independent AoS/SoA particle and field layouts
 //
 // Checks all four storage combinations with LayoutLeft/LayoutRight spatial indexing,
 // mixed-layout HostSpace attributes, empty ranks, spare capacity and reallocation.
 // Direct packing and exact readback verify ghost exclusion, component order and metadata.
-// IPPL_TEST_BP5 selects BP5; otherwise the suite uses HDF5.
+// HDF5 is the default; IPPL_TEST_BP5 selects BP5 and IPPL_TEST_H5HUT selects H5hut.
+// Position/diagnostic attributes use HostSpace; velocity and fields use the default
+// execution/memory space. Run on one/two MPI ranks, including initially empty ranks.
 //
 
 #include <cstdlib>
 #include "Ippl.h"
-#include "Stream/OpenPMD/OpenPMDReader.h"
-#include "Stream/OpenPMD/OpenPMDWriter.h"
+#include "Stream/IO/IOReader.h"
+#include "Stream/IO/IOWriter.h"
 
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -45,8 +47,16 @@ namespace {
             KOKKOS_LAMBDA(std::size_t i) {
                 for (unsigned d = 0; d < 3; ++d) {
                     r(i)[d] = bias + rank * 100 + 4 * i + d;
-                    v(i)[d] = -r(i)[d];
+
                 }
+            });
+        // Each source is filled in its own execution space, including CUDA builds
+        // where positions are host-resident and velocities are device-resident.
+        Kokkos::parallel_for(
+            "layout output velocity", ippl::getRangePolicy(v),
+            KOKKOS_LAMBDA(std::size_t i) {
+                for (unsigned d = 0; d < 3; ++d)
+                    v(i)[d] = -(bias + rank * 100 + 4 * i + d);
             });
         auto hostDiagnostic = particles.diagnostic_m.getView();
         for (std::size_t i = 0; i < particles.getLocalNum(); ++i) {
@@ -99,10 +109,20 @@ namespace {
         const ippl::FieldMetadata FIELD{
             {{4.0, {}}, {"third", "first", "second"}},
             5.0, {"x", "y"}, {0.5, 0.5}};
-        ippl::OpenPMDWriter writer({.directory = directory,
-            .backend = std::getenv("IPPL_TEST_BP5") ? ippl::OpenPMDBackend::BP5
-                                                  : ippl::OpenPMDBackend::HDF5,
-            .stagingBytes = 144}, comm);
+        ippl::IOOptions settings;
+        settings.directory = directory;
+        // Full scalar field components fit for H5Block; particle components still
+        // need multiple chunks after reallocation. openPMD keeps its tiny chunk test.
+        settings.stagingBytes = std::getenv("IPPL_TEST_H5HUT") ? 432 : 144;
+        if (std::getenv("IPPL_TEST_BP5"))
+            settings.openPMD.backend = ippl::OpenPMDBackend::BP5;
+        if (std::getenv("IPPL_TEST_H5HUT")) {
+            settings.backend = ippl::IOBackend::H5hut;
+            if (const char* mode = std::getenv("IPPL_TEST_IO_BACKEND");
+                mode && std::string_view(mode) == "h5hut-independent")
+                settings.h5hut.transferMode = ippl::H5hutTransferMode::Independent;
+        }
+        ippl::IOWriter writer(settings, comm);
         auto& species = writer.addParticles("particles", particles, {.lengthUnitSI = 3.0});
         species.bind(particles.velocity_m, VELOCITY);
         species.bind(particles.diagnostic_m, DIAGNOSTIC);
@@ -117,20 +137,28 @@ namespace {
             Kokkos::deep_copy(field.getView(), ippl::Vector<float, 3>(-9999.0f));
             fillField(field, step + 0.5f);
             // Check the device-to-host adapter separately from the file backend.
-            const auto source = ippl::detail::openpmd::fieldSource("field", field, FIELD);
+            const auto source = ippl::detail::io::fieldSource("field", field, FIELD);
             const auto owned = field.getOwned();
             const ippl::Chunk region{{0, 0}, {static_cast<std::uint64_t>(owned[0].length()),
                                               static_cast<std::uint64_t>(owned[1].length())}};
-            for (unsigned d = 0; d < 3; ++d) {
-                const auto packed = source.values_m.pack_m(d, region);
-                const auto& values = std::get<std::vector<float>>(packed);
-                for (std::uint64_t i = 0; i < region.extent[0]; ++i)
-                    for (std::uint64_t j = 0; j < region.extent[1]; ++j)
-                        EXPECT_FLOAT_EQ(values.at(i * region.extent[1] + j),
-                            step + 0.5f + d * 1000 + 100 * (owned[0].first() + i)
-                            + owned[1].first() + static_cast<std::int64_t>(j));
+            for (auto order : {ippl::detail::io::ArrayOrder::C,
+                               ippl::detail::io::ArrayOrder::FirstIndexFastest}) {
+                for (unsigned d = 0; d < 3; ++d) {
+                    const auto packed = source.values_m.pack_m(d, region, order);
+                    const auto& values = std::get<std::vector<float>>(packed);
+                    for (std::uint64_t i = 0; i < region.extent[0]; ++i)
+                        for (std::uint64_t j = 0; j < region.extent[1]; ++j) {
+                            const auto linear = order == ippl::detail::io::ArrayOrder::C
+                                                    ? i * region.extent[1] + j
+                                                    : j * region.extent[0] + i;
+                            EXPECT_FLOAT_EQ(values.at(linear),
+                                step + 0.5f + d * 1000 + 100 * (owned[0].first() + i)
+                                + owned[1].first() + static_cast<std::int64_t>(j));
+                        }
+                }
             }
-            const auto ids = particles.ID.getView();
+            const auto ids = Kokkos::create_mirror_view_and_copy(
+                Kokkos::HostSpace(), particles.ID.getView());
             for (std::size_t i = 0; i < particles.getLocalNum(); ++i)
                 expectedIds[step].push_back(ids(i));
             writer.write({step + 1, 0.1 * (step + 1), 0.1});
@@ -147,7 +175,7 @@ namespace {
         }
         writer.close();
 
-        ippl::OpenPMDReader reader(directory, comm);
+        ippl::IOReader reader(directory, comm);
         reader.open();
         const std::array<std::string, 3> axes{"x", "y", "z"};
         for (unsigned step = 0; step < 2; ++step) {
@@ -201,16 +229,16 @@ namespace {
     }
 
     // Check exact AoS particle/AoS field output with both spatial index orders.
-    TEST(OpenPMDVectorLayouts, AoSParticlesAoSField) { checkSpatialLayouts<ippl::AoS, ippl::AoS>(); }
+    TEST(IOVectorLayouts, AoSParticlesAoSField) { checkSpatialLayouts<ippl::AoS, ippl::AoS>(); }
 
     // Check exact AoS particle/SoA field output with both spatial index orders.
-    TEST(OpenPMDVectorLayouts, AoSParticlesSoAField) { checkSpatialLayouts<ippl::AoS, ippl::SoA>(); }
+    TEST(IOVectorLayouts, AoSParticlesSoAField) { checkSpatialLayouts<ippl::AoS, ippl::SoA>(); }
 
     // Check exact SoA particle/AoS field output with both spatial index orders.
-    TEST(OpenPMDVectorLayouts, SoAParticlesAoSField) { checkSpatialLayouts<ippl::SoA, ippl::AoS>(); }
+    TEST(IOVectorLayouts, SoAParticlesAoSField) { checkSpatialLayouts<ippl::SoA, ippl::AoS>(); }
 
     // Check exact SoA particle/SoA field output with both spatial index orders.
-    TEST(OpenPMDVectorLayouts, SoAParticlesSoAField) { checkSpatialLayouts<ippl::SoA, ippl::SoA>(); }
+    TEST(IOVectorLayouts, SoAParticlesSoAField) { checkSpatialLayouts<ippl::SoA, ippl::SoA>(); }
 }  // namespace
 
 int main(int argc, char** argv) {

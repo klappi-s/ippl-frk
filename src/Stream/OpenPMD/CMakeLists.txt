@@ -1,8 +1,0 @@
-target_sources(ippl PRIVATE OpenPMD.cpp)
-foreach(backend IN ITEMS HDF5 ADIOS2)
-  if(backend IN_LIST IPPL_OPENPMD_BACKENDS)
-    target_compile_definitions(ippl PRIVATE IPPL_OPENPMD_HAVE_${backend}=1)
-  else()
-    target_compile_definitions(ippl PRIVATE IPPL_OPENPMD_HAVE_${backend}=0)
-  endif()
-endforeach()

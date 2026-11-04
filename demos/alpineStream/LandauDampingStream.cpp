@@ -12,7 +12,7 @@ const char* TestName = "LandauDampingStream";
 namespace {
     void usage() {
         std::cout << "LandauDampingStream nx ny nz totalParticles steps solver lbThreshold LeapFrog\n"
-                     "  [preconditioner arguments] [--output-dir PATH] [--io-backend hdf5|bp5] [--no-output]\n"
+                     "  [preconditioner arguments] [--output-dir PATH] [--io-backend hdf5|bp5|h5hut] [--no-output]\n"
                      "  [--output-kind particles|fields]\n"
                      "  [--staging-mib 64] [--length-unit-si 1] [--time-unit-si 1] [IPPL options]\n"
                      "Writes positions, velocities and IDs (default), or normalized E and rho.\n"
@@ -20,7 +20,7 @@ namespace {
                      "totalParticles is a global count, not particles per cell.\n"
                      "For PCG, supply a preconditioner such as jacobi after LeapFrog.\n"
                      "Output path: --output-dir overrides IPPL_OPENPMD_OUTPUT_DIR; default openpmd.\n"
-                     "HDF5 is the default; BP5 uses ADIOS2. PATH must not already exist.\n";
+                     "HDF5 is the default; BP5 uses ADIOS2; h5hut uses native H5Part/H5Block. PATH must not already exist.\n";
     }
 
     template <class Integer>
@@ -99,12 +99,16 @@ int main(int argc, char* argv[]) {
             }
             else if (token == "--io-backend") {
                 const auto backend = next();
-                if (backend == "hdf5")
-                    options.writer.backend = ippl::OpenPMDBackend::HDF5;
-                else if (backend == "bp5")
-                    options.writer.backend = ippl::OpenPMDBackend::BP5;
+                if (backend == "hdf5" || backend == "openpmd-hdf5") {
+                    options.writer.backend = ippl::IOBackend::OpenPMD;
+                    options.writer.openPMD.backend = ippl::OpenPMDBackend::HDF5;
+                } else if (backend == "bp5" || backend == "openpmd-bp5") {
+                    options.writer.backend = ippl::IOBackend::OpenPMD;
+                    options.writer.openPMD.backend = ippl::OpenPMDBackend::BP5;
+                } else if (backend == "h5hut")
+                    options.writer.backend = ippl::IOBackend::H5hut;
                 else
-                    throw IpplException(TestName, "io-backend must be hdf5 or bp5");
+                    throw IpplException(TestName, "io-backend must be hdf5, bp5 or h5hut");
             } else if (token == "--no-output")
                 options.enabled = false;
             else if (token == "--staging-mib") {

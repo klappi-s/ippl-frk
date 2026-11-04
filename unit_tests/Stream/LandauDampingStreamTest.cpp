@@ -1,10 +1,11 @@
 //
-// Unit test: Landau damping openPMD output
+// Unit test: Landau damping shared I/O for independent vector layouts
 //
 // Checks output against snapshots taken before each write, stable particle IDs during
 // MPI migration/repartitioning, selected records, metadata, timers and disabled output.
 // Field-only output also checks owned-cell values, geometry and omission of particles.
-// The selected demo layout is exercised with HDF5, or BP5 when IPPL_TEST_BP5 is set.
+// HDF5 is the default; IPPL_TEST_BP5 selects BP5 and IPPL_TEST_H5HUT selects H5hut.
+// The suite uses the selected Kokkos execution space and one/two MPI ranks.
 //
 
 #include <cstdlib>
@@ -14,7 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "LandauDampingStreamManager.h"
-#include "Stream/OpenPMD/OpenPMDReader.h"
+#include "Stream/IO/IOReader.h"
 
 const char* TestName = "LandauDampingStreamTest";
 
@@ -97,12 +98,14 @@ namespace {
         std::string solver = "FFT", method = "LeapFrog";
         alpine_stream::OutputOptions options;
         if (std::getenv("IPPL_TEST_BP5")) {
-            options.writer.backend = ippl::OpenPMDBackend::BP5;
-            options.writer.backendConfig = "{}";
+            options.writer.openPMD.backend = ippl::OpenPMDBackend::BP5;
+            options.writer.openPMD.backendConfig = "{}";
         }
+        if (std::getenv("IPPL_TEST_H5HUT"))
+            options.writer.backend = ippl::IOBackend::H5hut;
         options.kind = alpine_stream::OutputKind::Fields;
         options.writer.directory = "fields";
-        options.writer.stagingBytes = 128;
+        options.writer.stagingBytes = std::getenv("IPPL_TEST_H5HUT") ? 16384 : 128;
         options.lengthUnitSI = 3.0;
         Manager manager(4096, 2, grid, 0.0, solver, method, {}, options);
         manager.pre_run();
@@ -120,7 +123,7 @@ namespace {
         manager.closeOutput();
         manager.writeSummary("field-summary.csv");
         EXPECT_EQ(IpplTimings::getMeasurements("ioWrite").size(), 2u);
-        ippl::OpenPMDReader reader("fields", ippl::Comm->getCommunicator());
+        ippl::IOReader reader("fields", ippl::Comm->getCommunicator());
         reader.open();
         for (std::uint64_t step = 1; step <= expected.size(); ++step) {
             const auto info = reader.inspect(step);
@@ -157,9 +160,11 @@ namespace {
         std::string solver = "FFT", method = "LeapFrog";
         alpine_stream::OutputOptions options;
         if (std::getenv("IPPL_TEST_BP5")) {
-            options.writer.backend = ippl::OpenPMDBackend::BP5;
-            options.writer.backendConfig = "{}";
+            options.writer.openPMD.backend = ippl::OpenPMDBackend::BP5;
+            options.writer.openPMD.backendConfig = "{}";
         }
+        if (std::getenv("IPPL_TEST_H5HUT"))
+            options.writer.backend = ippl::IOBackend::H5hut;
         options.writer.directory = "particles";
         options.writer.stagingBytes = 3072;  // Multiple chunks per component.
         options.lengthUnitSI = 3.0;
@@ -196,7 +201,7 @@ namespace {
             EXPECT_GT(migrated, 0u);
         }
 
-        ippl::OpenPMDReader reader("particles", ippl::Comm->getCommunicator());
+        ippl::IOReader reader("particles", ippl::Comm->getCommunicator());
         reader.open();
         EXPECT_EQ(reader.info().iterations, (std::vector<std::uint64_t>{1, 2}));
         EXPECT_DOUBLE_EQ(reader.info().timeUnitSI, 5.0);

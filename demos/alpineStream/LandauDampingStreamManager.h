@@ -11,7 +11,7 @@
 #include <type_traits>
 
 #include "Manager/datatypes.h"
-#include "Stream/OpenPMD/OpenPMDWriter.h"
+#include "Stream/IO/IOWriter.h"
 #include "Utility/IpplTimings.h"
 #include "../alpine/LandauDampingManager.h"
 
@@ -26,7 +26,7 @@ namespace alpine_stream {
         bool enabled = true;
         OutputKind kind = OutputKind::Particles;
         double lengthUnitSI = 1.0;
-        ippl::OpenPMDOptions writer{.directory = "openpmd"};
+        ippl::IOOptions writer{.directory = "openpmd", .openPMD = {}, .h5hut = {}};
     };
 
     // The existing ID allocator and migration paths keep IDs attached to particles.
@@ -65,10 +65,11 @@ namespace alpine_stream {
             Kokkos::fence("Landau output initialization");
             ippl::Comm->barrier();
             IpplTimings::startTimer(openTimer_m);
-            if (options_m.writer.backend == ippl::OpenPMDBackend::HDF5
-                && options_m.writer.backendConfig == "{}")
-                options_m.writer.backendConfig = R"({"hdf5":{"independent_stores":false}})";
-            writer_m = std::make_unique<ippl::OpenPMDWriter>(options_m.writer,
+            if (options_m.writer.backend == ippl::IOBackend::OpenPMD
+                && options_m.writer.openPMD.backend == ippl::OpenPMDBackend::HDF5
+                && options_m.writer.openPMD.backendConfig == "{}")
+                options_m.writer.openPMD.backendConfig = R"({"hdf5":{"independent_stores":false}})";
+            writer_m = std::make_unique<ippl::IOWriter>(options_m.writer,
                                                             ippl::Comm->getCommunicator());
             if (options_m.kind == OutputKind::Particles) {
                 auto& species = writer_m->addParticles("electrons", *this->pcontainer_m,
@@ -189,7 +190,8 @@ namespace alpine_stream {
                     output << i + 1 << ',' << time << ',' << this->dt_m << ','
                            << ranks << ',' << this->nr_m[0] << ',' << this->nr_m[1] << ','
                            << this->nr_m[2] << ',' << this->totalP_m << ',' << options_m.enabled
-                           << ',' << (options_m.writer.backend == ippl::OpenPMDBackend::BP5 ? "bp5" : "hdf5")
+                           << ',' << (options_m.writer.backend == ippl::IOBackend::H5hut ? "h5hut"
+                               : options_m.writer.openPMD.backend == ippl::OpenPMDBackend::BP5 ? "bp5" : "hdf5")
                            << ',' << bytes << ',' << maximum[0] << ',' << maximum[1] << ','
                            << minimum[2] << ',' << sum[2] / ranks << ',' << maximum[2] << ','
                            << maximum[3] << ',' << throughput << ',' << PARTICLE_LAYOUT << ','
@@ -209,7 +211,7 @@ namespace alpine_stream {
 
     private:
         OutputOptions options_m;
-        std::unique_ptr<ippl::OpenPMDWriter> writer_m;
+        std::unique_ptr<ippl::IOWriter> writer_m;
         IpplTimings::TimerRef openTimer_m = IpplTimings::getTimer("ioOpen");
         IpplTimings::TimerRef syncTimer_m = IpplTimings::getTimer("ioSync");
         IpplTimings::TimerRef writeTimer_m = IpplTimings::getTimer("ioWrite");
