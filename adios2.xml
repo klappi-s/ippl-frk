@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!--
+  ADIOS2 configuration for the ipplADIOS / AdiosCatalyst track.
+
+  The IO block name MUST be "Writer": AdiosCatalyst hardcodes DeclareIO("Writer")
+  in AdiosPipeline.cxx, so any other name silently disables engine selection.
+
+  This configures the BP5 engine for scalable on-disk time-series output. The
+  output basename comes from catalyst/state/sstFileName (IPPL_ADIOS2_OUTPUT,
+  default "alpine.bp"); BP5 writes it as a directory bundle.
+
+  Inspect results with:
+    bpls -l  alpine.bp
+    bpls -D  alpine.bp
+-->
+<adios-config>
+    <io name="Writer">
+        <engine type="BP5">
+            <!-- One sub-file per aggregator. Tune to the node/rank count. -->
+            <parameter key="NumAggregators" value="0"/>
+            <parameter key="AggregationType" value="TwoLevelShm"/>
+            <parameter key="AsyncWrite" value="false"/>
+        </engine>
+    </io>
+
+    <!--
+      Optional in-transit template (SST) for AdiosReplay experiments; disabled
+      by default. To stream instead of writing to disk, point AdiosCatalyst at
+      an "Writer" block using engine type "SST".
+    -->
+</adios-config>
