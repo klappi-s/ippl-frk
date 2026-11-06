@@ -15,7 +15,7 @@ Usage: bash gh200_validate.sh STAGE
   oracle-source One GPU: source-sampling regression in 1D-3D, both stiffness modes.
   oracle      One GPU: complete serial FEM oracle/periodic CTest selection (build-full first).
   mpi         Two GPUs: reuse, particle and halo checks; small two-rank PIC run.
-  mpi-two-node Two nodes, one GPU/rank per node: placement, periodic/reuse/halo tests and PIC/replay.
+  mpi-two-node Two nodes, one GPU/rank per node: placement, periodic/reuse/halo tests and ordinary PIC runs.
   sanitize    One GPU: complete memcheck reports for MPI init, cache and P3/P5 probes.
   sanitize-mpi-filtered Same probes; review complete reports with a narrow Cray MPI exception.
   all         build, then smoke (requires a Slurm GPU allocation).
@@ -164,6 +164,18 @@ unit() {
   run "$target" timeout "${FEM_TEST_TIMEOUT:-900}" "${launcher[@]}" "$unitDir/$target" \
     "--gtest_output=xml:$runDir/$target.xml" "$@"
 }
+picRuns() {
+  local name=$1 methods=$2 method solver preconditioner rc=0
+  shift 2
+  for method in $methods; do
+    solver=preconditioned; preconditioner=$method
+    if [[ $method == plain ]]; then solver=plain; preconditioner=jacobi; fi
+    run "$name-$method" timeout "${FEM_TEST_TIMEOUT:-900}" "${launcher[@]}" "$app" "$@" \
+      --solver "$solver" --preconditioner_type "$preconditioner" \
+      --output "$runDir/$name-$method" || rc=$?
+  done
+  return "$rc"
+}
 smoke() {
   needAllocation
   for target in FEMReferenceOracle1D FEMReferenceOracle2D FEMReferenceOracle3D FEMReuse \
@@ -172,13 +184,11 @@ smoke() {
   done
   # Small correctness runs, not performance measurements. Exercise Q=P+1 and Q9,
   # both families and preconditioner reuse, including the largest P5 device tables.
-  run pic-1d "${launcher[@]}" "$app" --dim 1 --order 3 --cells 32 --particles 2048 --steps 3 \
-    --quadrature_points exact --replay plain,jacobi,chebyshev --output "$runDir/pic-1d"
-  run pic-2d "${launcher[@]}" "$app" --dim 2 --order 3 --cells 4 --particles 1024 --steps 2 \
-    --interpolation_nodes equispaced --quadrature_points exact --replay plain,jacobi \
-    --output "$runDir/pic-2d"
-  run pic-3d-p5 "${launcher[@]}" "$app" --dim 3 --order 5 --cells 2 --particles 512 --steps 1 \
-    --quadrature_points 9 --replay plain,jacobi --output "$runDir/pic-3d-p5"
+  picRuns pic-1d 'plain jacobi chebyshev' --dim 1 --order 3 --cells 32 --particles 2048 --steps 3 \
+    --quadrature_points exact
+  picRuns pic-2d 'plain jacobi' --dim 2 --order 3 --cells 4 --particles 1024 --steps 2 \
+    --interpolation_nodes equispaced --quadrature_points exact
+  picRuns pic-3d-p5 'plain jacobi' --dim 3 --order 5 --cells 2 --particles 512 --steps 1 --quadrature_points 9
 }
 case "$stage" in
   build|all) configureBuild; [[ $stage != all ]] || smoke;;
@@ -214,8 +224,8 @@ case "$stage" in
     for target in FEMReuse FEMParticleCoupling FEMThinHalo; do
       run "$target-mpi2" timeout "${FEM_TEST_TIMEOUT:-900}" "${launcher[@]}" "$unitDir/$target"
     done
-    run pic-mpi2 "${launcher[@]}" "$app" --dim 1 --order 3 --cells 16 --particles 1024 --steps 3 \
-      --quadrature_points exact --replay plain,jacobi --output "$runDir/pic-mpi2";;
+    picRuns pic-mpi2 'plain jacobi' --dim 1 --order 3 --cells 16 --particles 1024 --steps 3 \
+      --quadrature_points exact;;
   mpi-two-node)
     [[ ${SLURM_JOB_NUM_NODES:-0} == 2 && ${SLURM_NTASKS:-0} == 2 ]] || {
       echo 'Use sbatch --nodes=2 --ntasks=2 --ntasks-per-node=1 gh200_validate.slurm mpi-two-node' >&2
@@ -263,13 +273,12 @@ PY
                 '3 3 4 1024 2 gll' '3 5 2 512 1 gll'; do
       read -r dim order cells particles steps family <<< "$spec"
       name="pic-two-node-${dim}d-p${order}"
-      methods=plain,jacobi,gauss-seidel,chebyshev
-      [[ $order != 5 ]] || methods=plain,jacobi
-      run "$name" timeout "${FEM_TEST_TIMEOUT:-900}" "${launcher[@]}" "$app" \
+      methods='plain jacobi gauss-seidel chebyshev'
+      [[ $order != 5 ]] || methods='plain jacobi'
+      picRuns "$name" "$methods" \
         --dim "$dim" --order "$order" --cells "$cells" --particles "$particles" --steps "$steps" \
         --interpolation_nodes "$family" --quadrature_points exact \
-        --reuse full --poisson_stiffness_mode constant_preserving \
-        --replay "$methods" --output "$runDir/$name" || mpiStatus=$?
+        --reuse full --poisson_stiffness_mode constant_preserving || mpiStatus=$?
     done
     if (( mpiStatus != 0 )); then
       printf '\nTwo-node probes completed with failures; inspect stages.tsv and per-rank XML in %s\n' "$runDir"

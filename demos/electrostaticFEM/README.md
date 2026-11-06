@@ -41,10 +41,9 @@ An existing run's output directory is rejected.
 | `--tolerance`, `--max_iterations` | 1e-10, 10000 |
 | `--poisson_stiffness_mode` | `constant_preserving`; `standard` is a diagnostic alternative |
 | `--reuse` | `full`; alternatives `operator`, `off` |
-| `--initial_guess` | `previous`; alternative `zero`, applied equally in replay |
+| `--initial_guess` | `previous`; alternative `zero` |
 | `--timer_level` | `coarse`; `detailed` additionally times each preconditioner application |
 | `--diagnostics_every` | 1; initial and final diagnostics always recorded |
-| `--replay` | Empty; e.g. `plain,jacobi,gauss-seidel,chebyshev` captures and replays loads |
 | `--output` | `landau-fem`; use a separate directory for every run |
 
 Every axis needs at least two cells and every rank must own elements. P1/P2 GLL
@@ -114,12 +113,9 @@ Operator result containers copy the input's prepared entity layouts through
 rediscovering neighbors. The returned fields own their entity-layout objects;
 the original mesh and vertex layout retain their normal lifetime requirements.
 
-Replay first evolves one canonical **plain-CG PIC trajectory**, stores its eleven
-assembled loads in memory and then solves the exact same stored sequence for each
-listed method. Each method starts with fresh caches and zero potential; later
-guesses follow `--initial_guess`. Capture is outside solve timing. Memory scales
-as the number of saved loads times distributed field storage. Replay is an
-experiment, not a restart/checkpoint format.
+Each process initializes one solver, performs the initial field solve and evolves
+its own PIC trajectory. The application has no load capture or replay mode;
+`--replay` is rejected. Use separate processes for different configurations.
 
 Each run writes:
 
@@ -160,45 +156,34 @@ storage grows with the number of solves/steps. Summary timer storage depends onl
 on the number of timer labels and ranks, not the number of calls. Timer export
 occurs after all solves and is excluded from solve/Krylov timers but included in
 the runner's total batch wall time. Long production runs still need a bounded
-flush policy for the solve/step/physics records and captured replay loads.
+flush policy for the solve/step/physics records.
 
 Use maximum-rank latency after summing locally across solves, not sums of
 separately maximized child stages. The analysis scripts preserve this distinction
 and emit PDF/PNG figures plus raw CSV summaries.
 
-```sh
-python experiments/run_reuse.py --executable /path/to/LandauDampingFEM \
-  --output results/reuse
-python experiments/analyze_reuse.py results/reuse
-# Complete PIC comparison (separate trajectories):
-python experiments/run_pic.py --executable /path/to/LandauDampingFEM \
-  --output results/pic
-# Optional parameter comparison:
-python experiments/run_reuse.py --executable /path/to/LandauDampingFEM \
-  --output results/tuned --reuse full --degree 16 --gs-outer 1
-# Interleaved instrumentation comparison:
-python experiments/check_timer_overhead.py --executable /path/to/LandauDampingFEM \
-  --output results/timer-overhead
-# Separate physical check; requires NumPy, SciPy and Matplotlib:
-python experiments/check_landau.py --executable /path/to/LandauDampingFEM \
-  --output results/landau
-```
+On GH200, use `experiments/submit_fem_campaign.py` as the public entry point.
+It provides separate plain-CG placement and paired preconditioner-tuning phases;
+the shared [campaign manual](experiments/MESH_STUDY.md) gives complete commands.
+`run_mesh_sweep.py` is the internal/local process runner used by that interface,
+and `analyze_mesh_sweep.py` checks complete records and produces CSV means and
+optional plots. A separate physical diagnostic remains available with
+`check_landau.py` (NumPy, SciPy and Matplotlib required).
 
-The reuse runner rotates method/mode order, performs three sequential repetitions
-and records commands and executable SHA256. Run it without concurrent builds.
-Compare a coarse-timer repeat to quantify detailed instrumentation overhead.
-Fewer iterations alone are not a speedup: include setup, applications and complete
-PIC cost. A ten-step timing pilot cannot establish a Landau damping rate or a
-long-run energy guarantee. The separate physical script fits early electric
-amplitude peaks against a SciPy dispersion root and varies dt, cells and particles.
+The ordinary machinery uses ten steps and three repetitions. FEM tuning supports
+CG, Jacobi, GS 2/1 and 2/2, and Chebyshev degrees 2/4/8/16. It rotates independent
+process launches, validates every rank and resumes individual completed runs.
+Its initialization is `alpine_product` to match Alpine's physical distribution;
+the standalone executable retains its `single` default. Each configuration
+evolves its own trajectory. Fewer iterations alone are not a speedup: include
+setup, applications and complete PIC cost. Ten steps do not establish a damping
+rate or long-run energy conservation.
 
 Correctness tests are `FEMPeriodic`, `FEMParticleCoupling`, `FEMReuse`,
 `FEMPreconditionerProperties`, plus the existing Dirichlet/oracle regressions.
 Periodic matrix and coupling references tensorize existing published Basix 1D
 data; no large generated data headers or new package release are required.
 
-For mesh trends in 1D–3D and later GH200 runs, see
-[MESH_STUDY.md](experiments/MESH_STUDY.md). The resumable `run_mesh_sweep.py`
-uses the same replay runner, and `analyze_mesh_sweep.py` produces mesh/iteration/
-cost/speedup plots. A Slurm template supplies one GPU per rank; GPU execution
-still requires validation in the target environment.
+For mesh trends in 1D–3D and GH200 runs, see
+[MESH_STUDY.md](experiments/MESH_STUDY.md). The Slurm path supplies one GPU per
+rank and uses exclusive node allocations.

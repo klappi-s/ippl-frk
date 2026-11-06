@@ -1,217 +1,329 @@
-# Mesh trends and later GH200 studies
+# FEM and finite-difference performance campaigns
 
-**23 September implementation:** new sweeps default to `--timer-recording summary`.
-They retain per-solve/step data and compact online internal-timer statistics.
-`--timer-recording raw --timer-sample-limit 1024` enables bounded diagnostic samples.
-The recording policy is part of the campaign identity; pooled analyses reject
-mixed policies, including older manifests with unbounded raw recording. Use fresh
-output directories after rebuilding for layout reuse and compact recording.
+**Updated 07 October 2026, 15:06 CEST (Europe/Zurich).**
 
-The scripts use `LandauDampingFEM` and the existing replay machinery. They add no
-solver implementation. `run_mesh_sweep.py` calls `run_reuse.py` in two batches:
+This directory contains one maintained entry point per application:
 
-| Batch | Configurations |
+- `submit_fem_campaign.py` submits higher-order FEM placement and
+  preconditioner studies using `LandauDampingFEM`.
+- `submit_fd_pcg_campaign.py` submits Alpine finite-difference placement and
+  PCG studies using `LandauDamping`.
+
+Both delegate plan creation and Slurm submission to `submit_campaigns.py`.
+`run_mesh_sweep.py` launches each solver configuration in a fresh application
+process, and `ordinary_measurements.py` validates the resulting solve, timestep,
+physics, timer, and memory records. Do not invoke these internal layers directly
+for a normal GH200 campaign.
+
+Every measured process uses eight particles per geometric cell, one
+initialization solve, ten ordinary timesteps, three independent repetitions,
+exclusive nodes, one MPI rank per GPU, and the site MPI wrapper. Load balancing
+remains disabled. By default, first and repeat stages are separate: repeat
+tasks are admitted after repetition zero passes numerical and memory checks.
+Explicit `--stage all` queues all three repetitions independently in one array;
+each run still undergoes the same validation.
+
+## Common setup
+
+From the Daint workspace containing `ippl-frk` and `build_cuda`:
+
+```bash
+cd /users/sklapproth/phd/fem
+export FEM_ROOT="$PWD"
+export WRAPPER=/user-environment/wrapper-mpi.sh
+EXPERIMENTS="$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments"
+```
+
+Use `--dry-run` first when changing cells, orders, variants, or placements. A
+campaign root is immutable with respect to its executable, wrapper, runner,
+variant definitions, and numerical recipe. Resume with the same command and
+root; use a new root after changing any pinned input.
+
+## FEM campaigns
+
+`submit_fem_campaign.py` supports 3D P1/P2/P3 and two phases:
+
+- `placement` fixes the method to plain CG and writes below `placement/cg`.
+- `tune` requires either a named `--bundle` or an explicit paired variant set
+  containing `cg` and at least one of `jacobi`, `gs21`, `gs22`, `cheb2`,
+  `cheb4`, `cheb8`, `cheb16`.
+
+The named bundles are `controls` (CG/Jacobi), `gauss-seidel` (CG plus 2/1 and
+2/2), `chebyshev-low` (CG plus degrees 2/4), `chebyshev-high` (CG plus degrees
+8/16), and `all`. An explicit set receives a content-derived directory unless
+`--label` gives it a stable name. The FEM solver supports more preconditioner
+families, but the maintained campaign registry currently validates only these
+eight variants; Newton, Richardson, SSOR and FEM multigrid are not part of this
+grid.
+
+The supported small meshes are 16³/32³/64³. Their historical nine default
+placements remain; explicit FEM searches also accept 8/16 nodes with 1/2/4
+GPUs per node. The supported large meshes are 128³/256³. Their historical
+1×2/1×4/2×4/4×4/8×4 defaults remain; explicit searches also accept
+2×1/4×1/8×1/16×1, 2×2/4×2/8×2/16×2 and 16×4. Source-based memory
+screening remains active; the full-volume diagnostics exclude P3 256³ on 1×2.
+
+Example placement study:
+
+```bash
+FEM_CAMPAIGN="$FEM_ROOT/gpu_performance/$(date +%Y-%m-%d_%H%M)_fem"
+
+python3 "$EXPERIMENTS/submit_fem_campaign.py" --root "$FEM_CAMPAIGN" \
+  --phase placement --cells 16 32 64 --orders 1 2 3 \
+  --placements 1x1 1x2 1x4 2x1 2x2 2x4 4x1 4x2 4x4 \
+  --stage first
+
+# After all required first runs pass:
+python3 "$EXPERIMENTS/submit_fem_campaign.py" --root "$FEM_CAMPAIGN" \
+  --phase placement --cells 16 32 64 --orders 1 2 3 \
+  --placements 1x1 1x2 1x4 2x1 2x2 2x4 4x1 4x2 4x4 \
+  --stage repeats
+```
+
+Example focused preconditioner comparison:
+
+```bash
+python3 "$EXPERIMENTS/submit_fem_campaign.py" --root "$FEM_CAMPAIGN" \
+  --phase tune --cells 64 --orders 2 3 --placements 1x4 4x4 \
+  --variants cg jacobi gs21 cheb4 --stage first
+```
+
+Run the identical command with `--stage repeats` after its first runs pass.
+Keep CG in each tuning bundle because it is the paired same-allocation control.
+
+### Standard-CG placement extension: 64³ and 128³
+
+The workspace helper `submit_fem_cg_extension.sh` uses the same FEM entry point
+with `--stage all`, three orders and three repetitions. From the Daint
+workspace, after syncing the helper and updated experiment scripts:
+
+```bash
+bash ./submit_fem_cg_extension.sh all --dry-run --account c41
+bash ./submit_fem_cg_extension.sh all --account c41
+```
+
+Use `small` or `large` instead of `all` to submit only 64³ or 128³.
+The 64³ extension uses 8×1/8×2/8×4/16×1/16×2/16×4; the 128³ extension
+uses 2×1/4×1/8×1/16×1/2×2/4×2/8×2/16×2/16×4. Together they form
+15 arrays with nine tasks each (135 measured simulations). Array indices
+0–2 are P1 repetitions, 3–5 P2, and 6–8 P3. There is no first-run dependency.
+
+Defaults: 59 minutes per task, 3,000 seconds per application, and three
+simultaneous exclusive allocations per array. Set `FEM_CG_CONCURRENT=1` for
+sequential execution within each array; all repetitions remain queued.
+`FEM_CG_TIME`, `FEM_CG_TIMEOUT` and `FEM_CG_EXTENSION_CAMPAIGN` override the
+limits or fixed output root. Defaults write below
+`gpu_performance/2026-10-07_1501_fem_cg_placement_extension/placement/cg/n<cells>-<placement>`.
+Reuse the same command/root to skip validated results and queued arrays.
+Failed results need explicit `--retry-failed` after inspection.
+
+The new root retains the original campaign records and source pins. The
+allocation driver's accepted placements changed; retain the existing CUDA
+executable to compare against the original results. The numerical runner,
+validators, variant registry, and FD extended driver have not changed.
+See the [extension guide](../../../../../ShortTermReports/2026-10-07_1506_FEM_CG_PLACEMENT_EXTENSION.md)
+for deployment, direct Python commands and analysis.
+
+### Maintained FEM parameter grid
+
+The root helper covers the current eight FEM variants in four independent
+bundles. Independent bundles prevent one slow or failed family from blocking
+repeat admission for the others. From the Daint workspace root:
+
+```bash
+# Inspect and submit the small 16^3/32^3/64^3 grid.
+bash ./submit_fem_parameter_grid.sh small first --dry-run
+bash ./submit_fem_parameter_grid.sh small first
+
+# After the eligible first cases finish:
+bash ./submit_fem_parameter_grid.sh small repeats --dry-run
+bash ./submit_fem_parameter_grid.sh small repeats
+
+# Inspect and submit the large 128^3/256^3 grid.
+bash ./submit_fem_parameter_grid.sh large first --dry-run
+bash ./submit_fem_parameter_grid.sh large first
+
+# After the eligible first cases finish:
+bash ./submit_fem_parameter_grid.sh large repeats --dry-run
+bash ./submit_fem_parameter_grid.sh large repeats
+```
+
+The default output root is
+`gpu_performance/2026-09-30_1144_fem_parameter_grid`; set
+`FEM_GRID_CAMPAIGN` before both stages to use another fixed root. The small grid
+uses 1x1 and 2x1. The large grid uses 1x2/8x4 at 128^3, 1x2/8x4 for P1/P2 at
+256^3, and 8x4/4x4 for P3 at 256^3. Thus the screened P3 256^3/1x2 case is not
+planned. Defaults are two hours/6,000 seconds per small allocation/application
+and eight hours/27,000 seconds for large; override them with
+`FEM_SMALL_GRID_TIME`, `FEM_SMALL_RUN_TIMEOUT`, `FEM_LARGE_GRID_TIME`, and
+`FEM_LARGE_RUN_TIMEOUT`.
+
+The small first stage submits 24 arrays containing at most 198 ordinary
+processes; its repeat stage contains at most 396. The large stages submit 20
+arrays with at most 132 first and 264 repeat processes. Every array is exclusive
+and throttled to one active task. Set `FEM_GRID_BUNDLES`, for example to
+`"controls chebyshev-low"`, to submit only selected named bundles. Use the same
+selection when requesting their repeats.
+
+### Proposed FEM tuning grid
+
+The next grid and its numerical prerequisites are documented in
+[REPORT_FEM.md, Chapter 2](../../../../../ReportsMD/REPORT_FEM.md#2-parameter-grids-for-tuning).
+It aligns GS/SSOR loop pairs and adds Newton, Richardson and SSOR coverage.
+These broader configurations still require registry, option-forwarding and
+validation support in the maintained FEM submitter.
+
+## Finite-difference campaigns
+
+The FD submitter has five phases:
+
+- `smoke`: fixed 128³ family correctness check;
+- `preflight`: fixed one-step 1024³ large-particle-count capacity check;
+- `placement`: explicit plain-CG topology search below `placement/cg`;
+- `tune`: a named family bundle or explicit variant subset;
+- `transfer`/`confirm`: run an analyzer-generated shortlist.
+
+Example 1024³ placement study after the preflight succeeds:
+
+```bash
+FD_CAMPAIGN="$FEM_ROOT/gpu_performance/2026-09-25_1705_fd_pcg"
+
+python3 "$EXPERIMENTS/submit_fd_pcg_campaign.py" --root "$FD_CAMPAIGN" \
+  --phase placement --cells 1024 --placements 4x4 8x4 16x4 \
+  --stage first --time 00:59:00 --timeout 3000
+```
+
+Use `--stage repeats` after all three first runs pass. The current 32×4 path is
+a debugging target: its first CG run passed, but both repeats failed with CUDA
+illegal-memory accesses. Parameter tuning remains under `tune`, for example:
+
+```bash
+python3 "$EXPERIMENTS/submit_fd_pcg_campaign.py" --root "$FD_CAMPAIGN" \
+  --phase tune --bundle ssor-all --cells 256 512 --stage first
+```
+
+An explicit variant subset normally receives a content-derived `custom-*`
+directory. Give a maintained subset a stable descriptive directory with
+`--label`, for example `--variants cg ssor11w100 ssor11w125 --label
+ssor-factorial`. The label changes only the study path; the saved plan still
+contains and validates the complete variant recipe.
+Use `--substudy NAME` with `--label` when one logical study needs separately
+resumable recipes below each mesh/placement root. This keeps the analyzer's
+phase, label, and mesh anchor intact while preventing a known-failing diagnostic
+point from blocking repetitions of the timing grid.
+For an already completed broader first run, `--reuse-first-subset` admits a
+`--stage repeats` substudy only when every requested variant has a successful
+job state in the parent r0. Extra failed variants do not block that subset, and
+the original first-run manifest remains unchanged.
+If an earlier dry run saved the same execution recipe without subset-admission
+metadata, the planner archives that draft in `plans/history/` and adds the
+metadata. This migration is restricted to unsubmitted plans with no task
+directories, logs, or study pin; changed execution recipes still fail.
+
+The complete current FD variant registry is in `fd_pcg_variants.py`. It is
+shared by plan generation, application command construction, validation, and
+memory estimation. Invalid numerical results remain recorded and are never
+timing samples. Do not use `--retry-failed` without first diagnosing the stored
+failure.
+
+### Recovering the interrupted multigrid factorial
+
+The first `multigrid-factorial` allocations exposed parameter points that run
+to 10,000 iterations. Ten such applications took 1,032--1,644 seconds and
+failed. They exhausted the 30-minute debug allocations before later variants
+could start. The normal `--resume`/`--retry-failed` path is unsuitable here
+because it would run those known failures again.
+
+Use the dedicated missing-only recovery from the Daint workspace root:
+
+```bash
+bash ./submit_multigrid_missing.sh --dry-run
+bash ./submit_multigrid_missing.sh
+```
+
+The site wrapper supplies account `c41` and the same OPAL uenv/view as the
+configured campaign launcher. Override these, when needed, with
+`MG_RECOVERY_ACCOUNT`, `MG_RECOVERY_UENV`, and `MG_RECOVERY_VIEW`. Recovery
+uses the `normal` partition with a 40-minute allocation limit; override those
+defaults with `MG_RECOVERY_PARTITION` and `MG_RECOVERY_TIME`.
+
+This scans the 24 first-stage smoothing bundles and submits only bundles that
+still lack canonical `jobs/*.json` records. Within each submitted allocation,
+`resume_missing_campaign.py` skips every recorded success and every recorded
+failure, then runs only absent applications. Each newly attempted application
+has a 180-second limit: the longest successful first-stage application observed
+before recovery was 88.42 seconds, so this leaves margin while preventing a new
+10,000-iteration point from consuming most of an allocation. A timeout is
+recorded with exit code 124 and is not retried by another missing-only pass.
+
+If Slurm ends an allocation while an application is running, its attempt log is
+retained without a canonical job record. Run the same helper again after the
+allocation has ended; only that interrupted application and any applications
+after it are selected. The helper refuses to race an active original or
+recovery allocation. Recovery writes into the original campaign tree, retains
+the immutable plan and source pins, and remains compatible with the standard
+analyzer. Do not add `--retry-failed` to this recovery.
+
+Once every first-stage bundle has a canonical record for all thirteen variants,
+launch factorial repeats with:
+
+```bash
+MG_SLURM_TIME=00:30:00 ./submit_multigrid_factorial.sh repeats --dry-run
+MG_SLURM_TIME=00:30:00 ./submit_multigrid_factorial.sh repeats
+```
+
+The helper derives the successful variants independently for each mesh,
+placement, and smoothing pair. It refuses an incomplete first stage, excludes
+all recorded failures/timeouts, and stores r1/r2 below the corresponding
+`smoothing-*/converged/` directory while reusing the successful parent r0
+evidence. Repeat applications default to a 180-second timeout; override it with
+`MG_RUN_TIMEOUT` only after inspecting a timeout.
+
+Explicit 16×4/32×4 requests use `gh200_campaign_extended.slurm`,
+`campaign_task_extended.py`, and `gh200_mesh_extended.slurm`. The older driver
+is retained byte-for-byte because existing studies pin its hash. The extended
+path applies to placement, transfer, and tuning phases. This duplication can be
+consolidated after those studies no longer need to remain resumable.
+
+## Analysis and validation
+
+Analyze current FEM/ordinary campaigns with:
+
+```bash
+python3 "$EXPERIMENTS/analyze_mesh_sweep.py" CAMPAIGN_ROOT [CAMPAIGN_ROOT ...] \
+  --output ANALYSIS_DIRECTORY --plots
+```
+
+Analyze the dedicated FD-PCG campaign with:
+
+```bash
+python3 "$EXPERIMENTS/analyze_fd_pcg.py" "$FD_CAMPAIGN" \
+  --output "$FD_CAMPAIGN/analysis"
+```
+
+The analyzers report recurring and initial solve time, complete timestep time,
+iterations, achieved fresh residual, setup cost, memory, and paired speedups.
+Optional figures require Matplotlib; campaign submission and validation use only
+the Python standard library.
+
+`gh200_validate.sh`/`.slurm` provide the maintained CUDA, sanitizer, MPI, and
+oracle checks. `gh200_efficiency.slurm` exercises compact timers, reuse, unit
+tests, and representative PIC configurations. `check_compact_timers.py`,
+`check_landau.py`, and `check_variants.py` remain focused diagnostic helpers.
+Build with `-j 8`.
+
+## Maintained implementation files
+
+| Role | Files |
 |---|---|
-| baseline | CG, Jacobi, GS inner/outer 2/2, Chebyshev degree 8 |
-| tuned | CG, GS 2/1, Chebyshev degree 16 |
+| Public submission | `submit_fem_campaign.py`, `submit_fd_pcg_campaign.py`, `submit_multigrid_missing.py`; root helper `submit_fem_parameter_grid.sh` |
+| Shared planning/execution | `submit_campaigns.py`, `run_mesh_sweep.py`, `ordinary_measurements.py`, `fd_pcg_variants.py`, `rank_memory.py`, `successful_campaign_variants.py` |
+| Slurm dispatch | `gh200_campaign*.slurm`, `campaign_task*.py`, `gh200_mesh*.slurm`, `gh200_build_performance.slurm` |
+| Analysis | `analyze_mesh_sweep.py`, `analyze_fd_pcg.py` |
+| Validation | `gh200_validate.sh`, `gh200_validate.slurm`, `gh200_efficiency.slurm`, `classify_mpi_memcheck.py`, `check_compact_timers.py`, `check_landau.py`, `check_variants.py` |
+| Special recovery | `resume_missing_campaign.py` (missing states only; never retries recorded failures) |
+| Regression tests | `test_phase1_campaigns.py`, `test_run_mesh_sweep.py`, `test_resume_missing_campaign.py`, `test_compact_timers.py` |
 
-CG appears in each batch so every candidate has a paired same-load baseline.
-Three repetitions rotate methods and alternate batch order. Each method starts
-with fresh caches, then reuses setup across eleven captured loads. All runs use
-`constant_preserving`, full reuse, tolerance 1e-10 and previous-potential guesses
-unless overridden. Multigrid, Newton and duplicate SSOR/Richardson variants are
-outside this focused sweep; earlier results did not make them priority candidates.
-
-## Local Serial campaign
-
-```sh
-python run_mesh_sweep.py --executable /path/to/LandauDampingFEM \
-  --output results/serial-mesh
-python analyze_mesh_sweep.py results/serial-mesh
-```
-
-Defaults are P3 GLL; GL(p+1); one MPI rank; 32,768 particles; ten timesteps;
-1D cells 128/256/512/1024, 2D 8/16/32 per axis, and 3D 3/4/6 per axis. The box
-has length 4π in each direction. Independent periodic DOFs are `(p*cells)^dim`.
-GL(p+1) exactly integrates the affine constant-coefficient stiffness; it does not
-make the cosine-based Fourier diagnostic exact. The fixed particle count isolates
-mesh work and keeps the same initial ensemble within a Serial dimensional sweep;
-particles per cell decrease with refinement. This is not an accuracy-convergence
-experiment. Use `--particles-per-cell N` for a different, explicitly recorded policy.
-
-Useful options include `--dimensions 3 --cells-3d 8 12 16`, `--orders 2 3`,
-`--family equispaced`, `--repeats 5`, `--steps 10`, `--initial-guess zero`,
-`--timer-level detailed`, `--ranks 4` and
-`--launcher 'srun -n {ranks} --cpu-bind=cores /path/to/site-wrapper'`.
-The launch prefix is tokenized without a shell; shell pipelines/substitutions
-are not executed. MPI wrappers and options can be supplied without editing scripts.
-
-`--dry-run` creates a reviewable `campaign.json` and lists indexed jobs.
-`--resume` skips completed jobs, rejects a changed configuration/binary/replay
-runner, and retains interrupted/failed attempts when retrying. `--job-index N`
-runs just one manifest job, allowing independent Slurm array allocations. Avoid
-running the same job index concurrently. `--timeout` bounds each whole batch;
-timeouts are failures, not timing samples. Default execution is sequential.
-
-The stdlib-only runner regression needs no MPI, GPU or FEM executable. From this
-directory, run `python3 -m unittest -v test_run_mesh_sweep`. It checks the full
-54-batch GH200 plan, old-Python dictionary behavior, rotated method launches
-through `run_reuse.py` with a mock application, and safe resume. This includes
-the multi-repetition branch that the one-repetition sizing pilot does not cover.
-
-To extend an existing study without rerunning or altering its measurements, run
-the additional meshes into a new directory and combine them during analysis:
-
-```sh
-python run_mesh_sweep.py --executable /path/to/LandauDampingFEM \
-  --output results/larger-mesh --dimensions 2 3 \
-  --cells-2d 64 --cells-3d 8 16 --timeout 14400
-python analyze_mesh_sweep.py results/serial-mesh \
-  --include results/larger-mesh --output results/combined
-```
-
-The analyzer rejects overlapping cases and incompatible solver/particle settings.
-It preserves source manifests and raw-data paths in the combined output. Different
-binary hashes are explicitly disclosed: verify source compatibility before
-pooling results from rebuilt executables. Original measurements remain intact.
-If the scope is deliberately reduced, use e.g. `--exclude-mesh 3:16
---exclusion-reason 'Omitted by runtime decision'`. The report and
-`analysis_selection.json` list the omissions separately from failed/missing jobs;
-the original campaign plan remains intact.
-
-The analyzer checks all planned jobs, solve counts, success flags, fresh residuals,
-fixed-operator setup counts and matching RHS-norm sequences. Exact load identity
-within a batch comes from reusing the same in-memory fields. Across batches the
-canonical CG trajectory is regenerated with the same configuration and seed;
-RHS norms provide a consistency check, not a collision-proof field checksum.
-GPU random sampling may regenerate different sequences between batches/repeats.
-The default analyzer stops on that difference. After inspecting it, use
-`--allow-regenerated-load-variation` to analyze paired comparisons and explicitly
-label the differing loads; within-batch candidate/CG parity is still required.
-
-Outputs:
-
-- `summary.csv`: one configuration/repetition per row, iterations, first/recurring/
-  total costs, paired speedups, work counts, residuals and measured/modelled crossings.
-- `p3_mesh_trends.png/.pdf`: iterations, recurring seconds and paired speedups
-  against cells per axis, separated by dimension. Bands are min–max, not confidence intervals.
-- `p3_setup_and_total.png/.pdf`: first setup and complete eleven-solve cost.
-- `p3_dof_cost.png/.pdf`: dimension comparisons normalized by DOFs and outer
-  iterations; these include all solver work, not just a matrix-vector product.
-- `README.md`, `campaign.json`, `jobs/*.json`: summary, provenance and exact commands.
-- Each attempt directory: original application configuration and per-rank CSVs.
-
-Rank totals are summed before selecting the maximum. Application time is already
-inside Krylov time. Fresh residual diagnostics and canonical load capture are
-outside replay solve timing. Canonical PIC results are **plain CG only**; the
-scripts do not fabricate PCG timestep costs by substituting replay times.
-For selected full-PIC comparisons, the existing runner now also accepts dimensions,
-quadrature and method subsets, for example:
-
-```sh
-python run_pic.py --executable /path/to/LandauDampingFEM --output results/pic-3d \
-  --dimension 3 --cells 6 --quadrature exact --methods plain jacobi
-python -m unittest test_replay_measurements.py
-```
-
-`inspect_diagonal_scaling.py --output diagonal.json` is an optional Basix/NumPy
-calculation of the P3 GLL diagonal spread across dimensions. It tensorizes exact
-1D mass/stiffness contractions with periodic incidence counts. Diagonal spread
-helps explain Jacobi's role; it is **not** the stiffness condition number.
-
-## GH200 build and correctness gate
-
-Use the site's supported compiler, CUDA, MPI and Kokkos environment. The existing
-IPPL GH200 CI configuration in `ci/cscs/cuda/build_sm90.yml` is the repository's
-starting point. Configure the same project with:
-
-```sh
-cmake -S /path/to/ippl-frk -B /path/to/build-gh200 \
-  -DCMAKE_BUILD_TYPE=Release -DIPPL_PLATFORMS=CUDA \
-  -DKokkos_ARCH_HOPPER90=ON -DCMAKE_CUDA_ARCHITECTURES=90 \
-  -DIPPL_ENABLE_SOLVERS=ON -DIPPL_ENABLE_ELECTROSTATIC_FEM=ON \
-  -DIPPL_ELECTROSTATIC_FEM_DIMS='1;2;3' -DIPPL_ELECTROSTATIC_FEM_ORDERS=3 \
-  -DIPPL_ENABLE_UNIT_TESTS=ON
-cmake --build /path/to/build-gh200 --target LandauDampingFEM \
-  FEMReuse FEMPreconditionerProperties FEMParticleCoupling -j 8
-```
-
-The selectable order list reduces template compilation for a focused study;
-default remains P1–P5. Compiler/dependency prefixes and the CTest MPI launcher
-must match the selected site environment. The native Daint build and one-GPU
-oracle checks now pass, as does the two-node/one-GPU-per-node check (job 4736170).
-See [GH200_VALIDATION.md](../../../../../ProjectManagement/2026-09-23_1609_GH200_VALIDATION_GUIDE.md). The Serial measurements do not
-establish GPU performance.
-
-First run the named unit tests and a small ten-step P3 demo on one GPU, then
-repeat on two GPUs and across nodes. Use the configured CTest MPI wrapper, with
-one GPU assigned to every rank. Check backend=`Cuda`, actual rank/particle counts,
-fresh residuals, charge, gauge and weak/quadrature energy consistency. Compare
-CG/PCG solutions and cache counts before starting a large timing sweep. Extend to
-the periodic/oracle suites when debugging numerical or halo differences.
-
-## Slurm execution
-
-`gh200_mesh.slurm` now defaults to a short **one-GPU pilot on an exclusive node**,
-with 72 allocated CPU cores per rank. The [performance guide](../../../../../ProjectManagement/2026-09-23_1608_GH200_PERFORMANCE_GUIDE.md)
-defines the progression: 1×1, 1×2, 1×4 and 2×4 GPUs, plus a targeted 2×1 comparison.
-All placements reserve whole nodes and use one GPU per MPI rank. Account/uenv remain
-site choices; the mounted root copy carries the settings from the validated jobs.
-Slurm handles GPU visibility; the script verifies host/rank placement before running.
-The FEM preflight and all replay applications use `srun ... "$WRAPPER" ...`,
-defaulting to `/user-environment/wrapper-mpi.sh`. The wrapper's path, contents and
-SHA-256 are retained; its identity must match when resuming a campaign.
-
-```sh
-export FEM_ROOT=/absolute/directory-containing-ippl-frk-and-build_cuda
-export FEM_OUTPUT=/shared/scratch/fem-gh200-one-gpu-pilot
-# Add your site's environment/partition options to this submission:
-sbatch --account=YOUR_ACCOUNT "$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments/gh200_mesh.slurm"
-```
-
-The batch shell runs one Python driver; **do not launch one driver per MPI rank**.
-Each child `srun` uses the verified allocation's ranks. The pilot defaults are P3
-GLL, 512/32²/8³ cells in 1D/2D/3D, 32,768 particles, three timesteps and one repeat.
-Use distinct outputs and ten timesteps/three repeats for measured comparisons:
-
-```sh
-export FEM_OUTPUT=/shared/scratch/fem-gh200-two-full-nodes
-sbatch --account=YOUR_ACCOUNT --nodes=2 --ntasks=8 --ntasks-per-node=4 \
-  "$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments/gh200_mesh.slurm" \
-  --steps 10 --repeats 3 --dimensions 3 --cells-3d 4 8 16
-```
-
-For strong scaling, keep global cells/particles fixed while changing node count.
-For weak scaling, keep cells/particles per rank approximately fixed and record
-the actual partition. Do not mix these with the mesh-refinement plots. Particle
-sampling currently depends on rank/backend: identical seeds do not guarantee
-identical global loads between CPU/GPU or different rank counts. Strict
-cross-backend same-load comparisons need an exported/replayed common load archive
-or a deterministic rank-independent source; that is a separate extension.
-
-Use a fresh output directory per backend/placement/configuration. Run plotting
-locally after measurement; the batch job does not import NumPy/Matplotlib.
-The launch runners use Python 3.6+ standard-library APIs. Retained loads, field
-temporaries and buffered timers/CSV data
-consume memory; scale in steps and record memory before very large runs.
-
-## Expected GPU differences
-
-The mathematical mesh dependence remains, and identical matrices/loads should
-give broadly similar iteration counts. **Wall-time rankings may change.** GPUs
-reward enough parallel work and efficient memory traffic; tiny fields and many
-short kernels expose launch overhead. Jacobi is simple but adds field operations;
-Chebyshev trades extra operator actions for fewer outer iterations/reductions.
-The current GS implementation also performs several field/triangular operations;
-its name alone does not imply an efficient GPU triangular solve. These are
-expectations to test, not predictions of a winner. See [NVIDIA's performance
-guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/).
-
-Begin with coarse timers and profile selected cases with Kokkos Tools/Nsight.
-Existing IPPL timer fences and the new detailed action fences can serialize GPU
-work; do not compare differently instrumented builds as if the algorithm alone
-changed. Preserve fences required for correct end-to-end timing and record any
-profiling/fence changes. [Kokkos explains asynchronous timing and fences](https://kokkos.org/kokkos-core-wiki/API/core/parallel-dispatch/fence.html).
-Across nodes, halo exchanges and global reductions add another tradeoff: fewer
-outer iterations can help, while extra preconditioner operator actions also
-communicate. Measure both.
+Historical replay analyzers, frozen-baseline preparation, the pre-rewrite FEM
+DAG, and redundant application-specific shell wrappers are kept in the external
+experiment archive rather than this active source directory.

@@ -93,6 +93,7 @@ void printGlobalField(const FieldType& field, const std::string& name) {
 
 int main(int argc, char* argv[]) {
     ippl::initialize(argc, argv);
+    int return_code = 0;
     {
         constexpr unsigned int dim = 3;
         using Mesh_t               = ippl::UniformCartesian<double, dim>;
@@ -240,6 +241,18 @@ int main(int argc, char* argv[]) {
         IpplTimings::stopTimer(solve);
         info << "Solve completed." << endl;
 
+        if (lapsolver.getPreconditionerSetupCount() != 1
+            || lapsolver.getPreconditionerHierarchyLevels() == 0
+            || lapsolver.getPreconditionerCoarsestLocalExtent() == 0) {
+            return_code = 1;
+        }
+
+        // A second solve on the unchanged mesh must reuse the hierarchy.
+        lapsolver.solve();
+        if (lapsolver.getPreconditionerSetupCount() != 1) {
+            return_code = 2;
+        }
+
         // 6. Error Analysis
         field_type error(mesh, layout);
 
@@ -267,5 +280,5 @@ int main(int argc, char* argv[]) {
     }
     ippl::finalize();
 
-    return 0;
+    return return_code;
 }

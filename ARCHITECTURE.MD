@@ -643,7 +643,7 @@ Base `Poisson<FieldLHS,FieldRHS>` (`Poisson.h`): `-laplace(lhs)=rhs`; `setLhs/se
 `Maxwell<EMField,SourceField>` base. `FDTDSolverBase` → `StandardFDTDSolver` / `NonStandardFDTDSolver`, `fdtd_bc ∈ {periodic, absorbing}`. `solve()` per step; deposit current with `assemble_current_yee` first.
 
 ### Linear — `src/LinearSolvers/`
-`CG<...>` and `PCG<...>` in `PCG.h` (matrix-free; `setOperator(std::function<lhs(lhs)>)`, `operator()(lhs,rhs,params)`, `getIterationCount()`, `getResidue()`). Preconditioners in `Preconditioner.h`: `jacobi, newton, chebyshev, richardson, gauss-seidel, ssor`.
+`CG<...>` and `PCG<...>` in `PCG.h` (matrix-free; `setOperator(std::function<lhs(lhs)>)`, `operator()(lhs,rhs,params)`, `getIterationCount()`, `getResidue()`). Preconditioners in `Preconditioner.h`: `jacobi, newton, chebyshev, richardson, richardson_alt, gauss-seidel, ssor, multigrid`. FD multigrid caches a collective mesh/layout/BC signature and reuses its hierarchy until that signature changes; `PCG`/`PoissonCG` expose setup count, hierarchy levels and coarsest local extent.
 
 ---
 
@@ -769,15 +769,15 @@ against source.*
   `IPPL_ELECTROSTATIC_FEM_DIMS` (default `1;2;3`). One `LandauDampingFEM` executable,
   P1–P5, GL9 or GL(p+1), both interpolation families. Build **-j 8**.
   `IPPL_ELECTROSTATIC_FEM_ORDERS` selects compiled orders (default `1;2;3;4;5`).
-  `experiments/run_mesh_sweep.py` orchestrates resumable same-load comparisons;
-  `analyze_mesh_sweep.py` validates/plots mesh trends; `--include` combines disjoint
-  compatible campaigns into `--output` while retaining each source's provenance.
-  `test_mesh_campaigns.py` checks overlap/settings rejection. `MESH_STUDY.md` documents
+  `experiments/run_mesh_sweep.py` orchestrates resumable ordinary PIC comparisons;
+  `analyze_mesh_sweep.py` validates/plots multiple compatible campaign roots into
+  `--output` while retaining provenance. `test_run_mesh_sweep.py` checks process
+  isolation, resume and failure collection. `MESH_STUDY.md` documents
   local execution and Slurm/GH200 performance templates. [GH200 validation guide](../../ProjectManagement/2026-09-23_1609_GH200_VALIDATION_GUIDE.md)
   records the passed one-GPU oracle suite, selected memcheck probes (with a
   documented Cray MPI exception) and two-node checks (one GPU/rank per node).
   [GH200 performance guide](../../ProjectManagement/2026-09-23_1608_GH200_PERFORMANCE_GUIDE.md) specifies exclusive 1x1/1x2/1x4/2x4 allocations and a targeted
-  2x1 placement comparison. `gh200_mesh.slurm` defaults to a one-GPU sizing pilot;
+  2x1 placement comparison. `gh200_mesh.slurm` runs ordinary FEM or Alpine cases;
   it snapshots stdlib-only runners and records placement/build/GPU provenance.
 - Periodic geometric vertex layout: cells+1 mesh points, `isAllPeriodic=true`.
   `FEMContainer` entity layouts own cells indices per axis, including vertices;
@@ -827,6 +827,68 @@ against source.*
 - The demo defaults to `timer_recording=summary`; `raw` requires a positive
   `timer_sample_limit` (default1024 samples/timer/rank). Online `timer-summary.csv`
   always covers all calls; `timers.csv` exists only in raw mode. Solve/step CSVs
-  remain unchanged. Mesh/replay runners record the policy and reject mixed-policy
+  remain unchanged. Ordinary campaign runners record the policy and reject mixed-policy
   resumes/pooling. `check_compact_timers.py` verifies matched summary/raw runs;
   `gh200_efficiency.slurm` builds -j8 and runs wrapped native unit/PIC checks.
+
+- September 24: `LandauDampingFEM` has no replay/captured-load support. The CLI
+  rejects `--replay`. `experiments/run_mesh_sweep.py` schema2 launches separate
+  ordinary FEM/Alpine simulations; `ordinary_measurements.py` checks 1+N solves,
+  all ranks, fresh residuals, reuse and summary-only timers. `submit_campaigns.py`
+  schedules per-mesh/repetition Slurm arrays with exclusive placement and the MPI
+  wrapper; `campaign_task.py` pins binaries/wrapper/scripts across the study.
+  Historical replay/reuse analyzers and removed launchers are preserved only in
+  the external experiment archive; the active source tree contains ordinary-run
+  tools.
+- Alpine `LandauDamping --benchmark-output DIR` (after its positional arguments)
+  opts into compact per-rank solve/step/physics data and fresh `rho+laplace(phi)`
+  checks. Requires CG/PCG and lbthres=1, skips the dummy warmup, initializes phi=0,
+  reuses its existing PoissonCG instance and then evolves normally. Optional
+  benchmark tolerance/max-iterations/dt controls leave other Alpine modes alone.
+  FD CG uses RHS-relative L2 stopping; FD PCG retains its preconditioned-residual
+  relative-to-initial rule. Never equate these internal residuals with FEM's.
+  `FieldSolver::setLogSolves(false)` avoids its legacy per-solve file/barrier in
+  benchmark mode; legacy logged residuals now retain floating-point precision.
+
+- September 24, 16:36 CEST: ordinary allocation presets `fem-small` (1a, 243 runs)
+  and `fd-large` (1c, 45 runs) in `submit_campaigns.py`, CG only, 8 particles/cell,
+  10 steps, first/repeat staging. Full-volume FEM diagnostics intentionally retained.
+  Archived baseline snapshots freeze their CUDA binaries/tools and use isolated
+  results and study pins. `rank_memory.py` wraps ranks, resolves CUDA
+  ordinal→PCI→NVML, samples bounded summaries and checks device/host headroom;
+  sampled peaks are not guaranteed maxima. Expanded driver covers 1/2/4 nodes ×
+  1/2/4 GPUs plus 8×4, 16³ P1/P2/P3 monitored preflight. Analyzer uses recorded
+  nodes/GPUs, exports diagnostic/memory/application-cost metrics and allocation
+  plots. `test_phase1_campaigns.py` protects coverage, staging and memory refusal.
+  New GPU monitor/placement checks are pending execution; existing C++ unchanged.
+
+- September 25, 01:13 CEST: Alpine FD-PCG tuning is implemented through
+  `fd_pcg_variants.py`, `submit_fd_pcg_campaign.py`, and `analyze_fd_pcg.py`.
+  Every family has exact
+  canonical CLI args and method-specific memory metadata. Initial discovery covers
+  256³ and 512³; 128³/1024³ are transfer targets, and 1024³ may also be tuned after
+  a fixed one-step large-count preflight. Alpine accepts a fifth multigrid
+  communication argument and SSOR enforces `0 < omega < 2`. Benchmark solve CSVs
+  record multigrid setup count, hierarchy levels and coarsest local extent.
+
+- September 26, 00:00 CEST: plain-CG topology searches use
+  `submit_fd_pcg_campaign.py --phase placement` and are stored below
+  `placement/cg`, separate from preconditioner parameter tuning. Placements 16×4
+  and 32×4 run through `gh200_campaign_extended.slurm`,
+  `campaign_task_extended.py`, and `gh200_mesh_extended.slurm`. The legacy
+  `gh200_mesh.slurm` remains byte-identical because completed and active tuning
+  studies pin its SHA-256.
+
+- September 26, 00:24 CEST: the active experiment directory exposes two public
+  submission commands: `submit_fem_campaign.py` for FEM placement/tuning and
+  `submit_fd_pcg_campaign.py` for FD placement/tuning. Redundant shell wrappers,
+  the old FEM DAG, replay/reuse tools and legacy analyzers were removed after the
+  directory was archived. Shared execution, validation and analysis helpers remain;
+  see `demos/electrostaticFEM/experiments/MESH_STUDY.md` for the maintained inventory.
+
+- September 26, 09:12 CEST: explicit 16×4/32×4 requests select the extended
+  dispatcher for placement, transfer, and tuning. The 1024³ CG campaign has
+  three valid runs at 4×4/8×4/16×4; both 32×4 repeats failed with CUDA illegal
+  memory accesses and are excluded from tuning. The updated nine-method transfer
+  targets 8×4 and 16×4. Operational reports were consolidated into
+  `ShortTermReports/2026-09-26_0912_GH200_CAMPAIGN_REPRODUCTION_AND_CONTINUATION.md`.

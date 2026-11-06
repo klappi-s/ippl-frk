@@ -1,13 +1,24 @@
-# Each CTest invocation owns its isolated output directory.
+# Each CTest invocation owns isolated output directories; one method per process.
+set(base_output "${OUTPUT}")
+foreach(method IN ITEMS plain jacobi chebyshev)
+set(OUTPUT "${base_output}/${method}")
+if(method STREQUAL "plain")
+  set(solver plain)
+  set(preconditioner jacobi)
+else()
+  set(solver preconditioned)
+  set(preconditioner "${method}")
+endif()
 file(REMOVE_RECURSE "${OUTPUT}")
 execute_process(COMMAND "${MPIEXEC}" "${RANK_FLAG}" "${RANKS}" ${PREFLAGS} "${APP}" ${POSTFLAGS}
   --dim 1 --order 3 --cells 8 --particles 512 --steps 10 --quadrature_points exact
-  --replay plain,jacobi,chebyshev --output "${OUTPUT}"
+  --solver "${solver}" --preconditioner_type "${preconditioner}" --output "${OUTPUT}"
   RESULT_VARIABLE result)
 if(NOT result EQUAL 0)
   message(FATAL_ERROR "LandauDampingFEM smoke run failed: ${result}")
 endif()
-file(STRINGS "${OUTPUT}/solves-rank0.csv" rows REGEX "^(initial|step),")
+file(STRINGS "${OUTPUT}/solves-rank0.csv" rows)
+list(REMOVE_AT rows 0)
 list(LENGTH rows count)
 if(NOT count EQUAL 11)
   message(FATAL_ERROR "Expected eleven PIC solves, got ${count}")
@@ -30,3 +41,17 @@ foreach(row IN LISTS timer_rows)
     message(FATAL_ERROR "Summary mode retained raw samples: ${row}")
   endif()
 endforeach()
+
+foreach(row IN LISTS rows)
+  if(NOT row MATCHES "^(initial|step),${method},")
+    message(FATAL_ERROR "Unexpected solve phase/method: ${row}")
+  endif()
+endforeach()
+endforeach()
+# Removed CLI must fail explicitly rather than silently changing the experiment.
+execute_process(COMMAND "${MPIEXEC}" "${RANK_FLAG}" "${RANKS}" ${PREFLAGS} "${APP}" ${POSTFLAGS}
+  --replay plain --output "${base_output}/rejected"
+  RESULT_VARIABLE rejected OUTPUT_QUIET ERROR_QUIET)
+if(rejected EQUAL 0)
+  message(FATAL_ERROR "Removed replay option was accepted")
+endif()

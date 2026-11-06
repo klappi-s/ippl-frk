@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
                "  --reuse off|operator|full --initial_guess zero|previous --quadrature_points "
                "9|exact\n"
                "  --interpolation_nodes gll|equispaced --tolerance 1e-10 --max_iterations 10000\n"
-               "  --timer_level coarse|detailed --replay plain,jacobi,chebyshev --output "
+               "  --timer_level coarse|detailed --output "
                "DIRECTORY\n"
                "  --timer_recording summary|raw --timer_sample_limit 1024 (per timer/rank)\n"
                "See demos/electrostaticFEM/README.md for physics and preconditioner controls.\n";

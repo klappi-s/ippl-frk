@@ -23,14 +23,14 @@ for dim,order,family,quad,ranks in cases:
     command=[a.mpiexec,'-n',str(ranks),str(a.executable),'--dim',str(dim),'--order',str(order),
              '--cells','4','--lengths',lengths,'--particles','512','--steps','2',
              '--interpolation_nodes',family,'--quadrature_points',quad,'--reuse','full',
-             '--replay','plain,jacobi','--output',str(a.output/name)]
+             '--solver','preconditioned','--preconditioner_type','jacobi','--output',str(a.output/name)]
     print(name,flush=True)
     if not a.reuse_runs:
         with (a.output/f'{name}.log').open('w') as log:
             subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True)
     for file in (a.output/name).glob('solves-rank*.csv'):
         rows=list(csv.DictReader(file.open()))
-        assert len(rows)==9 and all(r['success']=='1' for r in rows)
+        assert len(rows)==3 and all(r['success']=='1' for r in rows)
     records.append(dict(name=name,command=command))
     (a.output/'runs.json').write_text(json.dumps(records,indent=2)+'\n')
 arrays=[]

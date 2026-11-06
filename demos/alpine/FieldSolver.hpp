@@ -36,6 +36,7 @@ private:
     VField_t<T, Dim>* E_m;
     Field<T, Dim>* phi_m;
     std::vector<std::string> preconditioner_params_m;
+    bool logSolves_m = true;
 
     // Parse the preconditioner params (PCG and FEMPrecon solvers);
     //   [type, optional numeric args...]
@@ -58,6 +59,7 @@ private:
             parsed.type, "FieldSolver::parsePreconditionerParams");
 
         size_t expected_arg_count = 0;
+        size_t maximum_arg_count  = 0;
         if (parsed.type == "newton" || parsed.type == "chebyshev"
             || parsed.type == "richardson_alt") {
             expected_arg_count = 1;
@@ -67,6 +69,10 @@ private:
             expected_arg_count = 3;
         } else if (parsed.type == "multigrid") {
             expected_arg_count = 4;
+            maximum_arg_count  = 5;
+        }
+        if (maximum_arg_count == 0) {
+            maximum_arg_count = expected_arg_count;
         }
 
         const size_t provided_arg_count = preconditioner_params_m.size() - 1;
@@ -81,9 +87,13 @@ private:
             parsed.use_defaults = true;
         };
 
-        if (provided_arg_count != expected_arg_count) {
-            warnAndUseDefaults("expected " + std::to_string(expected_arg_count)
-                               + " argument(s), got " + std::to_string(provided_arg_count));
+        if (provided_arg_count < expected_arg_count || provided_arg_count > maximum_arg_count) {
+            const std::string expected = expected_arg_count == maximum_arg_count
+                                             ? std::to_string(expected_arg_count)
+                                             : std::to_string(expected_arg_count) + " or "
+                                                   + std::to_string(maximum_arg_count);
+            warnAndUseDefaults("expected " + expected + " argument(s), got "
+                               + std::to_string(provided_arg_count));
             return parsed;
         }
 
@@ -111,6 +121,9 @@ private:
                 parsed.mg_post_smooth_iters = std::stoi(preconditioner_params_m[arg++]);
                 parsed.mg_omega             = std::stod(preconditioner_params_m[arg++]);
                 parsed.mg_min_cells         = std::stoi(preconditioner_params_m[arg++]);
+                if (provided_arg_count == 5) {
+                    parsed.communication = std::stoi(preconditioner_params_m[arg++]);
+                }
             }
             parsed.use_defaults = false;
         } catch (const std::exception& ex) {
@@ -128,6 +141,7 @@ private:
     }
 
 public:
+    void setLogSolves(bool enabled) { logSolves_m = enabled; }
     FieldSolver(std::string solver, Field_t<Dim>* rho, VField_t<T, Dim>* E, Field<T, Dim>* phi,
                 std::vector<std::string> preconditioner_params = {})
         : ippl::FieldSolverBase<T, Dim>(solver)
@@ -191,7 +205,7 @@ public:
         if ((this->getStype() == "CG") || (this->getStype() == "PCG") || (this->getStype() == "FEM")
             || (this->getStype() == "FEM_PRECON")) {
             int iterations = 0;
-            int residue    = 0;
+            T residue      = 0;
 
             if (this->getStype() == "FEM") {
                 FEMSolver_t<T, Dim>& solver = std::get<FEMSolver_t<T, Dim>>(this->getSolver());
@@ -214,6 +228,8 @@ public:
                 residue    = solver.getResidue();
             }
 
+            if (!logSolves_m)
+                return;
             if (ippl::Comm->rank() == 0) {
                 std::filesystem::create_directory("data_CG");
                 std::stringstream fname;
@@ -229,6 +245,7 @@ public:
                 fname << ".csv";
 
                 Inform log(NULL, fname.str().c_str(), Inform::APPEND);
+                log.precision(17);
                 // Assume the dummy solve is the first call
                 if (iterations == 0) {
                     log << "residue,iterations" << endl;

@@ -8,9 +8,11 @@
 #include "Kokkos_Core.hpp"
 #include "Ippl.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <ostream>
@@ -174,7 +176,9 @@ namespace ippl {
             IpplTimings::TimerRef mg = IpplTimings::getTimer("MG-PRECOND");
             IpplTimings::startTimer(mg);
 
-            L_[0].f = b.deepCopy();
+            // The hierarchy owns persistent storage. Copy into it instead of
+            // constructing a temporary Field on every PCG iteration.
+            detail::deepCopyIfDifferent(L_[0].f.getView(), b.getView());
 
             // Remove Volume average if periodic
             if (is_all_periodic_) {
@@ -220,6 +224,42 @@ namespace ippl {
             std::array<bool, Dim> decomp = fine_layout.isParallel();
 
             auto bcs = b.getFieldBC();
+
+            // PCG invokes init_fields before every solve so that a load-balanced
+            // layout can be noticed. Rebuilding a complete multigrid hierarchy
+            // on an unchanged static mesh is unnecessary. Compare a compact
+            // signature locally, then reduce the change flag so every rank
+            // makes the same collective rebuild decision.
+            int local_changed = hierarchy_initialized_ ? 0 : 1;
+            const auto& local_fine = fine_layout.getLocalNDIndex();
+            const auto& origin     = fine_mesh.getOrigin();
+            for (unsigned d = 0; d < Dim; ++d) {
+                local_changed |= cached_global_first_[d] != fine_domain[d].first()
+                                 || cached_global_last_[d] != fine_domain[d].last()
+                                 || cached_global_stride_[d] != fine_domain[d].stride()
+                                 || cached_local_first_[d] != local_fine[d].first()
+                                 || cached_local_last_[d] != local_fine[d].last()
+                                 || cached_local_stride_[d] != local_fine[d].stride()
+                                 || cached_decomposition_[d] != decomp[d]
+                                 || cached_spacing_[d] != fine_mesh.getMeshSpacing(d)
+                                 || cached_origin_[d] != origin[d];
+            }
+            for (unsigned face = 0; face < 2 * Dim; ++face) {
+                const int bc_type = bcs[face] ? bcs[face]->getBCType() : -1;
+                local_changed |= cached_bc_types_[face] != bc_type;
+            }
+            local_changed |= cached_all_periodic_ != fine_layout.isAllPeriodic_m;
+
+            int changed_ranks = local_changed;
+            ippl::Comm->allreduce(local_changed, changed_ranks, 1, std::plus<int>{});
+            if (changed_ranks == 0) {
+                IpplTimings::stopTimer(init_fields);
+                return;
+            }
+
+            IpplTimings::TimerRef build_hierarchy =
+                IpplTimings::getTimer("MG-build-hierarchy");
+            IpplTimings::startTimer(build_hierarchy);
 
             // 1. Calculate number of levels
             const auto& localFine = fine_layout.getLocalNDIndex();  // this rank's slab
@@ -297,7 +337,44 @@ namespace ippl {
                 L_.emplace_back(level_mesh, level_layout, level_bcs);
             }
 
+            for (unsigned d = 0; d < Dim; ++d) {
+                cached_global_first_[d]  = fine_domain[d].first();
+                cached_global_last_[d]   = fine_domain[d].last();
+                cached_global_stride_[d] = fine_domain[d].stride();
+                cached_local_first_[d]   = local_fine[d].first();
+                cached_local_last_[d]    = local_fine[d].last();
+                cached_local_stride_[d]  = local_fine[d].stride();
+                cached_decomposition_[d] = decomp[d];
+                cached_spacing_[d]       = fine_mesh.getMeshSpacing(d);
+                cached_origin_[d]        = origin[d];
+            }
+            is_all_periodic_ = true;
+            for (unsigned face = 0; face < 2 * Dim; ++face) {
+                cached_bc_types_[face] = bcs[face] ? bcs[face]->getBCType() : -1;
+                is_all_periodic_ &= cached_bc_types_[face] == ippl::PERIODIC_FACE;
+            }
+            cached_all_periodic_  = fine_layout.isAllPeriodic_m;
+            hierarchy_initialized_ = true;
+            ++setup_count_;
+
+            IpplTimings::stopTimer(build_hierarchy);
             IpplTimings::stopTimer(init_fields);
+        }
+
+        std::size_t getSetupCount() const override { return setup_count_; }
+
+        std::size_t getHierarchyLevels() const override { return L_.size(); }
+
+        std::size_t getCoarsestLocalExtent() const override {
+            if (L_.empty()) {
+                return 0;
+            }
+            const auto& local = L_.back().layout_ptr->getLocalNDIndex();
+            std::size_t extent = local[0].length();
+            for (unsigned d = 1; d < Dim; ++d) {
+                extent = std::min(extent, static_cast<std::size_t>(local[d].length()));
+            }
+            return extent;
         }
 
         /**
@@ -683,6 +760,19 @@ namespace ippl {
         bool communication_;
         bool is_all_periodic_ = false;
         size_t active_level_ = 0;
+        bool hierarchy_initialized_ = false;
+        std::size_t setup_count_ = 0;
+        std::array<int, Dim> cached_global_first_{};
+        std::array<int, Dim> cached_global_last_{};
+        std::array<int, Dim> cached_global_stride_{};
+        std::array<int, Dim> cached_local_first_{};
+        std::array<int, Dim> cached_local_last_{};
+        std::array<int, Dim> cached_local_stride_{};
+        std::array<bool, Dim> cached_decomposition_{};
+        std::array<double, Dim> cached_spacing_{};
+        std::array<double, Dim> cached_origin_{};
+        std::array<int, 2 * Dim> cached_bc_types_{};
+        bool cached_all_periodic_ = false;
 
         // --- DEBUGGING ---
 

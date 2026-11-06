@@ -2,7 +2,10 @@
 #define IPPL_LANDAU_DAMPING_MANAGER_H
 
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 
 #include "AlpineManager.h"
 #include "FieldContainer.hpp"
@@ -45,6 +48,56 @@ struct CustomDistributionFunctions {
 
 template <typename T, unsigned Dim>
 class LandauDampingManager : public AlpineManager<T, Dim> {
+    // Opt-in measurements around the normal application/PoissonCG path.
+    bool benchmark_m = false;
+    std::string benchmarkOutput_m;
+    double benchmarkTolerance_m = 1e-10, benchmarkDt_m = .05, benchmarkSetupSeconds_m = 0;
+    int benchmarkMaxIterations_m = 10000;
+    unsigned benchmarkSolve_m = 0;
+    Kokkos::Timer benchmarkStepTimer_m;
+    Field_t<Dim> benchmarkResidual_m;
+    std::ostringstream benchmarkSolves_m, benchmarkSteps_m, benchmarkPhysics_m;
+
+    void solveField() {
+        if (!benchmark_m) {
+            this->fsolver_m->runSolver();
+            return;
+        }
+        Kokkos::fence();
+        Kokkos::Timer timer;
+        this->fsolver_m->runSolver();
+        Kokkos::fence();
+        const double seconds = timer.seconds();
+        timer.reset();
+        auto& rho = this->fcontainer_m->getRho();
+        auto& phi = this->fcontainer_m->getPhi();
+        auto& solver = std::get<CGSolver_t<T, Dim>>(this->fsolver_m->getSolver());
+        // A=-laplace. Allocate the verification field once during initialization.
+        benchmarkResidual_m = rho + ippl::laplace(phi);
+        const double rhsNorm = ippl::norm(rho);
+        const double relative = ippl::norm(benchmarkResidual_m) / (rhsNorm > 0 ? rhsNorm : 1);
+        Kokkos::fence();
+        const double verification = timer.seconds();
+        const bool success = std::isfinite(relative)
+                             && relative <= std::max(20 * benchmarkTolerance_m, 5e-11)
+                             && solver.getIterationCount() < benchmarkMaxIterations_m;
+        const std::string method = this->solver_m == "CG" ? "plain" : this->preconditioner_params_m.at(0);
+        benchmarkSolves_m << (benchmarkSolve_m == 0 ? "initial" : "step") << ',' << method
+            << ',' << benchmarkSolve_m << ',' << ippl::Comm->rank() << ','
+            << solver.getIterationCount() << ',' << solver.getResidue() << ',' << relative
+            << ',' << rhsNorm << ',' << seconds << ',' << verification << ','
+            << (benchmarkSolve_m == 0 ? benchmarkSetupSeconds_m : 0) << ','
+            << solver.getPreconditionerSetupCount() << ','
+            << solver.getPreconditionerHierarchyLevels() << ','
+            << solver.getPreconditionerCoarsestLocalExtent() << ',' << success << '\n';
+        ++benchmarkSolve_m;
+        if (!success) {
+            flushBenchmark();
+            throw std::runtime_error("Alpine fresh residual check failed at solve "
+                                     + std::to_string(benchmarkSolve_m - 1));
+        }
+    }
+
 public:
     using ParticleContainer_t = ParticleContainer<T, Dim>;
     using FieldContainer_t    = FieldContainer<T, Dim>;
@@ -62,6 +115,67 @@ public:
                                 preconditioner_params_) {}
 
     ~LandauDampingManager() {}
+
+    void enableBenchmark(const std::string& output, double tolerance, int maxIterations, double dt) {
+        if ((this->solver_m != "CG" && this->solver_m != "PCG") || this->lbt_m != 1.0
+            || !(tolerance > 0) || !std::isfinite(tolerance) || maxIterations < 1
+            || !(dt > 0) || !std::isfinite(dt))
+            throw std::runtime_error("Benchmark requires CG/PCG, lbthres=1 and positive solver/dt controls.");
+        benchmarkOutput_m = std::filesystem::absolute(output).string();
+        int error = 0;
+        if (ippl::Comm->rank() == 0) {
+            try {
+                if (std::filesystem::exists(benchmarkOutput_m + "/configuration.txt"))
+                    error = 1;
+                else
+                    std::filesystem::create_directories(benchmarkOutput_m);
+            } catch (...) { error = 1; }
+        }
+        MPI_Bcast(&error, 1, MPI_INT, 0, ippl::Comm->getCommunicator());
+        if (error)
+            throw std::runtime_error("Benchmark output exists or cannot be created: " + output);
+        ippl::Comm->barrier();
+        std::filesystem::current_path(benchmarkOutput_m); // Isolate existing Alpine diagnostic files.
+        benchmark_m = true;
+        benchmarkTolerance_m = tolerance;
+        benchmarkMaxIterations_m = maxIterations;
+        benchmarkDt_m = dt;
+        IpplTimings::setSampleLimit(0);
+        benchmarkSolves_m << std::setprecision(17)
+            << "phase,method,solve,rank,iterations,recursive_residual,fresh_relative_residual,"
+               "rhs_norm,solve_seconds,verification_seconds,solver_setup_seconds,"
+               "preconditioner_setups,preconditioner_levels,preconditioner_coarsest_local_extent,"
+               "success\n";
+        benchmarkSteps_m << std::setprecision(17) << "step,rank,stage,seconds\n";
+        benchmarkPhysics_m << std::setprecision(17)
+            << "step,time,Ex_field_energy,Ex_max_norm,mean_potential,mean_charge_density\n";
+    }
+
+    void flushBenchmark() {
+        if (!benchmark_m) return;
+        const std::string rank = std::to_string(ippl::Comm->rank());
+        std::ofstream(benchmarkOutput_m + "/solves-rank" + rank + ".csv") << benchmarkSolves_m.str();
+        std::ofstream(benchmarkOutput_m + "/steps-rank" + rank + ".csv") << benchmarkSteps_m.str();
+        if (ippl::Comm->rank() == 0)
+            std::ofstream(benchmarkOutput_m + "/physics.csv") << benchmarkPhysics_m.str();
+    }
+
+    void pre_step() override {
+        if (benchmark_m) {
+            Kokkos::fence();
+            benchmarkStepTimer_m.reset();
+        }
+        AlpineManager<T, Dim>::pre_step();
+    }
+
+    void post_step() override {
+        AlpineManager<T, Dim>::post_step();
+        if (benchmark_m) {
+            Kokkos::fence();
+            benchmarkSteps_m << this->it_m << ',' << ippl::Comm->rank()
+                             << ",step_total," << benchmarkStepTimer_m.seconds() << '\n';
+        }
+    }
 
     void pre_run() override {
         Inform m("Pre Run");
@@ -97,6 +211,7 @@ public:
             std::reduce(this->rmax_m.begin(), this->rmax_m.end(), -1., std::multiplies<double>());
         this->origin_m = this->rmin_m;
         this->dt_m   = std::min(.05, 0.5 * *std::min_element(this->hr_m.begin(), this->hr_m.end()));
+        if (benchmark_m) this->dt_m = benchmarkDt_m;
         this->it_m   = 0;
         this->time_m = 0.0;
 
@@ -124,28 +239,61 @@ public:
                 &this->fcontainer_m->getPhi()));
         }
 
+        Kokkos::fence();
+        Kokkos::Timer setupTimer;
         this->fsolver_m->initSolver();
+        Kokkos::fence();
+        if (benchmark_m) {
+            benchmarkSetupSeconds_m = setupTimer.seconds();
+            auto& solver = std::get<CGSolver_t<T, Dim>>(this->fsolver_m->getSolver());
+            ippl::ParameterList parameters;
+            parameters.add("tolerance", benchmarkTolerance_m);
+            parameters.add("max_iterations", benchmarkMaxIterations_m);
+            solver.mergeParameters(parameters);
+            std::static_pointer_cast<FieldSolver_t>(this->fsolver_m)->setLogSolves(false);
+            this->fcontainer_m->getPhi() = 0;
+            benchmarkResidual_m.initialize(this->fcontainer_m->getMesh(), this->fcontainer_m->getFL());
+        }
 
         this->setLoadBalancer(std::make_shared<LoadBalancer_t>(
             this->lbt_m, this->fcontainer_m, this->pcontainer_m, this->fsolver_m));
 
         initializeParticles();
 
-        static IpplTimings::TimerRef DummySolveTimer = IpplTimings::getTimer("solveWarmup");
-        IpplTimings::startTimer(DummySolveTimer);
-
-        this->fcontainer_m->getRho() = 0.0;
-
-        this->fsolver_m->runSolver();
-
-        IpplTimings::stopTimer(DummySolveTimer);
+        if (!benchmark_m) {
+            static IpplTimings::TimerRef DummySolveTimer = IpplTimings::getTimer("solveWarmup");
+            IpplTimings::startTimer(DummySolveTimer);
+            this->fcontainer_m->getRho() = 0.0;
+            this->fsolver_m->runSolver();
+            IpplTimings::stopTimer(DummySolveTimer);
+        } else if (ippl::Comm->rank() == 0) {
+            std::ofstream out(benchmarkOutput_m + "/configuration.txt");
+            out << std::setprecision(17)
+                << "application=alpine\nbackend=" << Kokkos::DefaultExecutionSpace::name()
+                << "\ndimension=" << Dim << "\nranks=" << ippl::Comm->size()
+                << "\nparticles=" << this->totalP_m << "\nsteps=" << this->nt_m
+                << "\ndt=" << this->dt_m << "\nalpha=" << this->alpha_m
+                << "\nseed=42\ninitial_condition=alpine_product\ninitial_guess=previous"
+                << "\nload_balancing=disabled\ntimer_recording=summary\ntimer_sample_limit=0"
+                << "\npreconditioner_lifecycle_metrics=1"
+                << "\ntolerance=" << benchmarkTolerance_m
+                << "\nmax_iterations=" << benchmarkMaxIterations_m
+                << "\npic_method=" << (this->solver_m == "CG" ? "plain" : this->preconditioner_params_m.at(0))
+                << "\nsolver=" << this->solver_m << "\nsolver_setup_seconds=" << benchmarkSetupSeconds_m
+                << "\nresidual_policy=" << (this->solver_m == "CG" ? "l2_relative_rhs" : "preconditioned_relative_initial")
+                << "\nwarmup_solves=0\n";
+            for (unsigned d = 0; d < Dim; ++d)
+                out << "cells_" << d << '=' << this->nr_m[d] << "\nlength_" << d << '=' << this->rmax_m[d] << '\n';
+            for (size_t i = 0; i < this->preconditioner_params_m.size(); ++i)
+                out << "preconditioner_arg_" << i << '=' << this->preconditioner_params_m[i] << '\n';
+        }
 
         this->par2grid();
 
         static IpplTimings::TimerRef SolveTimer = IpplTimings::getTimer("solve");
         IpplTimings::startTimer(SolveTimer);
 
-        this->fsolver_m->runSolver();
+        solveField();
 
         IpplTimings::stopTimer(SolveTimer);
 
@@ -307,7 +455,7 @@ public:
 
         // Field solve
         IpplTimings::startTimer(SolveTimer);
-        this->fsolver_m->runSolver();
+        solveField();
         IpplTimings::stopTimer(SolveTimer);
 
         // gather E field
@@ -366,6 +514,14 @@ public:
 
         double ExAmp = 0.0;
         ippl::Comm->reduce(localExNorm, ExAmp, 1, std::greater<double>());
+
+        if (benchmark_m) {
+            const double meanPhi = this->fcontainer_m->getPhi().getVolumeAverage();
+            const double meanRho = this->fcontainer_m->getRho().getVolumeAverage();
+            if (ippl::Comm->rank() == 0)
+                benchmarkPhysics_m << this->it_m << ',' << this->time_m << ',' << fieldEnergy
+                                   << ',' << ExAmp << ',' << meanPhi << ',' << meanRho << '\n';
+        }
 
         if (ippl::Comm->rank() == 0) {
             std::filesystem::create_directory("data");

@@ -77,7 +77,6 @@ namespace electrostatic_fem {
         std::string method_m;
         std::map<std::string, double> times_m;
         std::ostringstream solves_m, steps_m, physics_m;
-        std::vector<Field> loads_m;
         Kokkos::View<Point*> quadraturePositions_m, quadratureField_m;
         Kokkos::View<double*> quadratureWeights_m;
         size_t totalParticles_m = 0;
@@ -342,7 +341,6 @@ namespace electrostatic_fem {
                 << "\ntimer_level=" << config_m.timerLevel
                 << "\ntimer_recording=" << config_m.timerRecording
                 << "\ntimer_sample_limit=" << (config_m.timerRecording == "raw" ? config_m.timerSampleLimit : 0)
-                << "\nreplay=" << config_m.replay
                 << "\nload_balancing=disabled\nlayout_generation=0\n";
             size_t dofs = 1;
             for (unsigned d = 0; d < Dim; ++d) {
@@ -406,13 +404,9 @@ namespace electrostatic_fem {
                 initializeParticles();
                 initializeQuadrature();
             });
-            selectMethod(config_m.replay.empty() && config_m.solver != "plain"
-                             ? config_m.preconditioner
-                             : "plain");
+            selectMethod(config_m.solver != "plain" ? config_m.preconditioner : "plain");
             writeManifest();
             deposit();
-            if (!config_m.replay.empty())
-                loads_m.push_back(fields_m->load.deepCopy());
             solve("initial", 0);
             gather();
             diagnostics();
@@ -434,10 +428,6 @@ namespace electrostatic_fem {
                 });
                 // balancer_m.repartition(); // Disabled until FEM redistribution is validated.
                 deposit();
-                if (!config_m.replay.empty())
-                    timed("capture_load", [&] {
-                        loads_m.push_back(fields_m->load.deepCopy());
-                    });
                 solve("step", step_m);
                 gather();
                 timed("kick", [&] {
@@ -467,21 +457,6 @@ namespace electrostatic_fem {
                 std::ofstream(path("physics.csv")) << physics_m.str();
         }
         void finish() {
-            if (!config_m.replay.empty()) {
-                std::string list = config_m.replay;
-                for (auto& ch : list)
-                    if (ch == ',')
-                        ch = ' ';
-                std::istringstream methods(list);
-                std::string method;
-                while (methods >> method) {
-                    selectMethod(method);
-                    for (size_t i = 0; i < loads_m.size(); ++i) {
-                        fields_m->load = loads_m[i];
-                        solve("replay", i);
-                    }
-                }
-            }
             timed("output", [&] {
                 flush();
             });

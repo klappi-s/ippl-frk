@@ -20,7 +20,7 @@ namespace electrostatic_fem {
         int maxIterations  = 10000;
         std::string solver = "plain", preconditioner = "jacobi", family = "gll", quadrature = "9";
         std::string stiffness = "constant_preserving", reuse = "full", initialGuess = "previous";
-        std::string initialCondition = "single", output = "landau-fem", replay,
+        std::string initialCondition = "single", output = "landau-fem",
                     timerLevel = "coarse", timerRecording = "summary";
         std::vector<unsigned> cells;
         std::vector<double> lengths;
@@ -49,7 +49,7 @@ namespace electrostatic_fem {
                 " dim order cells lengths particles steps seed mode dt alpha thermal_speed "
                 "tolerance max_iterations solver preconditioner_type interpolation_nodes "
                 "quadrature_points poisson_stiffness_mode reuse initial_guess initial_condition "
-                "output replay diagnostics_every newton_level chebyshev_degree "
+                "output diagnostics_every newton_level chebyshev_degree "
                 "richardson_iterations gauss_seidel_inner_iterations gauss_seidel_outer_iterations "
                 "ssor_omega timer_level timer_recording timer_sample_limit info ";
             for (int i = 1; i < argc; ++i) {
@@ -103,7 +103,6 @@ namespace electrostatic_fem {
             c.initialGuess     = c.get("initial_guess", c.initialGuess);
             c.initialCondition = c.get("initial_condition", c.initialCondition);
             c.output           = c.get("output", c.output);
-            c.replay           = c.get("replay", "");
             if (c.dimension < 1 || c.dimension > 3 || c.order < 1 || c.order > 5 || !c.particles
                 || !c.mode || !c.maxIterations || !c.diagnosticsEvery || c.dt <= 0
                 || std::abs(c.alpha) >= 1 || c.thermalSpeed <= 0 || !(c.tolerance > 0)

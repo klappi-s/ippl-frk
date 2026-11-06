@@ -1,108 +1,94 @@
-"""Exercise repeated sweep planning, replay launches and resume without MPI/GPU."""
+"""Protect ordinary process isolation, failure collection and resumable campaigns."""
+import argparse
 import contextlib
 import io
 import json
 from pathlib import Path
-import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-import run_mesh_sweep
+import run_mesh_sweep as runner
+from ordinary_measurements import DEFAULT_VARIANTS, VARIANTS
+from submit_campaigns import tasks_for
 
-
-class ForwardOnlyDict(dict):
-    # Model Python 3.6/3.7 dictionaries even when testing on newer Python.
-    __reversed__ = None
-
-
-class MeshSweepRunner(unittest.TestCase):
+class OrdinaryCampaigns(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.app = self.root / 'mock application.py'
-        self.app.write_text(
-            'import json, sys\n'
-            'from pathlib import Path\n'
-            'args = sys.argv[1:]\n'
-            'output = Path(args[args.index("--output") + 1])\n'
-            'output.mkdir()\n'
-            '(output / "arguments.json").write_text(json.dumps(args))\n')
-        self.output = self.root / 'campaign'
-        # A failed allocation can leave evidence before campaign.json exists.
-        (self.output / 'allocations').mkdir(parents=True)
-        (self.output / 'allocations/previous.log').write_text('preflight passed\n')
-        self.args = ['--executable', str(self.app), '--output', str(self.output),
-                     '--dimensions', '1', '2', '3', '--orders', '3',
-                     '--cells-1d', '256', '512', '1024', '--cells-2d', '16', '32', '64',
-                     '--cells-3d', '4', '8', '16', '--steps', '10', '--repeats', '3',
-                     '--launcher', shlex.quote(sys.executable), '--resume']
-
-    def check_plan(self):
-        manifest = json.loads((self.output / 'campaign.json').read_text())
-        jobs = manifest['jobs']
-        self.assertEqual(len(jobs), 54)
-        self.assertEqual([j['index'] for j in jobs], list(range(54)))
-        self.assertEqual(len({j['name'] for j in jobs}), 54)
-        meshes = {(1, 256), (1, 512), (1, 1024), (2, 16), (2, 32), (2, 64),
-                  (3, 4), (3, 8), (3, 16)}
-        self.assertEqual({(j['dimension'], j['cells']) for j in jobs}, meshes)
-        for dim, cells in meshes:
-            actual = [(j['repeat'], j['batch']) for j in jobs
-                      if (j['dimension'], j['cells']) == (dim, cells)]
-            self.assertEqual(actual, [(0, 'baseline'), (0, 'tuned'),
-                                      (1, 'tuned'), (1, 'baseline'),
-                                      (2, 'baseline'), (2, 'tuned')])
-        self.assertEqual((self.output / 'allocations/previous.log').read_text(), 'preflight passed\n')
-        return manifest
-
-    def test_three_repeats_with_nonreversible_dictionary(self):
-        with patch.object(run_mesh_sweep, 'BATCHES', ForwardOnlyDict(run_mesh_sweep.BATCHES)), \
-                patch.object(sys, 'argv', ['run_mesh_sweep.py'] + self.args + ['--dry-run']), \
-                contextlib.redirect_stdout(io.StringIO()):
-            run_mesh_sweep.main()
-        self.check_plan()
-
-    def test_all_launches_method_rotation_and_resume(self):
-        command = [sys.executable, str(Path(run_mesh_sweep.__file__).resolve())] + self.args
-        def run(extra=()):
-            return subprocess.run(command + list(extra), stdout=subprocess.PIPE,
-                                  stderr=subprocess.STDOUT, universal_newlines=True)
-        completed = run()
-        self.assertEqual(completed.returncode, 0, completed.stdout)
-        manifest = self.check_plan()
-        expected_methods = {
-            'baseline': ['plain,jacobi,gauss-seidel,chebyshev',
-                         'jacobi,gauss-seidel,chebyshev,plain',
-                         'gauss-seidel,chebyshev,plain,jacobi'],
-            'tuned': ['plain,gauss-seidel,chebyshev',
-                      'gauss-seidel,chebyshev,plain', 'chebyshev,plain,gauss-seidel']}
-        for job in manifest['jobs']:
-            state = json.loads((self.output / 'jobs' / (job['name'] + '.json')).read_text())
-            self.assertEqual(state['returncode'], 0)
-            batch = self.output / state['directory']
-            replay = json.loads((batch / 'runs.json').read_text())[0]
-            arguments = json.loads((batch / replay['name'] / 'arguments.json').read_text())
-            self.assertEqual(arguments[arguments.index('--replay') + 1],
-                             expected_methods[job['batch']][job['repeat']])
-            self.assertEqual(arguments[arguments.index('--steps') + 1], '10')
-            self.assertEqual(arguments[arguments.index('--timer_recording') + 1], 'summary')
-            self.assertEqual(arguments[arguments.index('--timer_sample_limit') + 1], '1024')
+        temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.app = self.root/'application'; self.app.write_text('binary pin')
+        self.output = self.root/'campaign'
+        self.args = ['--executable', str(self.app), '--output', str(self.output), '--dimensions', '3',
+                     '--orders', '2', '--cells-3d', '4', '--repeats', '1', '--variants', 'cg', 'jacobi', 'cheb2']
+        self.child = Mock(pid=123456)
+        self.child.wait.return_value = 0
+    def run_driver(self, extra=(), **patches):
+        with patch.object(sys, 'argv', ['run_mesh_sweep.py'] + self.args + list(extra)), \
+             patch.object(runner.subprocess, 'Popen', return_value=self.child) as launch, \
+             patch.object(runner, 'inspect_run', **(patches or dict(return_value={'verified': True}))), \
+             contextlib.redirect_stdout(io.StringIO()):
+            runner.main()
+        return launch
+    def test_normal_launches_resume_and_pins(self):
+        launched = self.run_driver()
+        self.assertEqual(launched.call_count, 3)
+        for call in launched.call_args_list:
+            command = call.args[0]
+            self.assertNotIn('--replay', command)
+            self.assertEqual(command[command.index('--steps')+1], '10')
+            self.assertEqual(command[command.index('--initial_condition')+1], 'alpine_product')
+            self.assertTrue(call.kwargs['start_new_session'])
         before = {p: p.read_bytes() for p in self.output.rglob('*') if p.is_file()}
-        resumed = run()
-        self.assertEqual(resumed.returncode, 0, resumed.stdout)
-        self.assertEqual(resumed.stdout.count('completed; skipped'), 54)
+        self.assertEqual(self.run_driver(['--resume', '--timeout', '18000']).call_count, 0)
         self.assertEqual(before, {p: p.read_bytes() for p in self.output.rglob('*') if p.is_file()})
-        changed_recording = run(['--timer-recording', 'raw'])
-        self.assertNotEqual(changed_recording.returncode, 0)
-        self.assertIn('Resume configuration/binary/runner differs', changed_recording.stdout)
-        changed = run(['--steps', '11'])
-        self.assertNotEqual(changed.returncode, 0)
-        self.assertIn('Resume configuration/binary/runner differs', changed.stdout)
+        with self.assertRaisesRegex(SystemExit, 'differs'): self.run_driver(['--resume', '--steps', '11'])
+        self.app.write_text('different executable')
+        with self.assertRaisesRegex(SystemExit, 'differs'): self.run_driver(['--resume'])
+    def test_validation_failure_does_not_abort_other_methods(self):
+        with self.assertRaisesRegex(SystemExit, 'cg'):
+            self.run_driver(side_effect=[AssertionError('bad residual'), {}, {}])
+        states = [json.loads(p.read_text()) for p in (self.output/'jobs').glob('*.json')]
+        self.assertEqual(len(states), 3)
+        self.assertEqual(sum(bool(s['validation_error']) for s in states), 1)
+    def test_timeout_terminates_process_group_and_records_failure(self):
+        self.child.wait.side_effect = [subprocess.TimeoutExpired('application', 1), 0, 0, 0]
+        with patch.object(runner.os, 'killpg') as kill:
+            with self.assertRaisesRegex(SystemExit, 'cg'): self.run_driver()
+        kill.assert_called_once_with(self.child.pid, signal.SIGTERM)
+        state = json.loads((self.output/'jobs/d3_p2_n4_cg_r0.json').read_text())
+        self.assertEqual(state['returncode'], 124)
+        self.assertEqual(len(list((self.output/'jobs').glob('*.json'))), 3)
+    def test_alpine_arguments_and_separate_method_variants(self):
+        config = dict(application='alpine', launcher='mpiexec -n {ranks}', ranks=2,
+                      executable='/path with spaces/LandauDamping', steps=10, tolerance=1e-10, max_iterations=10000, dt=.05)
+        for variant in VARIANTS:
+            command = runner.command_for(config, dict(cells=64, particles=32768, variant=variant), self.root/'data')
+            self.assertNotIn('--replay', command)
+            self.assertIn('--benchmark-output', command)
+            self.assertEqual(command[10], '1.0')
+            self.assertEqual(command[11], 'LeapFrog')
+        command = runner.command_for(config, dict(cells=64, particles=32768, variant='gs21'), self.root/'data')
+        self.assertEqual(command[12:16], ['gauss-seidel', '2', '1', '1'])
+    def test_study_coverage_and_repeat_rotation(self):
+        args = argparse.Namespace(application='fem', orders=[2,3], dimensions=[1,2,3],
+            cells_3d=None, large=None, full_control=False, repeats=3, variants=DEFAULT_VARIANTS,
+            output_root=self.root, particles=32768, tolerance=1e-10, dt=.05)
+        tasks = tasks_for(args, '1x4')
+        self.assertEqual(len(tasks), 63)
+        self.assertEqual(len({t['output'] for t in tasks}), 63)
+        self.assertEqual(len(tasks_for(args, '2x1')), 18)
+        args.application='alpine'
+        self.assertEqual(len(tasks_for(args, '1x4')), 12)
+        self.assertEqual(len(tasks_for(args, '2x1')), 6)
+        a = argparse.Namespace(application='fem', orders=[2], dimensions=[3], cells_1d=[], cells_2d=[],
+            cells_3d=[64], repeat_offset=0, repeats=3, variants=DEFAULT_VARIANTS, particles_per_cell=None, particles=32768)
+        jobs = runner.make_jobs(a)
+        self.assertEqual(len(jobs), 24)
+        self.assertEqual([j['variant'] for j in jobs[:3]], ['cg','jacobi','gs21'])
+        self.assertEqual([j['variant'] for j in jobs[8:11]], ['jacobi','gs21','gs22'])
+        self.assertEqual(len({j['name'] for j in jobs}), 24)
 
-
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == '__main__': unittest.main()

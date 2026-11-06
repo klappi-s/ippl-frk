@@ -67,10 +67,17 @@ namespace ippl {
             detail::do_deep_copy(result, u);
         }
 
-        // Allocate any scratch fields the preconditioner needs. Called once
-        // by the owning solver after the layout is known. Concrete
-        // preconditioners that need scratch override this.
+        // Allocate or refresh scratch fields after the layout is known. PCG
+        // calls this before each solve so a load-balanced layout can be
+        // detected; concrete implementations must reuse unchanged storage.
         virtual void init_fields(Field& /*b*/) {}
+
+        // Lifecycle metadata is primarily useful for expensive, reusable
+        // preconditioners such as multigrid. Cheap preconditioners retain the
+        // zero-valued defaults.
+        virtual std::size_t getSetupCount() const { return 0; }
+        virtual std::size_t getHierarchyLevels() const { return 0; }
+        virtual std::size_t getCoarsestLocalExtent() const { return 0; }
 
         std::string get_type() { return type_m; };
 

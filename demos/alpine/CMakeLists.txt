@@ -46,4 +46,32 @@ endif()
 add_alpine_example(PenningTrap)
 add_alpine_example(BumponTailInstability)
 
+if(BUILD_TESTING)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    string(TOLOWER "${IPPL_PLATFORMS}" _platforms)
+    set(_benchmark_backend Serial)
+    if(_platforms MATCHES "cuda")
+      set(_benchmark_backend Cuda)
+    elseif(_platforms MATCHES "hip")
+      set(_benchmark_backend HIP)
+    elseif(_platforms MATCHES "sycl")
+      set(_benchmark_backend SYCL)
+    elseif(_platforms MATCHES "openmp")
+      set(_benchmark_backend OpenMP)
+    endif()
+    foreach(_ranks IN ITEMS 1 2)
+      add_test(NAME LandauDampingBenchmark_MPI${_ranks}
+        COMMAND ${CMAKE_COMMAND}
+          -DAPP=$<TARGET_FILE:LandauDamping> -DPYTHON=${Python3_EXECUTABLE}
+          -DBACKEND=${_benchmark_backend}
+          -DMPIEXEC=${MPIEXEC_EXECUTABLE} -DRANK_FLAG=${MPIEXEC_NUMPROC_FLAG} -DRANKS=${_ranks}
+          -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/benchmark-smoke-${_ranks}
+          -DRUNNER=${CMAKE_CURRENT_SOURCE_DIR}/../electrostaticFEM/experiments/run_mesh_sweep.py
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkSmoke.cmake)
+      set_tests_properties(LandauDampingBenchmark_MPI${_ranks} PROPERTIES TIMEOUT 120 PROCESSORS ${_ranks} LABELS "alpine;demo")
+    endforeach()
+  endif()
+endif()
+
 add_subdirectory(validation)

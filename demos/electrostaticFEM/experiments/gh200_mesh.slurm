@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exclusive GH200 timing pilot; account and uenv are supplied by the caller.
+# Ordinary PIC measurements on exclusive GH200 allocations.
 # See ProjectManagement/2026-09-23_1608_GH200_PERFORMANCE_GUIDE.md in the FEM workspace.
 #SBATCH --job-name=fem-mesh
 #SBATCH --nodes=1
@@ -22,15 +22,21 @@ set -euo pipefail
 : "${SLURM_JOB_ID:?Submit this script through Slurm}"
 experiments=${FEM_EXPERIMENTS:-$FEM_ROOT/ippl-frk/demos/electrostaticFEM/experiments}
 buildDir=${FEM_BUILD:-$FEM_ROOT/build_cuda}
-app=${FEM_EXECUTABLE:-$buildDir/demos/electrostaticFEM/LandauDampingFEM}
+application=${FEM_APPLICATION:-fem}
+case "$application" in
+  fem) defaultApp=$buildDir/demos/electrostaticFEM/LandauDampingFEM;;
+  alpine) defaultApp=$buildDir/demos/alpine/LandauDamping;;
+  *) echo "Unknown application: $application" >&2; exit 2;;
+esac
+app=${FEM_EXECUTABLE:-$defaultApp}
 nodes=$SLURM_JOB_NUM_NODES
 ranks=$SLURM_NTASKS
 cpus=${SLURM_CPUS_PER_TASK:-72}
 (( ranks > 0 && nodes > 0 && ranks % nodes == 0 )) || { echo 'Ranks must divide evenly across nodes.' >&2; exit 2; }
 perNode=$((ranks / nodes))
 case "$nodes:$perNode" in
-  1:1|1:2|1:4|2:1|2:4) ;;
-  *) echo 'Supported placements: 1x1, 1x2, 1x4, 2x1 or 2x4 (nodes x GPUs/node).' >&2; exit 2;;
+  1:1|1:2|1:4|2:1|2:2|2:4|4:1|4:2|4:4|8:1|8:2|8:4|16:1|16:2|16:4) ;;
+  *) echo 'Supported placements: 1/2/4/8/16 nodes x 1/2/4 GPUs.' >&2; exit 2;;
 esac
 output=${FEM_OUTPUT:-$FEM_ROOT/gpu_performance/$(date -u +%Y%m%dT%H%M%SZ)-${nodes}n-${perNode}gpn-$SLURM_JOB_ID}
 mkdir -p "$output/allocations"
@@ -54,7 +60,7 @@ export WRAPPER="${WRAPPER:-/user-environment/wrapper-mpi.sh}"
 # where the allocation itself may expose all four GPUs to the batch shell.
 launch=(srun --nodes="$nodes" --ntasks="$ranks" --ntasks-per-node="$perNode"
   --cpus-per-task="$cpus" --gpus-per-task=1 --cpu-bind=cores --kill-on-bad-exit=1)
-# run_reuse.py parses with shlex.split and formats {ranks}. Preserve arbitrary
+# The runner parses with shlex.split and formats {ranks}. Preserve arbitrary
 # wrapper paths as one argument, including literal braces and shell metacharacters.
 launcher=$("$python_command" -c 'import shlex, sys; print(" ".join(shlex.quote(a) for a in sys.argv[1:]).replace("{", "{{").replace("}", "}}"))' \
   "${launch[@]}" "$WRAPPER")
@@ -69,16 +75,22 @@ launcher=$("$python_command" -c 'import shlex, sys; print(" ".join(shlex.quote(a
 } > "$runDir/allocation.txt" 2>&1
 cp "${BASH_SOURCE[0]}" "$runDir/driver.slurm"
 cp "$buildDir/CMakeCache.txt" "$runDir/CMakeCache.txt"
-git -C "$FEM_ROOT/ippl-frk" rev-parse HEAD > "$runDir/source-revision.txt"
-git -C "$FEM_ROOT/ippl-frk" diff --binary HEAD > "$runDir/source.patch"
-# Freeze both stdlib-only runners for this invocation, even if the source files
-# are updated later. No analysis/plotting packages are needed on the cluster.
-mkdir "$runDir/tools"
-cp "$experiments/run_mesh_sweep.py" "$experiments/run_reuse.py" "$runDir/tools/"
-if [[ ${FEM_REPLAY_CHECK:-0} == 1 ]]; then
-  cp "$experiments/run_replay_check.py" "$experiments/check_compact_timers.py" "$runDir/tools/"
-  cp "${FEM_REPLAY_CHECK_SCRIPT:-$experiments/gh200_replay_check.slurm}" "$runDir/replay-check-driver.slurm"
+if [[ -n ${FEM_BASELINE:-} ]]; then
+  cp "$FEM_BASELINE/source-revision.txt" "$FEM_BASELINE/source.patch" "$runDir/"
+  cp "$FEM_BASELINE/baseline.json" "$runDir/baseline.json"
+else
+  git -C "$FEM_ROOT/ippl-frk" rev-parse HEAD > "$runDir/source-revision.txt"
+  git -C "$FEM_ROOT/ippl-frk" diff --binary HEAD > "$runDir/source.patch"
 fi
+# Freeze the runner, validator, and their local registry dependency for this
+# allocation.  The copied scripts must be importable without consulting the
+# live source tree so the recorded hashes describe the code that actually ran.
+mkdir "$runDir/tools"
+cp "$experiments/run_mesh_sweep.py" \
+   "$experiments/ordinary_measurements.py" \
+   "$experiments/fd_pcg_variants.py" \
+   "$experiments/rank_memory.py" \
+   "$runDir/tools/"
 sha256sum "$app" "$runDir/tools/"*.py > "$runDir/sha256.txt"
 "$python_command" - "$WRAPPER" "$runDir" "$output" <<'PY'
 import hashlib
@@ -134,35 +146,20 @@ for host in hosts:
 print('Verified %d nodes x %d GPU ranks/node.' % (nodes, per_node))
 PY
 timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" --label nvidia-smi > "$runDir/gpus-before.log"
-# A small 3D case has enough owned cells even for eight ranks. Its numerical
-# residual/charge/energy checks also provide a gate for each new allocation.
-timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" "$WRAPPER" "$app" \
-  --dim 3 --order 3 --cells 4 --particles 1024 --steps 1 --quadrature_points exact \
-  --replay plain,jacobi --output "$runDir/preflight" > "$runDir/preflight.log" 2>&1
-"$python_command" - "$runDir/preflight/configuration.txt" "$ranks" <<'PY'
-from pathlib import Path
-import sys
+# Separate allocation preflight; never part of the measured ten-step records.
+"$python_command" "$runDir/tools/run_mesh_sweep.py" \
+  --application "$application" --executable "$app" --output "$runDir/preflight" \
+  --dimensions 3 --orders 1 2 3 --cells-3d 16 --particles-per-cell 8 --steps 1 --repeats 1 \
+  --variants cg --ranks "$ranks" --launcher "$launcher" --expected-backend Cuda \
+  --rank-monitor "$runDir/tools/rank_memory.py" --memory-estimate-gib 2 \
+  --timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" > "$runDir/preflight.log" 2>&1
+printf 'CUDA ordinary-run preflight passed on all allocated ranks.\n'
 
-config = dict(line.split('=', 1) for line in Path(sys.argv[1]).read_text().splitlines())
-assert config['backend'] == 'Cuda' and int(config['ranks']) == int(sys.argv[2]), 'Wrong backend/rank count'
-print('CUDA preflight passed on all allocated ranks.')
-PY
-
-# Defaults are a short sizing pilot: one mesh/dimension, four loads, one repeat.
-# Pass --steps 10 --repeats 3 and mesh lists for the measured sweep. Explicit
-# --ranks/--launcher/--output below protect the verified placement from overrides.
 status=0
-if [[ ${FEM_REPLAY_CHECK:-0} == 1 ]]; then
-  "$python_command" "$runDir/tools/run_replay_check.py" "$@" \
-    --executable "$app" --output "$output" --ranks "$ranks" --launcher "$launcher" \
-    --expected-backend Cuda --resume || status=$?
-else
-  "$python_command" "$runDir/tools/run_mesh_sweep.py" \
-    --dimensions 1 2 3 --orders 3 --cells-1d 512 --cells-2d 32 --cells-3d 8 \
-    --particles 32768 --steps 3 --repeats 1 --timeout 1800 "$@" \
-    --executable "$app" --output "$output" --ranks "$ranks" --launcher "$launcher" \
-    --timer-level coarse --resume || status=$?
-fi
+"$python_command" "$runDir/tools/run_mesh_sweep.py" "$@" \
+  --application "$application" --executable "$app" --output "$output" \
+  --ranks "$ranks" --nodes "$nodes" --gpus-per-node "$perNode" \
+  --launcher "$launcher" --expected-backend Cuda --resume || status=$?
 timeout "${FEM_PREFLIGHT_TIMEOUT:-300}" "${launch[@]}" --label nvidia-smi > "$runDir/gpus-after.log" || true
 exit "$status"
 }

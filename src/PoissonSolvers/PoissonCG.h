@@ -177,6 +177,18 @@ namespace ippl {
          */
         Tlhs getResidue() const { return algo_m->getResidue(); }
 
+        std::size_t getPreconditionerSetupCount() const {
+            return algo_m->getPreconditionerSetupCount();
+        }
+
+        std::size_t getPreconditionerHierarchyLevels() const {
+            return algo_m->getPreconditionerHierarchyLevels();
+        }
+
+        std::size_t getPreconditionerCoarsestLocalExtent() const {
+            return algo_m->getPreconditionerCoarsestLocalExtent();
+        }
+
     protected:
         std::unique_ptr<CG<OperatorRet, LowerRet, UpperRet, UpperAndLowerRet, InverseDiagonalRet,
                            DiagRet, FieldLHS, FieldRHS>>

@@ -89,16 +89,20 @@ done
 for ranks in 1 2 4; do
   for dim in 1 2 3; do
     case $dim in 1) cells=32;; 2) cells=8;; 3) cells=4;; esac
+    for method in plain jacobi gauss-seidel chebyshev; do
+    solver=preconditioned; preconditioner=$method
+    if [[ $method == plain ]]; then solver=plain; preconditioner=jacobi; fi
     for recording in summary raw; do
-      output=$runDir/d${dim}-r${ranks}-${recording}
-      check "d${dim}-r${ranks}-${recording}" launch "$ranks" "$app" --dim "$dim" --order 3 --cells "$cells" \
+      output=$runDir/d${dim}-r${ranks}-${method}-${recording}
+      check "d${dim}-r${ranks}-${method}-${recording}" launch "$ranks" "$app" --dim "$dim" --order 3 --cells "$cells" \
         --particles 1024 --steps 2 --quadrature_points exact --reuse full \
-        --replay plain,jacobi,gauss-seidel,chebyshev --gauss_seidel_outer_iterations 1 \
+        --solver "$solver" --preconditioner_type "$preconditioner" --gauss_seidel_outer_iterations 1 \
         --chebyshev_degree 8 --timer_level coarse --timer_recording "$recording" \
         --timer_sample_limit 4 --output "$output"
     done
-    check "d${dim}-r${ranks}-comparison" python3 "$runDir/check_compact_timers.py" --ranks "$ranks" \
-      --summary "$runDir/d${dim}-r${ranks}-summary" --raw "$runDir/d${dim}-r${ranks}-raw"
+    check "d${dim}-r${ranks}-${method}-comparison" python3 "$runDir/check_compact_timers.py" --ranks "$ranks" \
+      --summary "$runDir/d${dim}-r${ranks}-${method}-summary" --raw "$runDir/d${dim}-r${ranks}-${method}-raw"
+    done
   done
 done
 (( failures == 0 )) || { echo "$failures checks failed; see check-status.txt and per-check logs." >&2; exit 1; }

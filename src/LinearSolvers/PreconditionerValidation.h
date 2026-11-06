@@ -57,7 +57,8 @@ namespace ippl::preconditioner_validation {
                            std::to_string(pcg_preconditioner_defaults::gauss_seidel_outer));
             outer = pcg_preconditioner_defaults::gauss_seidel_outer;
         }
-        if (!std::isfinite(omega)) {
+        if (preconditioner_type == "ssor"
+            && (!std::isfinite(omega) || omega <= 0.0 || omega >= 2.0)) {
             warnAndDefault("ssor_omega", std::to_string(omega),
                            std::to_string(pcg_preconditioner_defaults::ssor_omega));
             omega = pcg_preconditioner_defaults::ssor_omega;

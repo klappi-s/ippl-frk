@@ -55,6 +55,8 @@ int main(int argc, char* argv[]) {
             IpplTimings::startTimer(initializeTimer);
 
             // Read input parameters, assign them to the corresponding memebers of manager
+            if (argc < 9)
+                throw std::runtime_error("Usage: LandauDamping nx ny nz Np Nt CG|PCG lbthres LeapFrog [preconditioner arguments] [--benchmark-output DIR --benchmark-tolerance 1e-10 --benchmark-max-iterations 10000 --benchmark-dt 0.05]");
             int arg = 1;
             Vector_t<int, Dim> nr;
             for (unsigned d = 0; d < Dim; d++) {
@@ -67,6 +69,10 @@ int main(int argc, char* argv[]) {
 
             double lbt              = std::atof(argv[arg++]);
             std::string step_method = argv[arg++];
+            if (totalP < 1 || nt < 0 || !std::isfinite(lbt))
+                throw std::runtime_error("Invalid particle count, steps or balancing threshold");
+            for (unsigned d = 0; d < Dim; ++d)
+                if (nr[d] < 2) throw std::runtime_error("At least two cells per axis required");
 
             std::vector<std::string> preconditioner_params;
 
@@ -81,9 +87,33 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            std::string benchmarkOutput;
+            double benchmarkTolerance = 1e-10, benchmarkDt = .05;
+            int benchmarkMaxIterations = 10000;
+            while (arg < argc) {
+                const std::string key = argv[arg++];
+                if (arg == argc) throw std::runtime_error("Missing value for " + key);
+                const std::string value = argv[arg++];
+                size_t used = 0;
+                if (key == "--benchmark-output") benchmarkOutput = value;
+                else if (key == "--benchmark-tolerance") {
+                    benchmarkTolerance = std::stod(value, &used);
+                    if (used != value.size()) throw std::runtime_error("Invalid tolerance");
+                } else if (key == "--benchmark-dt") {
+                    benchmarkDt = std::stod(value, &used);
+                    if (used != value.size()) throw std::runtime_error("Invalid timestep");
+                } else if (key == "--benchmark-max-iterations") {
+                    benchmarkMaxIterations = std::stoi(value, &used);
+                    if (used != value.size()) throw std::runtime_error("Invalid iteration limit");
+                } else if (key != "--overallocate" && key != "--info" && key != "--timer-fences")
+                    throw std::runtime_error("Unknown option: " + key);
+            }
+
             // Create an instance of a manager for the considered application
             LandauDampingManager<T, Dim> manager(totalP, nt, nr, lbt, solver, step_method,
                                                  preconditioner_params);
+            if (!benchmarkOutput.empty())
+                manager.enableBenchmark(benchmarkOutput, benchmarkTolerance, benchmarkMaxIterations, benchmarkDt);
 
             // Perform pre-run operations, including creating mesh, particles,...
             manager.pre_run();
@@ -95,12 +125,15 @@ int main(int argc, char* argv[]) {
             msg << "Starting iterations ..." << endl;
 
             manager.run(manager.getNt());
+            manager.flushBenchmark();
 
             msg << "End." << endl;
 
             IpplTimings::stopTimer(mainTimer);
             IpplTimings::print();
             IpplTimings::print(std::string("timing.dat"));
+            if (!benchmarkOutput.empty())
+                IpplTimings::dumpSummaryToCSV("timer-summary.csv");
         } catch (const IpplException& ex) {
             Inform err(TestName);
             err << "IPPL exception: " << ex.what() << endl;

@@ -143,6 +143,10 @@ namespace ippl {
          */
         virtual int getIterationCount() { return iterations_m; }
 
+        virtual std::size_t getPreconditionerSetupCount() const { return 0; }
+        virtual std::size_t getPreconditionerHierarchyLevels() const { return 0; }
+        virtual std::size_t getPreconditionerCoarsestLocalExtent() const { return 0; }
+
         virtual void operator()(lhs_type& lhs, rhs_type& rhs,
                                 const ParameterList& params) override {
             constexpr unsigned Dim = lhs_type::dim;
@@ -779,6 +783,18 @@ namespace ippl {
                 T avg = lhs.getVolumeAverage();
                 lhs   = lhs - avg;
             }
+        }
+
+        std::size_t getPreconditionerSetupCount() const override {
+            return preconditioner_m->getSetupCount();
+        }
+
+        std::size_t getPreconditionerHierarchyLevels() const override {
+            return preconditioner_m->getHierarchyLevels();
+        }
+
+        std::size_t getPreconditionerCoarsestLocalExtent() const override {
+            return preconditioner_m->getCoarsestLocalExtent();
         }
 
       protected:
