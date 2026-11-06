@@ -56,6 +56,124 @@ namespace ippl {
             }
         };
 
+        // Match Archive's field-value representation without a second copy kernel.
+        // Byte access avoids alignment and object-lifetime assumptions about pooled storage.
+        template <typename T>
+        struct HaloWireValue {
+            static constexpr size_type BYTE_COUNT = sizeof(T);
+
+            KOKKOS_INLINE_FUNCTION static void pack(char* destination, const T& value) {
+                copyBytes(destination, reinterpret_cast<const char*>(&value), BYTE_COUNT);
+            }
+
+            KOKKOS_INLINE_FUNCTION static T unpack(const char* source) {
+                T value{};
+                copyBytes(reinterpret_cast<char*>(&value), source, BYTE_COUNT);
+                return value;
+            }
+        };
+
+        // Archive serializes Vector components, excluding any object padding.
+        template <typename T, unsigned N>
+        struct HaloWireValue<Vector<T, N>> {
+            static constexpr size_type BYTE_COUNT = N * sizeof(T);
+
+            KOKKOS_INLINE_FUNCTION static void pack(char* destination, const Vector<T, N>& value) {
+                for (unsigned component = 0; component < N; ++component) {
+                    const T entry = value[component];
+                    copyBytes(destination + component * sizeof(T),
+                              reinterpret_cast<const char*>(&entry), sizeof(T));
+                }
+            }
+
+            KOKKOS_INLINE_FUNCTION static Vector<T, N> unpack(const char* source) {
+                Vector<T, N> value;
+                for (unsigned component = 0; component < N; ++component) {
+                    T entry{};
+                    copyBytes(reinterpret_cast<char*>(&entry),
+                              source + component * sizeof(T), sizeof(T));
+                    value[component] = entry;
+                }
+                return value;
+            }
+        };
+
+        // The communicator's existing archive overload sends these bytes as MPI_BYTE.
+        // Ownership stays with its buffer pool until exchangeBoundaries completes.
+        struct HaloPackedBuffer {
+            char* data;
+            size_type byteCount;
+
+            char* getBuffer() const { return data; }
+            size_type getSize() const { return byteCount; }
+        };
+
+        template <typename T>
+        size_type haloMessageBytes(const mpi::Communicator& comm, size_type count) {
+            constexpr size_type MAX_BYTES = static_cast<size_type>(INT_MAX);
+            if (count > MAX_BYTES / HaloWireValue<T>::BYTE_COUNT) {
+                // Check before multiplying to avoid overflow as well as MPI truncation.
+                comm.assertMessageSize(MAX_BYTES + 1);
+            }
+            return count * HaloWireValue<T>::BYTE_COUNT;
+        }
+
+        template <typename T, typename Subview, typename IndexArray, unsigned Dim>
+        struct HaloBytePackFunctor {
+            Subview subview;
+            char* buffer;
+
+            KOKKOS_INLINE_FUNCTION void operator()(const IndexArray& args) const {
+                size_type offset = 0;
+                size_type stride = 1;
+                for (unsigned dimension = 0; dimension < Dim; ++dimension) {
+                    offset += args[dimension] * stride;
+                    stride *= subview.extent(dimension);
+                }
+                HaloWireValue<T>::pack(buffer + offset * HaloWireValue<T>::BYTE_COUNT,
+                                       apply(subview, args));
+            }
+        };
+
+        template <typename T, typename Subview, typename Op, typename IndexArray, unsigned Dim>
+        struct HaloByteUnpackFunctor {
+            Subview subview;
+            const char* buffer;
+            Op op;
+
+            KOKKOS_INLINE_FUNCTION void operator()(const IndexArray& args) const {
+                size_type offset = 0;
+                size_type stride = 1;
+                for (unsigned dimension = 0; dimension < Dim; ++dimension) {
+                    offset += args[dimension] * stride;
+                    stride *= subview.extent(dimension);
+                }
+                T value = HaloWireValue<T>::unpack(
+                    buffer + offset * HaloWireValue<T>::BYTE_COUNT);
+                op(apply(subview, args), value);
+            }
+        };
+
+        template <typename T, unsigned Dim, typename Subview>
+        void packHaloBytes(const Subview& subview, char* buffer) {
+            using index_array_type = typename RangePolicy<Dim,
+                typename Subview::execution_space>::index_array_type;
+            using functor_type = HaloBytePackFunctor<T, Subview, index_array_type, Dim>;
+            ippl::parallel_for("HaloCells::pack()", getRangePolicy(subview),
+                               functor_type{subview, buffer});
+            Kokkos::fence();
+        }
+
+        template <typename T, unsigned Dim, typename Op, typename Subview>
+        void unpackHaloBytes(const Subview& subview, const char* buffer) {
+            using index_array_type = typename RangePolicy<Dim,
+                typename Subview::execution_space>::index_array_type;
+            using functor_type = HaloByteUnpackFunctor<T, Subview, Op, index_array_type, Dim>;
+            ippl::parallel_for("HaloCells::unpack()", getRangePolicy(subview),
+                               functor_type{subview, buffer, Op{}});
+            Kokkos::fence();
+        }
+
         template <typename View, typename Op, typename IndexArray>
         struct HaloPeriodicFunctor {
             View view;
@@ -220,13 +338,12 @@ namespace ippl {
                         range = recvRanges[index][i];
                     }
 
-                    size_type nsends;
-                    pack(range, view, haloData_m, nsends);
-
-                    buffer_type buf = comm.template getBuffer<memory_space, T>(nsends);
-
-                    comm.isend(targetRank, tag, haloData_m, *buf, requests[requestIndex++], nsends);
-                    buf->resetWritePos();
+                    const size_type nsends = range.size();
+                    const size_type byteCount = haloMessageBytes<T>(comm, nsends);
+                    buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
+                    packHaloBytes<T, Dim>(makeSubview(view, range), buf->getBuffer());
+                    HaloPackedBuffer packed{buf->getBuffer(), byteCount};
+                    comm.isend(targetRank, tag, packed, requests[requestIndex++]);
                 }
             }
 
@@ -256,14 +373,11 @@ namespace ippl {
                         range = sendRanges[index][i];
                     }
 
-                    size_type nrecvs = range.size();
-
-                    buffer_type buf = comm.template getBuffer<memory_space, T>(nrecvs);
-
-                    comm.recv(sourceRank, tag, haloData_m, *buf, nrecvs * sizeof(T), nrecvs);
-                    buf->resetReadPos();
-
-                    unpack<Op>(range, view, haloData_m);
+                    const size_type nrecvs = range.size();
+                    const size_type byteCount = haloMessageBytes<T>(comm, nrecvs);
+                    buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
+                    comm.recv(sourceRank, tag, *buf, byteCount);
+                    unpackHaloBytes<T, Dim, Op>(makeSubview(view, range), buf->getBuffer());
                 }
             }
 
@@ -350,13 +464,12 @@ namespace ippl {
                         range = recvRanges[index][i];
                     }
 
-                    size_type nsends;
-                    pack(range, view, haloData_m, nsends);
-
-                    buffer_type buf = comm.template getBuffer<memory_space, T>(nsends);
-
-                    comm.isend(targetRank, tag, haloData_m, *buf, requests[requestIndex++], nsends);
-                    buf->resetWritePos();
+                    const size_type nsends = range.size();
+                    const size_type byteCount = haloMessageBytes<T>(comm, nsends);
+                    buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
+                    packHaloBytes<T, Dim>(makeSubview(view, range), buf->getBuffer());
+                    HaloPackedBuffer packed{buf->getBuffer(), byteCount};
+                    comm.isend(targetRank, tag, packed, requests[requestIndex++]);
                 }
             }
 
@@ -397,14 +510,11 @@ namespace ippl {
                         range = sendRanges[index][i];
                     }
 
-                    size_type nrecvs = range.size();
-
-                    buffer_type buf = comm.template getBuffer<memory_space, T>(nrecvs);
-
-                    comm.recv(sourceRank, tag, haloData_m, *buf, nrecvs * sizeof(T), nrecvs);
-                    buf->resetReadPos();
-
-                    unpack<Op>(range, view, haloData_m);
+                    const size_type nrecvs = range.size();
+                    const size_type byteCount = haloMessageBytes<T>(comm, nrecvs);
+                    buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
+                    comm.recv(sourceRank, tag, *buf, byteCount);
+                    unpackHaloBytes<T, Dim, Op>(makeSubview(view, range), buf->getBuffer());
                 }
             }
 

@@ -8,6 +8,7 @@
 #include "FEM/FEMContainerInterpolate.h"
 #include "FEMBuildInfo.h"
 #include "FEMFields.h"
+#include "FEMDiagnosticMoments.h"
 #include "FEMLoadBalancer.h"
 #include "FEMParticles.h"
 #include "Manager/BaseManager.h"
@@ -34,22 +35,6 @@ namespace electrostatic_fem {
         };
     };
 
-    // Named reduction functors also work when launched from private manager methods.
-    template <unsigned Dim, int Moment, typename Field, typename Positions, typename Weights>
-    struct FEMFieldMoment {
-        Field field;
-        Positions positions;
-        Weights weights;
-        double wave;
-        KOKKOS_INLINE_FUNCTION void operator()(size_t i, double& sum) const {
-            if constexpr (Moment == 0) {
-                for (unsigned d = 0; d < Dim; ++d)
-                    sum += 0.5 * weights(i) * field(i)[d] * field(i)[d];
-            } else if constexpr (Moment == 1)
-                sum += weights(i) * field(i)[0] * Kokkos::cos(wave * positions(i)[0]);
-            else sum += weights(i) * field(i)[0] * Kokkos::sin(wave * positions(i)[0]);
-        }
-    };
     template <unsigned Dim, typename Velocities, typename Charges>
     struct FEMParticleMoment {
         Velocities velocity;
@@ -77,8 +62,7 @@ namespace electrostatic_fem {
         std::string method_m;
         std::map<std::string, double> times_m;
         std::ostringstream solves_m, steps_m, physics_m;
-        Kokkos::View<Point*> quadraturePositions_m, quadratureField_m;
-        Kokkos::View<double*> quadratureWeights_m;
+        FEMDiagnosticMoments<Dim> quadrature_m;
         size_t totalParticles_m = 0;
         double initialEnergy_m  = 0;
         bool ownsOutput_m       = false;
@@ -164,31 +148,7 @@ namespace electrostatic_fem {
             auto& f = *fields_m;
             typename Fields::Solver::ElementType element;
             typename Fields::Solver::QuadratureType quadrature(element);
-            const auto points   = quadrature.getIntegrationNodesForRefElement();
-            const auto weights  = quadrature.getWeightsForRefElement();
-            const auto handler  = f.solver.getSpace().getDOFHandler();
-            const auto elements = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),
-                                                                      handler.getElementIndices());
-            const size_t count  = elements.extent(0) * points.dim;
-            quadraturePositions_m = Kokkos::View<Point*>("FEM diagnostic points", count);
-            quadratureField_m     = Kokkos::View<Point*>("FEM diagnostic gradients", count);
-            quadratureWeights_m   = Kokkos::View<double*>("FEM diagnostic weights", count);
-            auto positions        = Kokkos::create_mirror_view(quadraturePositions_m);
-            auto physicalWeights  = Kokkos::create_mirror_view(quadratureWeights_m);
-            const auto h          = f.mesh.getMeshSpacing();
-            double det            = 1;
-            for (unsigned d = 0; d < Dim; ++d)
-                det *= h[d];
-            for (size_t e = 0; e < elements.extent(0); ++e) {
-                auto cell = handler.getElementNDIndex(elements(e));
-                for (unsigned q = 0; q < points.dim; ++q) {
-                    for (unsigned d = 0; d < Dim; ++d)
-                        positions(e * points.dim + q)[d] = (cell[d] + points[q][d]) * h[d];
-                    physicalWeights(e * points.dim + q) = det * weights[q];
-                }
-            }
-            Kokkos::deep_copy(quadraturePositions_m, positions);
-            Kokkos::deep_copy(quadratureWeights_m, physicalWeights);
+            quadrature_m.initialize(f.solver.getSpace(), quadrature);
         }
         void deposit() {
             auto& f = *fields_m;
@@ -254,32 +214,11 @@ namespace electrostatic_fem {
             auto& f = *fields_m;
             auto& p = *particles_m;
             timed("diagnostics", [&] {
-                ippl::gatherFEMElectricField(f.potential, f.solver.getSpace(),
-                                             quadraturePositions_m, quadratureField_m,
-                                             quadraturePositions_m.extent(0));
-                const auto field = quadratureField_m, positions = quadraturePositions_m;
-                const auto weights = quadratureWeights_m;
-                double local = 0, energy = 0, real = 0, imaginary = 0, kinetic = 0;
-                Kokkos::parallel_reduce(
-                    "FEM field energy", Policy(0, weights.extent(0)),
-                    FEMFieldMoment<Dim, 0, decltype(field), decltype(positions), decltype(weights)>{
-                        field, positions, weights, 0},
-                    local);
-                ippl::Comm->allreduce(local, energy, 1, std::plus<double>());
                 const double wave =
                     2 * Kokkos::numbers::pi_v<double> * config_m.mode / config_m.lengths[0];
-                Kokkos::parallel_reduce(
-                    "FEM electric Fourier real", Policy(0, weights.extent(0)),
-                    FEMFieldMoment<Dim, 1, decltype(field), decltype(positions), decltype(weights)>{
-                        field, positions, weights, wave},
-                    local);
-                ippl::Comm->allreduce(local, real, 1, std::plus<double>());
-                Kokkos::parallel_reduce(
-                    "FEM electric Fourier imaginary", Policy(0, weights.extent(0)),
-                    FEMFieldMoment<Dim, 2, decltype(field), decltype(positions), decltype(weights)>{
-                        field, positions, weights, wave},
-                    local);
-                ippl::Comm->allreduce(local, imaginary, 1, std::plus<double>());
+                const auto moments = quadrature_m.evaluate(f.potential, f.solver.getSpace(), wave);
+                const double energy = moments.energy, real = moments.real, imaginary = moments.imaginary;
+                double local = 0, kinetic = 0;
                 const auto velocity = p.velocity.getView();
                 const auto charge   = p.charge.getView();
                 Kokkos::parallel_reduce(

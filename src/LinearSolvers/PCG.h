@@ -271,6 +271,7 @@ namespace ippl {
     public:
         using typename Base::lhs_type, typename Base::rhs_type;
         using OperatorF    = std::function<OperatorRet(lhs_type)>;
+        using OperatorIntoF = std::function<void(lhs_type&, lhs_type&)>;
         using LowerF       = std::function<LowerRet(lhs_type)>;
         using UpperF       = std::function<UpperRet(lhs_type)>;
         using UpperLowerF  = std::function<UpperLowerRet(lhs_type)>;
@@ -283,7 +284,14 @@ namespace ippl {
          * Sets the differential operator for the conjugate gradient algorithm
          * @param op A function that returns OpRet and takes a field of the LHS type
          */
-        virtual void setOperator(OperatorF op) { op_m = std::move(op); }
+        virtual void setOperator(OperatorF op) {
+            op_m = std::move(op);
+            operatorInto_m = {};
+        }
+
+        // The input's halos may be refreshed; owned values are unchanged.
+        // Input and output have matching layouts and independent storage.
+        void setOperatorInto(OperatorIntoF op) { operatorInto_m = std::move(op); }
         virtual void setPreconditioner(
             [[maybe_unused]] OperatorF&& op,  // Operator passed to chebyshev and newton
             [[maybe_unused]] LowerF&& lower,  // Operator passed to 2-step gauss-seidel and ssor
@@ -370,10 +378,12 @@ namespace ippl {
             }
 
             if (projector_m) projector_m(lhs);
-            r = rhs - op_m(lhs);
+            auto& q=*workspace_m[2];
+            applyOperator(lhs, q);
+            r.assignLinearCombination(T(1), rhs, T(-1), q);
             if (projector_m) projector_m(r);
-            d = r.deepCopy();
-            d.setFieldBC(bcTypes);
+            d.deepCopyFrom(r);
+            if (d.getFieldBCTypes() != bcTypes) d.setFieldBC(bcTypes);
 
             T delta1          = innerProduct(r, d);
             T delta0          = delta1;
@@ -381,18 +391,16 @@ namespace ippl {
             const T rhsNorm = norm(rhs);
             const T tolerance = params.get<T>("tolerance") * (rhsNorm > T(0) ? rhsNorm : T(1));
 
-            auto& q=*workspace_m[2];
-
             while (iterations_m < maxIterations && residueNorm > tolerance) {
-                q = op_m(d);
+                applyOperator(d, q);
 
                 const T curvature=innerProduct(d,q);
                 if (!(curvature>T(0)) || !std::isfinite(curvature))
                     throw IpplException("CG", "Nonpositive or nonfinite operator curvature.");
                 T alpha = delta1 / curvature;
-                lhs     = lhs + alpha * d;
+                lhs.assignLinearCombination(T(1), lhs, alpha, d);
 
-                r      = r - alpha * q;
+                r.assignLinearCombination(T(1), r, -alpha, q);
                 if (projector_m) projector_m(r);
 
                 delta0 = delta1;
@@ -400,14 +408,14 @@ namespace ippl {
                 T beta = delta1 / delta0;
 
                 residueNorm = std::sqrt(delta1);
-                d           = r + beta * d;
+                d.assignLinearCombination(T(1), r, beta, d);
 
                 ++iterations_m;
             }
 
             if (allFacesPeriodic && !projector_m) {
                 T avg = lhs.getVolumeAverage();
-                lhs   = lhs - avg;
+                lhs -= avg;
             }
         }
 
@@ -425,6 +433,11 @@ namespace ippl {
                     workspace_m.push_back(std::make_unique<lhs_type>(lhs.get_mesh(),lhs.getLayout(),lhs.getNghost()));
             }
         }
+        void applyOperator(lhs_type& input, lhs_type& output) {
+            if (operatorInto_m) operatorInto_m(input, output);
+            else output = op_m(input);
+        }
+        OperatorIntoF operatorInto_m;
         OperatorF op_m;
         std::function<void(lhs_type&)> projector_m;
         T residueNorm    = 0;

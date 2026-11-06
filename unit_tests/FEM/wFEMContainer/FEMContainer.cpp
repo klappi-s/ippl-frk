@@ -794,6 +794,85 @@ TYPED_TEST(FEMContainerTest, BoundaryValuesSurviveSetAndCopy) {
     check(restored);
 }
 
+// On every configured dimension/backend and MPI decomposition, check all entity
+// fields and each input/output alias combination against the expected values.
+TYPED_TEST(FEMContainerTest, AssignLinearCombinationValuesAndAliasing) {
+    using T = typename TestFixture::value_type;
+    using Container = typename TestFixture::femcontainer_full_type;
+    Container x(*this->mesh, *this->layout);
+    Container y(*this->mesh, *this->layout);
+    Container result(*this->mesh, *this->layout);
+    Container expected(*this->mesh, *this->layout);
+    x = T(2);
+    y = T(5);
+    auto check = [&](const Container& actual, T value) {
+        expected = value;
+        assertEqual<T>((actual - expected).norm(), T(0));
+    };
+
+    result.assignLinearCombination(T(3), x, T(-2), y);
+    check(result, T(-4));
+    check(x, T(2));
+    check(y, T(5));
+
+    x.assignLinearCombination(T(3), x, T(-2), y);
+    check(x, T(-4));
+    check(y, T(5));
+    y.assignLinearCombination(T(2), x, T(-3), y);
+    check(y, T(-23));
+    check(x, T(-4));
+    y.assignLinearCombination(T(2), y, T(-3), y);
+    check(y, T(23));
+    result.assignLinearCombination(T(0), x, T(0), y);
+    check(result, T(0));
+}
+
+// Value updates must retain every entity's allocation and layout and preserve
+// destination BC types and parameters, even when the inputs have different BCs.
+TYPED_TEST(FEMContainerTest, AssignLinearCombinationPreservesStorageAndBoundaryConditions) {
+    using T = typename TestFixture::value_type;
+    using Container = typename TestFixture::femcontainer_full_type;
+    constexpr unsigned Dim = TestFixture::dim;
+    using ScalarField = ippl::Field<T, Dim, typename TestFixture::mesh_type, Cell>;
+    auto& result = *this->femContainerFull;
+    Container x(*this->mesh, *this->layout);
+    Container y(*this->mesh, *this->layout);
+    x = T(2);
+    y = T(5);
+    std::array<ippl::FieldBC, 2 * Dim> types;
+    std::array<T, 2 * Dim> offsets, slopes;
+    for (unsigned face = 0; face < 2 * Dim; ++face) {
+        types[face] = face % 2 ? ippl::EXTRAPOLATE_FACE : ippl::CONSTANT_FACE;
+        offsets[face] = T(face) * T(.75);
+        slopes[face] = face % 2 ? T(.25) : T(0);
+    }
+    result.setFieldBC(types, offsets, slopes);
+    const auto views = result.getAllViews();
+    auto getLayouts = [&] {
+        return std::apply([&](auto... entityTypes) {
+            return std::make_tuple(&result.template getLayout<decltype(entityTypes)>()...);
+        }, Container::getEntityTypes());
+    };
+    const auto layouts = getLayouts();
+    result.assignLinearCombination(T(3), x, T(-2), y);
+    EXPECT_EQ(getLayouts(), layouts);
+    const auto updatedViews = result.getAllViews();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (([&] {
+            EXPECT_EQ(std::get<Is>(views).data(), std::get<Is>(updatedViews).data());
+        }()), ...);
+    }(std::make_index_sequence<Container::NEntitys>{});
+    EXPECT_EQ(result.getFieldBCTypes(), types);
+    auto bc = result.getFieldBC();
+    for (unsigned face = 0; face < 2 * Dim; ++face) {
+        EXPECT_EQ(bc[face]->getBCType(), types[face]);
+        auto* extrapolate = dynamic_cast<ippl::ExtrapolateFace<ScalarField>*>(bc[face].get());
+        ASSERT_NE(extrapolate, nullptr);
+        EXPECT_EQ(extrapolate->getOffset(), offsets[face]);
+        EXPECT_EQ(extrapolate->getSlope(), slopes[face]);
+    }
+}
+
 int main(int argc, char* argv[]) {
     int success = 1;
     ippl::initialize(argc, argv);

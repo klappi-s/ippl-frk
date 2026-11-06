@@ -8,6 +8,7 @@
 #define IPPL_FEM_ORDER_TRANSFER_H
 
 #include "FEM/DOFHandler.h"
+#include "FEM/FEMFieldAccess.h"
 #include "FEM/DOFLocations.h"
 #include "FEM/FiniteElementSpaceTraits.h"
 #include "Utility/IpplTimings.h"
@@ -34,51 +35,6 @@ namespace ippl {
                 product *= basis_1d;
             }
             return product;
-        }
-
-        template <typename Container, typename EntityTypes>
-        auto make_entity_view_tuple(Container& field) {
-            return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                return std::make_tuple(field.template getView<std::tuple_element_t<Is, EntityTypes>>()...);
-            }(std::make_index_sequence<std::tuple_size_v<EntityTypes>>{});
-        }
-
-        template <typename Container, typename EntityTypes>
-        auto make_entity_view_tuple(const Container& field) {
-            return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                return std::make_tuple(field.template getView<std::tuple_element_t<Is, EntityTypes>>()...);
-            }(std::make_index_sequence<std::tuple_size_v<EntityTypes>>{});
-        }
-
-        template <typename T, typename ViewTuple, typename Indices, typename Mapping>
-        KOKKOS_INLINE_FUNCTION T gather_from_views(const ViewTuple& views,
-                                                   const Indices& elementNDIndex,
-                                                   const Mapping& map) {
-            T val = T(0);
-            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ((Is == map.entityTypeIndex
-                      ? (val = apply(std::get<Is>(views),
-                                     elementNDIndex + map.entityLocalIndex)[map.entityLocalDOF],
-                         void())
-                      : void()),
-                 ...);
-            }(std::make_index_sequence<std::tuple_size_v<ViewTuple>>{});
-            return val;
-        }
-
-        template <typename ViewTuple, typename Indices, typename Mapping, typename T>
-        KOKKOS_INLINE_FUNCTION void scatter_to_views(ViewTuple& views, const Indices& elementNDIndex,
-                                                     const Mapping& map, const T value) {
-            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ((Is == map.entityTypeIndex
-                      ? (Kokkos::atomic_store(
-                             &apply(std::get<Is>(views),
-                                    elementNDIndex + map.entityLocalIndex)[map.entityLocalDOF],
-                             value),
-                         void())
-                      : void()),
-                 ...);
-            }(std::make_index_sequence<std::tuple_size_v<ViewTuple>>{});
         }
 
     }  // namespace detail

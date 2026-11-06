@@ -4,7 +4,7 @@
 > for an AI coding agent. It records *verbatim* public signatures, file:line anchors,
 > copy-pasteable skeletons, build/run commands, and the non-obvious gotchas that waste agent time.
 >
-> This is a **fork** (`ippl-frk`, branch `FEMContainer`) of [IPPL-framework/ippl](https://github.com/IPPL-framework/ippl)
+> This is a **fork** (`ippl-frk`, branch `FEMextremeTesting`) of [IPPL-framework/ippl](https://github.com/IPPL-framework/ippl)
 > with active **FEM** development. **Nodes1D is merged** (`7d88383f`, hygiene `2dcdb2f6`).
 > This tree is the **future FEMContainer development copy**; `IPPLfem/ippl-frk` is the older
 > working copy. When in doubt about a signature, open the cited file:line — the code is the
@@ -527,8 +527,8 @@ There are **two independent fork tracks**. Don't confuse them:
   It does **not** touch `DOFHandler`/`FiniteElementSpaceTraits`/`FEMContainer`. This is the curl-conforming
   analogue of the working first-order classic `LagrangeSpace` path. Unit tests: `unit_tests/FEM/FEMVector.cpp`,
   `unit_tests/FEM/NedelecSpace.cpp`.
-- **Track B — `DOFHandler` + `FEMContainer` + `LagrangeSpace_wFEMContainer` (the generalized DOF machinery, currently under debugging).**
-  This is the entity-split / higher-order generalization and is the part that **mainly needs debugging right now**.
+- **Track B — `DOFHandler` + `FEMContainer` + `LagrangeSpace_wFEMContainer`.**
+  The Lagrange P1–P5 path has numerical regression coverage and active performance work; unsupported Nédélec/redistribution paths remain separate.
 
 | Component | File | What it adds | Track / status |
 |-----------|------|--------------|----------------|
@@ -537,13 +537,13 @@ There are **two independent fork tracks**. Don't confuse them:
 | `GridPathSegmenter` | `FEM/GridPathSegmenter.h` | split a particle trajectory into `Dim+1` per-cell sub-segments | A — working |
 | `ProjectCurrent.hpp` | `FEM/ProjectCurrent.hpp` | `assemble_current_nedelec(...)` — deposit current onto Nédélec edge DOFs | A — working |
 | `FEMInterpolate.hpp` | `FEM/FEMInterpolate.hpp` | P1 particle deposit/sample/gradient (`locate_element_nd_and_xi`, `assemble_rhs_from_particles`, `interpolate_to_diracs`) | working (classic Lagrange) |
-| `DOFHandler<T,SpaceTraits>` | `FEM/DOFHandler.h` | local-DOF → (entity, offset, local-DOF) mapping | **B — debugging** (`fillNedelecDOFMappingTable` is a TODO stub belonging to a *future* DOFHandler-based Nédélec path, unrelated to Track A) |
-| `FEMContainer<T,Dim,EntityTypes,DOFNums>` | `FEM/FEMContainer.h` | entity-split multi-field storage (vertices/edges/faces/volume), each a `Field<DOFArray<T,N>,...>` over a `SubFieldLayout` | **B — debugging** |
+| `DOFHandler<T,SpaceTraits>` | `FEM/DOFHandler.h` | local-DOF → (entity, offset, local-DOF) mapping | **B — active Lagrange development** (`fillNedelecDOFMappingTable` is a TODO stub belonging to a *future* DOFHandler-based Nédélec path, unrelated to Track A) |
+| `FEMContainer<T,Dim,EntityTypes,DOFNums>` | `FEM/FEMContainer.h` | entity-split multi-field storage (vertices/edges/faces/volume), each a `Field<DOFArray<T,N>,...>` over a `SubFieldLayout` | **B — active development; P1–P5 covered** |
 | `LagrangeSpace_wfc` | `FEM/LagrangeSpace_wFEMContainer.h` | Lagrange space backed by `FEMContainer`+`DOFHandler` for **P≥1** / entity-split DOFs | **B — active development** (Dirichlet and fully periodic P1–P5 covered; redistribution unsupported) |
 | `FiniteElementSpaceTraits` | `FEM/FiniteElementSpaceTraits.h` | compile-time entity/DOF metadata per space | B — `LagrangeSpaceTag` defined; `NedelecSpaceTag` has no specialization (only relevant to the *future* Track-B Nédélec, not to the working Track-A `NedelecSpace`) |
 | `Entity.h`, `DOFArray.h`, `DOFLocations.h`, `FEMHelperStructs.h` | `FEM/` | entity tags (`Vertex`/`EdgeX`/`FaceXY`/...), per-cell DOF arrays, ref-element DOF coords, tuple metaprogramming | B — support |
 
-> **Agent caution:** the part actively being debugged is **Track B** (`DOFHandler`, `FEMContainer`,
+> **Agent caution:** current Lagrange performance work concerns **Track B** (`DOFHandler`, `FEMContainer`,
 > `LagrangeSpace_wFEMContainer` and their traits/DOF-location support). Treat Track A (`FEMVector`,
 > `NedelecSpace`) as working at first order, on par with the classic first-order `LagrangeSpace`.
 > Always confirm any path against its matching `unit_tests/FEM/` test (e.g. `FEMContainer.cpp`,
@@ -649,24 +649,29 @@ Base `Poisson<FieldLHS,FieldRHS>` (`Poisson.h`): `-laplace(lhs)=rhs`; `setLhs/se
 
 ## 9. Build & run
 
-**C++20, CMake ≥ 3.24. Deps:** MPI (required), Kokkos (default 4.7.01, fetched if absent), heFFTe (2.4.x, only if FFT on), GoogleTest (unit tests).
+**C++20, CMake ≥ 3.24. Deps:** MPI (required), Kokkos (default 5.2.0, fetched if absent), heFFTe (2.4.x, only if FFT on), GoogleTest (unit tests).
 
 ### Existing build (use this)
 
-`IPPLfem/build_serial` is the historically configured serial Release
-(`IPPL_PLATFORMS=serial`, FFT/SOLVERS/ALPINE/TESTS/UNIT_TESTS ON) against the older
-`IPPLfem/ippl-frk` tree (now under `old/IPPLfem`). **`ipplFEM/build_serial` exists**
-(configured 2026-08-20 for Task 7.7: serial Release, SOLVERS+TESTS, FFT/unit tests off).
-Current active build (September 2026): **`ipplFEM/build`**, serial Release,
-SOLVERS+TESTS+UNIT_TESTS enabled. Always **`-j 8`** per the user's updated memory
-limit; never bare `-j`.
+Checked 6 November 2026: **`ipplFEM/build`** is Serial Release with FFT,
+SOLVERS, TESTS and UNIT_TESTS enabled. **`ipplFEM/build_openmp`** is OpenMP
+Release with FFT and UNIT_TESTS enabled; it reuses the existing Kokkos/heFFTe/
+GoogleTest source directories and oracle package from `build/_deps`, while
+building separate libraries. Both use GCC 16.2.1 and Kokkos 5.2.0. Historical
+`build_serial` paths below describe earlier work and are not current builds.
+Always use **`-j 8`** locally; cluster builds use **`-j 16`**.
 
 ```bash
 cd ipplFEM/build
 cmake --build . -j 8
 # FEM solver test executables: test/solver/fem/ and test/solver/fem_wContainer/
 ```
-`compile_commands.json` is present in `build_serial` (use for clangd / static analysis).
+Inspect each `CMakeCache.txt` before changing options or dependency paths.
+The November GH200 validation uses an isolated scratch source/build with the
+verified `opal-x-gh200-mpich-gcc-2026-09-04.squashfs` uenv/default view, GCC 13.4,
+CUDA 13.3 and Kokkos 5.2.0, targeting compute capability 9.0. Study scripts and
+frozen baseline/intermediate binaries are documented in the workspace's dated
+FEM CG optimization report; the old remote checkout is not modified.
 
 ### Key CMake options (`CMakeLists.txt:35-53`)
 `IPPL_PLATFORMS` (`SERIAL|OPENMP|CUDA|HIP|SYCL`, semicolon list), `IPPL_ENABLE_FFT`, `IPPL_ENABLE_SOLVERS`, `IPPL_ENABLE_ALPINE`, `IPPL_ENABLE_TESTS`, `IPPL_ENABLE_UNIT_TESTS`, `IPPL_ENABLE_EXAMPLES`, `BUILD_SHARED_LIBS`.
@@ -821,9 +826,52 @@ against source.*
   prepared entity layouts, binds fields to its own layout array, and retains fresh
   constructor `NO_FACE` BC defaults. Mesh/vertex-layout lifetime remains borrowed.
   Track B stiffness/lifting/diagonal/triangular/load temporaries use this instead
-  of rerunning `SubFieldLayout::initialize` and neighbor discovery. No changed
-  numerical kernels or repartition semantics. `FEMReuse` tests independence,
+  of rerunning `SubFieldLayout::initialize` and neighbor discovery. Cloning itself
+  changes neither numerical kernels nor repartition semantics. `FEMReuse` tests independence,
   destruction safety and zero neighbor discoveries across repeated actions.
+- Current value/output reuse APIs:
+  `void FEMContainer::assignLinearCombination(T alpha, const FEMContainer& x, T beta, const FEMContainer& y)`
+  (`src/FEM/FEMContainer.h:98`) updates owned values with Field expressions;
+  layouts/ghost widths must match. Either input may alias output; storage/BCs
+  persist, ghosts require refresh. FEM CG `setOperatorInto(OperatorIntoF op)`
+  (`src/LinearSolvers/PCG.h:294`; `OperatorIntoF=std::function<void(lhs_type&,lhs_type&)>`)
+  retains output; legacy `setOperator` clears this callback. PCG keeps its legacy path.
+  Calling only `setOperatorInto` on PCG does not configure its operator.
+- `template<typename F> void evaluateAxInto(FieldLHS& field, F& evalFunction, FieldLHS& resultField) const`
+  and the overload adding `FieldBC boundaryType` (`src/FEM/LagrangeSpace_wFEMContainer.h:243,248`)
+  require independent matching storage, clear owned/ghost output and retain metadata.
+  The default uses input BC[0]; CG explicitly uses homogeneous Dirichlet rows.
+  One element-row kernel sums inputs then atomically adds once per row, retaining
+  coefficient differences and constrained columns. `DeviceMatrix` is explicitly
+  `LayoutLeft`. Shared `FEMFieldAccess.h:18` helpers use owning `ippl::Tuple`/device
+  `ippl::get`, also serving order transfer. Regrouping changes floating-point order;
+  bitwise agreement with prior kernels is not expected.
+- `src/Field/HaloCells.hpp:158` packs/unpacks directly in pooled communication
+  bytes; existing communicator sends avoid Archive copy kernels and host staging.
+  Vector component representation, directional ranges, fences, receive order and
+  buffer lifetime through `MPI_Waitall` persist. Field execution/memory spaces
+  remain unchanged, including CUDA device buffers.
+- `demos/electrostaticFEM/FEMDiagnosticMoments.h:80,115` provides
+  `initialize(const Space&, const Quadrature&)` and
+  `FEMDiagnosticValues evaluate(Field&, const Space&, double wave) const`.
+  Reference gradients/quadrature are cached; one device reduction and three-value
+  MPI sum replace full-volume diagnostic arrays. Requires periodic ownership and
+  interior quadrature. Regressions: `FEMReuse`, `FEMOrderTransfer`,
+  `FEMDiagnosticMoments`, `Halo` (including scalar/Vector reuse). Serial/MPI
+  validation covers 260 CTest entries, including all 3D Poisson oracle shards
+  on one/two/four ranks. Nine focused OpenMP CTest entries pass with four threads.
+  Focused CUDA/MPI tests and the selected 1D–3D operator/1D–2D solution oracles
+  pass across two GH200 nodes. Full GPU 3D Poisson oracle sharding is not claimed.
+- November 6 controlled plain-CG performance comparison: 240 baseline/final
+  ordinary simulations, P1–P3, 32³/64³ (three repeats, ten steps), 128³ (one
+  repeat, three steps), one/two nodes. P3 64³ 1×4 recurring solve improves
+  80.00→3.36 s; P3 128³ final 1→8 GPUs improves 38.23→10.29 s. Small domains
+  remain latency limited. The fused row kernel regresses about 19% against
+  CG-reuse-only at P3 128³ on one GPU; NCU shows instruction-heavy work and
+  low DRAM throughput, not HBM saturation. Next investigations are indexing,
+  per-entity reductions and halo synchronization; no further optimization is
+  implemented. See `../../Reports/2026-11-06_1908_FEM_CG_OPTIMIZATION.md` and
+  `../performance_runs/2026-11-06_1803_cg_optimization/` for data/provenance.
 - The demo defaults to `timer_recording=summary`; `raw` requires a positive
   `timer_sample_limit` (default1024 samples/timer/rank). Online `timer-summary.csv`
   always covers all calls; `timers.csv` exists only in raw mode. Solve/step CSVs
@@ -852,7 +900,8 @@ against source.*
 
 - September 24, 16:36 CEST: ordinary allocation presets `fem-small` (1a, 243 runs)
   and `fd-large` (1c, 45 runs) in `submit_campaigns.py`, CG only, 8 particles/cell,
-  10 steps, first/repeat staging. Full-volume FEM diagnostics intentionally retained.
+  10 steps, first/repeat staging. This historical baseline retained full-volume FEM
+  diagnostics; current local code uses fused, bounded-storage moments.
   Archived baseline snapshots freeze their CUDA binaries/tools and use isolated
   results and study pins. `rank_memory.py` wraps ranks, resolves CUDA
   ordinal→PCI→NVML, samples bounded summaries and checks device/host headroom;

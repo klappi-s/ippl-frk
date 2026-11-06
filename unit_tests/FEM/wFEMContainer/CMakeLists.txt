@@ -1,6 +1,7 @@
 file(RELATIVE_PATH _relPath "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "Adding unit tests found in ${_relPath}")
 
+add_ippl_test(FEMOrderTransfer NUM_PROCS 1 LABELS FEM periodic transfer)
 add_ippl_test(DOFHandler)
 add_ippl_test(FEMContainerHalo)
 add_ippl_test(FEMContainer)
@@ -9,6 +10,7 @@ add_ippl_test(LagrangeSpace_higherOrder)
 add_ippl_test(LagrangeGLLNodes)
 add_ippl_test(FEMOracleRuntimeTest NUM_PROCS 1 LABELS FEM oracle)
 add_ippl_test(FEMDevice NUM_PROCS 1 LABELS FEM device)
+add_ippl_test(FEMDiagnosticMoments NUM_PROCS 1 LABELS FEM diagnostics)
 add_ippl_test(FEMReuse NUM_PROCS 1 LABELS FEM periodic reuse)
 add_ippl_test(FEMPreconditionerProperties NUM_PROCS 1 LABELS FEM periodic preconditioner)
 add_ippl_test(FEMConstantPreservation NUM_PROCS 1 LABELS FEM operator solver)
@@ -28,6 +30,12 @@ add_ippl_test(FEMParticleCoupling SOURCES FEMParticleCoupling.cpp
   $<TARGET_OBJECTS:FEMOracleData1D> NUM_PROCS 1 LABELS FEM particle)
 target_link_libraries(FEMParticleCoupling PRIVATE FEMOraclePackage)
 if(BUILD_TESTING)
+  add_test(NAME FEMOrderTransfer_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMOrderTransfer> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMOrderTransfer_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;periodic;transfer")
+  add_test(NAME FEMDiagnosticMoments_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMDiagnosticMoments> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMDiagnosticMoments_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;diagnostics")
   # Exhaustive P1-P5 tensor cases take about five minutes on the Serial backend.
   set_tests_properties(FEMPeriodic PROPERTIES TIMEOUT 600)
   add_test(NAME FEMReuse_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2

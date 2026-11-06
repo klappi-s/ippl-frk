@@ -535,7 +535,20 @@ namespace ippl {
                 statistics_m.preconditionerApplicationSeconds=pcg_algo_m.getApplicationSeconds();
             } else {
                 Timer krylov; Kokkos::fence(); krylov.start();
-                cg_algo_m.setOperator(algoOperator);
+                // Apply homogeneous Krylov rows while retaining the solution's
+                // prescribed boundary values and metadata.
+                cg_algo_m.setOperatorInto([poissonEquationEval, boundaryType = bcTypes[0], this](lhs_type& field,
+                                                                     lhs_type& result) mutable {
+                    ++statistics_m.operatorCalls;
+                    Timer timer;
+                    if (detailedTiming_m) { Kokkos::fence(); timer.start(); }
+                    field.fillHalo();
+                    lagrangeSpace_m.evaluateAxInto(field, poissonEquationEval, result, boundaryType);
+                    if (detailedTiming_m) {
+                        Kokkos::fence(); timer.stop();
+                        statistics_m.operatorSeconds += timer.elapsed();
+                    }
+                });
                 cg_algo_m(*(this->lhs_mp), rhs, this->params_m);
                 Kokkos::fence(); krylov.stop();
                 statistics_m.krylovSeconds=krylov.elapsed();

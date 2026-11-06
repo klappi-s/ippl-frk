@@ -1,5 +1,7 @@
+#include <limits>
 #include "FEM/LagrangeGlobalDOFIndices.hpp"
 #include "FEM/RefShapeFunctionData.h"
+#include "FEM/FEMFieldAccess.h"
 
 namespace ippl {
 
@@ -167,95 +169,53 @@ namespace ippl {
     } // namespace detail
 
 
-    // Functors for LagrangeSpace_wfc parallel operations
-    // Must be defined at namespace scope for CUDA compatibility
-
-    // Functor for evaluateAx parallel_for loops
-    template <typename T, typename DOFHandlerType, typename ViewA, typename ViewB,
-              typename IndicesType, typename ElemIndicesView, typename MatrixType,
-              typename BCType, std::size_t DofStartA, std::size_t DofEndA,
-              std::size_t DofStartB, std::size_t DofEndB>
-    struct LagrangeEvaluateAxFunctor {
+    // One work item per element row. Adjacent work items vary i first, matching
+    // the element matrix's LayoutLeft storage. Shared output DOFs need one atomic
+    // addition per completed row rather than one per entry/entity pair.
+    template <typename T, unsigned NumElementDOFs, typename DOFHandlerType,
+              typename ViewTuple, typename ElemIndicesView, typename MatrixType>
+    struct LagrangeEvaluateAxRowFunctor {
         DOFHandlerType dofHandler;
         ElemIndicesView elemIndices;
-        ViewA viewBC;
-        ViewB view;
-        ViewA resultView;
-        MatrixType A_K;
-        BCType bcTypes;
+        ViewTuple inputViews, outputViews;
+        MatrixType matrix;
+        FieldBC bcType;
         int nghost;
         bool coefficientDifferences;
 
         KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
-            using DOFMapping_t = typename DOFHandlerType::DOFMapping_t;
-
-            // Get element index
-            const size_t elementIndex = elemIndices(index);
-            const IndicesType elementNDIndex =
-                dofHandler.getLocalElementNDIndex(elementIndex, nghost);
-
-            // Loop over local DOFs for entity type A and B
-            for (size_t i = DofStartA; i < DofEndA; ++i) {
-                // Get DOFMapping for local DOF i
-                DOFMapping_t dofMap_i = dofHandler.getElementDOFMapping(i);
-
-                // Handle boundary DOFs
-                if (bcTypes == CONSTANT_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
-                    Kokkos::atomic_store(
-                        &apply(resultView,
-                               elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
-                        apply(viewBC,
-                              elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF]);
-                    continue;
-                } else if (bcTypes == ZERO_FACE && dofHandler.isDOFOnBoundary(elementIndex, i)) {
-                    continue;
+            const size_t i = index % NumElementDOFs;
+            const size_t elementIndex = elemIndices(index / NumElementDOFs);
+            const auto elementNDIndex = dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+            const auto rowMap = dofHandler.getElementDOFMapping(i);
+            const bool dirichlet = bcType == CONSTANT_FACE || bcType == ZERO_FACE;
+            if (dirichlet && dofHandler.isDOFOnBoundary(elementIndex, i)) {
+                if (bcType == CONSTANT_FACE) {
+                    const T value = detail::gather_from_views<T>(inputViews, elementNDIndex, rowMap);
+                    detail::scatter_to_views(outputViews, elementNDIndex, rowMap, value);
                 }
-
-                if (coefficientDifferences) {
-                    const T xi = apply(viewBC, elementNDIndex + dofMap_i.entityLocalIndex)
-                                     [dofMap_i.entityLocalDOF];
-                    T contribution = T(0);
-                    for (size_t j = DofStartB; j < DofEndB; ++j) {
-                        if (j == i) continue; // The diagonal is implicit in the differences.
-                        const auto dofMap_j = dofHandler.getElementDOFMapping(j);
-                        const bool constrained =
-                            (bcTypes == CONSTANT_FACE || bcTypes == ZERO_FACE)
-                            && dofHandler.isDOFOnBoundary(elementIndex, j);
-                        // Keep K_ij*(0-x_i) for eliminated Dirichlet columns.
-                        const T xj = constrained ? T(0) :
-                            apply(view, elementNDIndex + dofMap_j.entityLocalIndex)
-                                 [dofMap_j.entityLocalDOF];
-                        contribution += A_K(i, j) * (xj - xi);
-                    }
-                    Kokkos::atomic_add(
-                        &apply(resultView, elementNDIndex + dofMap_i.entityLocalIndex)
-                              [dofMap_i.entityLocalDOF], contribution);
-                    continue;
-                }
-
-                for (size_t j = DofStartB; j < DofEndB; ++j) {
-                    // Get DOFMapping for local DOF j
-                    DOFMapping_t dofMap_j = dofHandler.getElementDOFMapping(j);
-
-                    // Skip boundary DOFs (Zero & Constant Dirichlet BCs)
-                    if (((bcTypes == CONSTANT_FACE) || (bcTypes == ZERO_FACE))
-                        && dofHandler.isDOFOnBoundary(elementIndex, j)) {
-                        continue;
-                    }
-
-                    T contrib =
-                        A_K(i, j)
-                        * apply(view, elementNDIndex
-                                          + dofMap_j.entityLocalIndex)[dofMap_j.entityLocalDOF];
-                    // Apply contribution to result
-                    Kokkos::atomic_add(
-                        &apply(resultView,
-                               elementNDIndex + dofMap_i.entityLocalIndex)[dofMap_i.entityLocalDOF],
-                        contrib);
-                }
+                return;
             }
+
+            const T xi = coefficientDifferences
+                ? detail::gather_from_views<T>(inputViews, elementNDIndex, rowMap) : T(0);
+            T contribution = T(0);
+            for (size_t j = 0; j < NumElementDOFs; ++j) {
+                if (coefficientDifferences && j == i) continue;
+                const bool constrained = dirichlet && dofHandler.isDOFOnBoundary(elementIndex, j);
+                if (!coefficientDifferences && constrained) continue;
+                const auto columnMap = dofHandler.getElementDOFMapping(j);
+                const T xj = constrained ? T(0)
+                    : detail::gather_from_views<T>(inputViews, elementNDIndex, columnMap);
+                // Retain K_ij*(0-x_i) for eliminated Dirichlet columns.
+                contribution += matrix(i, j) * (coefficientDifferences ? xj - xi : xj);
+            }
+            detail::atomicAddToViews(outputViews, elementNDIndex, rowMap, contribution);
         }
     };
+
+    // Functors for LagrangeSpace_wfc parallel operations
+    // Must be defined at namespace scope for CUDA compatibility
 
     // Functors for LagrangeSpace_wfc parallel operations
     // Must be defined at namespace scope for CUDA compatibility
@@ -997,6 +957,29 @@ namespace ippl {
     template <typename F>
     FieldLHS LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
                            FieldRHS>::evaluateAx(FieldLHS& field, F& evalFunction) const {
+        FieldLHS resultField = field.cloneStructure();
+        evaluateAxInto(field, evalFunction, resultField);
+        return resultField;
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    void LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                          FieldRHS>::evaluateAxInto(FieldLHS& field, F& evalFunction,
+                                                   FieldLHS& resultField) const {
+        evaluateAxInto(field, evalFunction, resultField, field.getFieldBCTypes()[0]);
+    }
+
+    template <typename T, unsigned Dim, unsigned Order, typename ElementType,
+              typename QuadratureType, typename FieldLHS, typename FieldRHS>
+    template <typename F>
+    void LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS,
+                          FieldRHS>::evaluateAxInto(FieldLHS& field, F& evalFunction,
+                                                   FieldLHS& resultField,
+                                                   FieldBC boundaryType) const {
+        if (&field == &resultField)
+            throw IpplException("evaluateAxInto", "Input and output must have independent storage.");
         Inform m("");
 
         // start a timer
@@ -1006,11 +989,9 @@ namespace ippl {
         // get number of ghost cells in field
         const int nghost = field.getNghost();
 
-        // create a new field for result with view initialized to zero (views are initialized to
-        // zero by default)
-
-        // TODO check if we need to set BCs the same as field
-        FieldLHS resultField = field.cloneStructure();
+        // Element assembly writes shared DOFs in the owned region and halos.
+        // Clear both before reusing an output from an earlier application.
+        resultField = T(0);
 
         const auto A_K = assembleDeviceElementMatrix(evalFunction);
 
@@ -1019,9 +1000,8 @@ namespace ippl {
             coefficientDifferences = evalFunction.useCoefficientDifferences();
 
 
-        // Get boundary conditions from field
         // Supported operators use the same boundary type on every face.
-        const FieldBC bcTypes = field.getFieldBCTypes()[0];
+        const FieldBC bcTypes = boundaryType;
 
         // start a timer
         static IpplTimings::TimerRef outer_loop = IpplTimings::getTimer("evaluateAx: outer loop");
@@ -1031,56 +1011,20 @@ namespace ippl {
         auto dofHandler = dofHandler_m.getDeviceMirror();
         auto elemIndices = elementIndices;
 
-        // Helper lambda to process a single entity type pair
-        auto processEntityPair = [&]<typename EntityTypeA, typename EntityTypeB>() {
-            // Get DOF ranges
-            constexpr size_t dofStart_a = DOFHandler_t::template getEntityDOFStart<EntityTypeA>();
-            constexpr size_t dofEnd_a   = DOFHandler_t::template getEntityDOFEnd<EntityTypeA>();
-            constexpr size_t dofStart_b = DOFHandler_t::template getEntityDOFStart<EntityTypeB>();
-            constexpr size_t dofEnd_b   = DOFHandler_t::template getEntityDOFEnd<EntityTypeB>();
-
-            // Get views for these entity types
-            using ViewType_a = std::remove_cv_t<
-                std::remove_reference_t<decltype(field.template getView<EntityTypeA>())>>;
-            using ViewType_b = std::remove_cv_t<
-                std::remove_reference_t<decltype(field.template getView<EntityTypeB>())>>;
-
-            ViewType_a resultView = resultField.template getView<EntityTypeA>();
-
-            ViewType_a viewBC =
-                field.template getView<EntityTypeA>();  // Needed for constant Dirichlet BCs
-            ViewType_b view = field.template getView<EntityTypeB>();
-
-            // Get execution space and policy type
-            using exec_space  = typename Kokkos::View<const size_t*>::execution_space;
-            using policy_type = Kokkos::RangePolicy<exec_space>;
-
-            // Create functor type
-            using functor_t = LagrangeEvaluateAxFunctor<
-                T, decltype(dofHandler), ViewType_a, ViewType_b, indices_t, decltype(elemIndices),
-                decltype(A_K), decltype(bcTypes), dofStart_a, dofEnd_a, dofStart_b, dofEnd_b>;
-
-            Kokkos::parallel_for(
-                "Loop over elements", policy_type(0, elemIndices.extent(0)),
-                functor_t{dofHandler, elemIndices, viewBC, view, resultView, A_K, bcTypes, nghost,
-                          coefficientDifferences});
-        };
-
-        // Iterate over all entity type pairs using compile-time double loop
-        constexpr size_t numTypes = DOFHandler_t::numEntityTypes;
-
-        // Execute the double loop over all entity type pairs
-        [&]<size_t... IJs>(std::index_sequence<IJs...>) {
-            (
-                [&] {
-                    constexpr size_t I = IJs / numTypes;
-                    constexpr size_t J = IJs % numTypes;
-                    using EntityTypeA = std::tuple_element_t<I, typename DOFHandler_t::EntityTypes>;
-                    using EntityTypeB = std::tuple_element_t<J, typename DOFHandler_t::EntityTypes>;
-                    processEntityPair.template operator()<EntityTypeA, EntityTypeB>();
-                }(),
-                ...);
-        }(std::make_index_sequence<numTypes * numTypes>{});
+        auto inputViews = detail::make_entity_view_tuple<
+            FieldLHS, typename DOFHandler_t::EntityTypes>(field);
+        auto outputViews = detail::make_entity_view_tuple<
+            FieldLHS, typename DOFHandler_t::EntityTypes>(resultField);
+        using exec_space = typename decltype(A_K)::execution_space;
+        using policy_type = Kokkos::RangePolicy<exec_space, Kokkos::IndexType<size_t>>;
+        using functor_type = LagrangeEvaluateAxRowFunctor<T, numElementDOFs,
+            decltype(dofHandler), decltype(inputViews), decltype(elemIndices), decltype(A_K)>;
+        if (elemIndices.extent(0) > std::numeric_limits<size_t>::max() / numElementDOFs)
+            throw IpplException("evaluateAxInto", "Element-row work count exceeds size_t.");
+        Kokkos::parallel_for("FEM element rows",
+            policy_type(0, elemIndices.extent(0) * numElementDOFs),
+            functor_type{dofHandler, elemIndices, inputViews, outputViews, A_K,
+                         bcTypes, nghost, coefficientDifferences});
 
         IpplTimings::stopTimer(outer_loop);
 
@@ -1098,10 +1042,9 @@ namespace ippl {
 
         IpplTimings::stopTimer(evalAx);
 
-        return resultField;
     }
 
- 
+
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,
               typename QuadratureType, typename FieldLHS, typename FieldRHS>
     template <typename F>
@@ -2112,7 +2055,7 @@ namespace ippl {
     template <typename T, unsigned Dim, unsigned Order, typename ElementType,
               typename QuadratureType, typename FieldLHS, typename FieldRHS>
     auto LagrangeSpace_wfc<T, Dim, Order, ElementType, QuadratureType, FieldLHS, FieldRHS>::copyElementMatrixToDevice(const ElementMatrix& matrix) -> DeviceMatrix {
-        Kokkos::View<T**> device("FEM element matrix", numElementDOFs, numElementDOFs);
+        Kokkos::View<T**, Kokkos::LayoutLeft> device("FEM element matrix", numElementDOFs, numElementDOFs);
         auto host = Kokkos::create_mirror_view(device);
         for (unsigned i = 0; i < numElementDOFs; ++i)
             for (unsigned j = 0; j < numElementDOFs; ++j) host(i, j) = matrix[i][j];

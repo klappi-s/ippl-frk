@@ -168,6 +168,15 @@ namespace ippl {
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    void FEMContainer<T, Dim, EntityTypes, DOFNums>::assignLinearCombination(
+        T alpha, const FEMContainer& x, T beta, const FEMContainer& y) {
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ((std::get<Is>(data_m) = alpha * std::get<Is>(x.data_m)
+                                    + beta * std::get<Is>(y.data_m)), ...);
+        }(std::make_index_sequence<NEntitys>{});
+    }
+
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     FEMContainer<T, Dim, EntityTypes, DOFNums>& FEMContainer<T, Dim, EntityTypes, DOFNums>::operator=(T value) {
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             (([&]() {

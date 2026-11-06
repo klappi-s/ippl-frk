@@ -215,7 +215,7 @@ namespace ippl {
         ///////////////////////////////////////////////////////////////////////
 
         using ElementMatrix = Vector<Vector<T, numElementDOFs>, numElementDOFs>;
-        using DeviceMatrix = Kokkos::View<const T**>;
+        using DeviceMatrix = Kokkos::View<const T**, Kokkos::LayoutLeft>;
 
         // Host assembly remains available for diagnostics; kernels receive views.
         static DeviceMatrix copyElementMatrixToDevice(const ElementMatrix& matrix);
@@ -236,6 +236,17 @@ namespace ippl {
          */
         template <typename F>
         FieldLHS evaluateAx(FieldLHS& field, F& evalFunction) const;
+
+        // Overwrite an independent result with the same entity layouts. All result
+        // values, including accumulation halos, are cleared; storage/BCs are retained.
+        template <typename F>
+        void evaluateAxInto(FieldLHS& field, F& evalFunction, FieldLHS& resultField) const;
+
+        // Apply a uniform boundary type without changing input/output metadata.
+        // Krylov operators use ZERO_FACE here for prescribed Dirichlet solutions.
+        template <typename F>
+        void evaluateAxInto(FieldLHS& field, F& evalFunction, FieldLHS& resultField,
+                            FieldBC boundaryType) const;
 
         /**
          * @brief Assemble the left stiffness matrix A of the system 

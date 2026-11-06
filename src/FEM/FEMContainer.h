@@ -91,6 +91,13 @@ namespace ippl {
         // The mesh and original vertex layout must outlive the returned container.
         FEMContainer cloneStructure() const;
 
+        // Assign alpha*x + beta*y to existing owned field values. All containers
+        // must be initialized with matching entity layouts and ghost widths.
+        // Preserves destination storage, layouts and boundary conditions; halos
+        // are not updated. Either or both inputs may alias this container.
+        void assignLinearCombination(T alpha, const FEMContainer& x, T beta,
+                                     const FEMContainer& y);
+
         void deepCopyFrom(const FEMContainer<T, Dim, EntityTypes, DOFNums>& other) {
             [&]<std::size_t... Is>(std::index_sequence<Is...>) {
                 ((Kokkos::deep_copy(std::get<Is>(this->data_m).getView(), std::get<Is>(other.data_m).getView())), ...);

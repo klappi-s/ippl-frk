@@ -1,3 +1,5 @@
+// Check FEM structure, operator and solver reuse without stale values or layouts.
+// Covers repeated periodic MPI1/MPI2 solves and Dirichlet boundary-mode preservation.
 #include "Ippl.h"
 
 #include "PoissonSolvers/FEMPoissonSolver_wFEMContainer.h"
@@ -13,14 +15,15 @@ namespace {
         ippl::UniformCartesian<double, 1> mesh;
         Field x, b;
         Solver solver;
-        explicit Problem(unsigned cells = 8)
+        explicit Problem(unsigned cells = 8, bool periodic = true)
             : domain(ippl::Vector<unsigned, 1>(cells + 1))
-            , layout(MPI_COMM_WORLD, domain, std::array<bool, 1>{true}, true)
+            , layout(MPI_COMM_WORLD, domain, std::array<bool, 1>{true}, periodic)
             , mesh(domain, ippl::Vector<double, 1>(1.0 / cells), ippl::Vector<double, 1>(0))
             , x(mesh, layout)
             , b(mesh, layout)
             , solver(x, b) {
-            const std::array<ippl::FieldBC, 2> bc{ippl::PERIODIC_FACE, ippl::PERIODIC_FACE};
+            std::array<ippl::FieldBC, 2> bc;
+            bc.fill(periodic ? ippl::PERIODIC_FACE : ippl::ZERO_FACE);
             x.setFieldBC(bc);
             b.setFieldBC(bc);
             x = 0;
@@ -88,6 +91,79 @@ TEST(FEMReuse, StructureCloneHasIndependentZeroValuesAndOwnedEntityLayouts) {
     }
 }
 
+// Repeated applications must clear previous owned/halo contributions while retaining
+// output allocations. The same check runs with one and two MPI ranks.
+TEST(FEMReuse, OperatorIntoReusesStorageAndClearsAccumulationHalos) {
+    Problem p;
+    p.fill(p.x);
+    const double h = p.mesh.getMeshSpacing()[0];
+    ippl::EvalFunctor<double, 1, 4> eval(ippl::Vector<double, 1>(1 / h), h,
+                                       p.solver.getStiffnessMode());
+    auto& space = p.solver.getSpace();
+    auto result = p.x.cloneStructure();
+    const auto vertexData = result.getView<ippl::Vertex<1>>().data();
+    const auto edgeData = result.getView<ippl::EdgeX<1>>().data();
+    auto original = p.x.deepCopy();
+    for (unsigned repeat = 0; repeat < 3; ++repeat) {
+        std::apply([](const auto&... views) {
+            (Kokkos::deep_copy(views,
+                typename std::remove_cvref_t<decltype(views)>::value_type(17.0)), ...);
+        }, result.getAllViews());
+        space.evaluateAxInto(p.x, eval, result);
+        auto expected = space.evaluateAx(p.x, eval);
+        EXPECT_LT(ippl::norm(result - expected), 1e-12);
+        EXPECT_DOUBLE_EQ(ippl::norm(p.x - original), 0);
+        EXPECT_EQ(result.getView<ippl::Vertex<1>>().data(), vertexData);
+        EXPECT_EQ(result.getView<ippl::EdgeX<1>>().data(), edgeData);
+    }
+    EXPECT_THROW(space.evaluateAxInto(p.x, eval, p.x), IpplException);
+}
+
+// On nonperiodic MPI1/MPI2 layouts, an explicit ZERO_FACE operator must match
+// the legacy action on a homogeneous-BC copy without changing prescribed input
+// values or BC offsets. Both stiffness modes must leave owned boundary rows zero.
+TEST(FEMReuse, HomogeneousOperatorModePreservesPrescribedInputBoundaries) {
+    Problem p(8, false);
+    const std::array<ippl::FieldBC, 2> types{ippl::CONSTANT_FACE, ippl::CONSTANT_FACE};
+    const std::array<double, 2> offsets{2.75, 2.75}, slopes{0, 0};
+    p.x.setFieldBC(types, offsets, slopes);
+    p.x = 2.75;
+    p.x.fillHalo();
+    const auto original = p.x.deepCopy();
+    auto homogeneous = p.x.deepCopy();
+    homogeneous.setFieldBC(std::array<ippl::FieldBC, 2>{ippl::ZERO_FACE, ippl::ZERO_FACE});
+    homogeneous.fillHalo();
+    auto result = p.x.cloneStructure();
+    auto& space = p.solver.getSpace();
+    const double h = p.mesh.getMeshSpacing()[0];
+    for (const auto mode : {ippl::PoissonStiffnessMode::Standard,
+                            ippl::PoissonStiffnessMode::ConstantPreserving}) {
+        ippl::EvalFunctor<double, 1, 4> eval(ippl::Vector<double, 1>(1 / h), h, mode);
+        const auto expected = space.evaluateAx(homogeneous, eval);
+        space.evaluateAxInto(p.x, eval, result, ippl::ZERO_FACE);
+        EXPECT_NEAR(ippl::norm(result - expected), 0, 1e-12);
+        EXPECT_DOUBLE_EQ(ippl::norm(p.x - original), 0);
+        EXPECT_EQ(p.x.getFieldBCTypes(), types);
+        using ScalarField = ippl::Field<double, 1, ippl::UniformCartesian<double, 1>, Cell>;
+        const auto bc = p.x.getFieldBC();
+        for (unsigned face = 0; face < 2; ++face) {
+            auto* constant = dynamic_cast<ippl::ExtrapolateFace<ScalarField>*>(bc[face].get());
+            ASSERT_NE(constant, nullptr);
+            EXPECT_DOUBLE_EQ(constant->getOffset(), offsets[face]);
+            EXPECT_DOUBLE_EQ(constant->getSlope(), slopes[face]);
+        }
+        const auto values = Kokkos::create_mirror_view_and_copy(
+            Kokkos::HostSpace(), result.getView<ippl::Vertex<1>>());
+        const auto owned = result.getLayout<ippl::Vertex<1>>().getLocalNDIndex();
+        for (int i = 0; i < owned[0].length(); ++i) {
+            const int global = owned[0].first() + i;
+            if (global == 0 || global == 8)
+                EXPECT_DOUBLE_EQ(values(i + result.getNghost())[0], 0);
+        }
+    }
+}
+
+// Cached layouts must not be rediscovered by operator and load temporaries.
 TEST(FEMReuse, OperatorResultsDoNotRediscoverNeighbors) {
     Problem p;
     p.fill(p.x);
