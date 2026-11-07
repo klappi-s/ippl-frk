@@ -14,23 +14,6 @@ namespace ippl {
         }
     };
 
-    // Functor for FEMContainer norm computation
-    // Must be defined at namespace scope for CUDA compatibility
-    template <typename ViewType, typename T, std::size_t NumDOFs, typename IndexArrayType>
-    struct FEMContainerNormFunctor {
-        ViewType view_;
-        int p_;
-
-        KOKKOS_INLINE_FUNCTION
-        void operator()(const IndexArrayType& args, T& val) const {
-            auto dofArray = apply(view_, args);
-            // Sum over all DOF elements in this DOFArray
-            for (std::size_t dof = 0; dof < NumDOFs; ++dof) {
-                val += Kokkos::pow(Kokkos::abs(dofArray[dof]), p_);
-            }
-        }
-    };
-
     // Reduce scalar DOFs, not DOFArrays: the latter have no scalar ordering or MPI min/max.
     template <typename ViewType, typename T, std::size_t NumDOFs,
               typename IndexArrayType, bool Maximum>
@@ -170,10 +153,12 @@ namespace ippl {
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     void FEMContainer<T, Dim, EntityTypes, DOFNums>::assignLinearCombination(
         T alpha, const FEMContainer& x, T beta, const FEMContainer& y) {
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((std::get<Is>(data_m) = alpha * std::get<Is>(x.data_m)
-                                    + beta * std::get<Is>(y.data_m)), ...);
-        }(std::make_index_sequence<NEntitys>{});
+        detail::updateFEMOwnedValues<true, DOFNums>(*this, x, y, alpha, beta);
+    }
+
+    template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
+    void FEMContainer<T, Dim, EntityTypes, DOFNums>::subtractOwnedValue(T value) {
+        detail::updateFEMOwnedValues<false, DOFNums>(*this, *this, *this, value);
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
@@ -381,40 +366,10 @@ namespace ippl {
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>
     T FEMContainer<T, Dim, EntityTypes, DOFNums>::norm(int p) const {
-        T total_sum = 0;
-
-        // Iterate over all fields in the container
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            (([&]() {
-                constexpr std::size_t numDOFs = std::get<Is>(DOFNums{}).value;
-                const auto& field = std::get<Is>(data_m);
-                auto layout = field.getLayout();
-                auto view = field.getView();
-
-                using exec_space = typename std::remove_reference_t<decltype(field)>::execution_space;
-                using index_array_type = typename RangePolicy<Dim, exec_space>::index_array_type;
-
-                T local_sum = 0;
-
-                // Use the functor defined at namespace scope
-                using functor_t = FEMContainerNormFunctor<decltype(view), T, numDOFs, index_array_type>;
-
-                // Owned region only (nghost=0): ghost layers duplicate neighbor-owned
-                // DOFs and must not be summed again after MPI_Allreduce.
-                ippl::parallel_reduce(
-                    "FEMContainer::norm", field.getFieldRangePolicy(0),
-                    functor_t{view, p},
-                    Kokkos::Sum<T>(local_sum));
-
-                // Reduce across MPI ranks
-                T global_sum = 0;
-                layout.comm.allreduce(local_sum, global_sum, 1, std::plus<T>());
-
-                total_sum += global_sum;
-            }()), ...);
-        }(std::make_index_sequence<std::tuple_size_v<decltype(data_m)>>{});
-
-        return std::pow(total_sum, 1.0 / p);
+        const T localSum = detail::reduceFEMOwnedValues<true, DOFNums>(*this, *this, p);
+        T globalSum = 0;
+        VertexLayout_m->comm.allreduce(localSum, globalSum, 1, std::plus<T>());
+        return std::pow(globalSum, 1.0 / p);
     }
 
     template <typename T, unsigned Dim, typename EntityTypes, typename DOFNums>

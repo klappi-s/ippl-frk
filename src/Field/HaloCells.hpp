@@ -161,7 +161,7 @@ namespace ippl {
             using functor_type = HaloBytePackFunctor<T, Subview, index_array_type, Dim>;
             ippl::parallel_for("HaloCells::pack()", getRangePolicy(subview),
                                functor_type{subview, buffer});
-            Kokkos::fence();
+            // exchangeBoundaries fences the complete pack batch before MPI reads it.
         }
 
         template <typename T, unsigned Dim, typename Op, typename Subview>
@@ -171,7 +171,8 @@ namespace ippl {
             using functor_type = HaloByteUnpackFunctor<T, Subview, Op, index_array_type, Dim>;
             ippl::parallel_for("HaloCells::unpack()", getRangePolicy(subview),
                                functor_type{subview, buffer, Op{}});
-            Kokkos::fence();
+            // Default policies share one execution instance. Ordered launches preserve
+            // additions to overlapping ranges; the caller fences before buffer reuse.
         }
 
         template <typename View, typename Op, typename IndexArray>
@@ -299,7 +300,21 @@ namespace ippl {
 
             using memory_space = typename view_type::memory_space;
             using buffer_type  = mpi::Communicator::buffer_type<memory_space>;
-            std::vector<MPI_Request> requests(totalRequests);
+            struct SendMessage {
+                int rank;
+                int tag;
+                buffer_type buffer;
+                size_type byteCount;
+            };
+            struct ReceiveMessage {
+                bound_type range;
+                buffer_type buffer;
+            };
+            std::vector<SendMessage> sends;
+            std::vector<ReceiveMessage> receives;
+            sends.reserve(totalRequests);
+            receives.reserve(totalRequests);
+            std::vector<MPI_Request> requests(2 * totalRequests);
             // sending loop
             constexpr size_t cubeCount = detail::countHypercubes(Dim) - 1;
             size_t requestIndex        = 0;
@@ -342,12 +357,17 @@ namespace ippl {
                     const size_type byteCount = haloMessageBytes<T>(comm, nsends);
                     buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
                     packHaloBytes<T, Dim>(makeSubview(view, range), buf->getBuffer());
-                    HaloPackedBuffer packed{buf->getBuffer(), byteCount};
-                    comm.isend(targetRank, tag, packed, requests[requestIndex++]);
+                    sends.push_back({targetRank, tag, buf, byteCount});
                 }
             }
 
-            // receiving loop
+            // MPI, including CUDA-aware MPI, may read send storage only after all
+            // packs finish. Keep one readiness fence for the entire batch.
+            if (!sends.empty()) {
+                Kokkos::fence();
+            }
+
+            // Post every receive before sending; retain storage through ordered unpack.
             for (size_t index = 0; index < cubeCount; index++) {
                 int tag                        = mpi::tag::HALO + Layout_t::getMatchingIndex(index);
                 const auto& componentNeighbors = neighbors[index];
@@ -376,15 +396,28 @@ namespace ippl {
                     const size_type nrecvs = range.size();
                     const size_type byteCount = haloMessageBytes<T>(comm, nrecvs);
                     buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
-                    comm.recv(sourceRank, tag, *buf, byteCount);
-                    unpackHaloBytes<T, Dim, Op>(makeSubview(view, range), buf->getBuffer());
+                    receives.push_back({range, buf});
+                    comm.irecv(sourceRank, tag, *buf, requests[requestIndex++], byteCount);
                 }
             }
 
-            if (totalRequests > 0) {
-                MPI_Waitall(totalRequests, requests.data(), MPI_STATUSES_IGNORE);
+            for (const auto& message : sends) {
+                HaloPackedBuffer packed{message.buffer->getBuffer(), message.byteCount};
+                comm.isend(message.rank, message.tag, packed, requests[requestIndex++]);
+            }
+            if (requestIndex > 0) {
+                MPI_Waitall(requestIndex, requests.data(), MPI_STATUSES_IGNORE);
             }
 
+            // Keep the original direction/neighbor order for overlapping additions.
+            // All kernels use the view execution space's default instance.
+            for (const auto& message : receives) {
+                unpackHaloBytes<T, Dim, Op>(makeSubview(view, message.range),
+                                           message.buffer->getBuffer());
+            }
+            if (!receives.empty()) {
+                Kokkos::fence();
+            }
             comm.freeAllBuffers();
         }
 
@@ -425,7 +458,21 @@ namespace ippl {
 
             using memory_space = typename view_type::memory_space;
             using buffer_type  = mpi::Communicator::buffer_type<memory_space>;
-            std::vector<MPI_Request> requests(totalRequests);
+            struct SendMessage {
+                int rank;
+                int tag;
+                buffer_type buffer;
+                size_type byteCount;
+            };
+            struct ReceiveMessage {
+                bound_type range;
+                buffer_type buffer;
+            };
+            std::vector<SendMessage> sends;
+            std::vector<ReceiveMessage> receives;
+            sends.reserve(totalRequests);
+            receives.reserve(totalRequests);
+            std::vector<MPI_Request> requests(2 * totalRequests);
 
             // sending loop
             size_t requestIndex = 0;
@@ -468,12 +515,17 @@ namespace ippl {
                     const size_type byteCount = haloMessageBytes<T>(comm, nsends);
                     buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
                     packHaloBytes<T, Dim>(makeSubview(view, range), buf->getBuffer());
-                    HaloPackedBuffer packed{buf->getBuffer(), byteCount};
-                    comm.isend(targetRank, tag, packed, requests[requestIndex++]);
+                    sends.push_back({targetRank, tag, buf, byteCount});
                 }
             }
 
-            // receiving loop
+            // MPI, including CUDA-aware MPI, may read send storage only after all
+            // packs finish. Keep one readiness fence for the entire batch.
+            if (!sends.empty()) {
+                Kokkos::fence();
+            }
+
+            // Post every receive before sending; retain storage through ordered unpack.
             for (size_t index = 0; index < cubeCount; index++) {
                 // Skip this neighbor if we shouldn't exchange in its direction
                 if (!shouldExchangeWithNeighbor(index, exchangeDir)) {
@@ -513,15 +565,28 @@ namespace ippl {
                     const size_type nrecvs = range.size();
                     const size_type byteCount = haloMessageBytes<T>(comm, nrecvs);
                     buffer_type buf = comm.template getBuffer<memory_space>(byteCount);
-                    comm.recv(sourceRank, tag, *buf, byteCount);
-                    unpackHaloBytes<T, Dim, Op>(makeSubview(view, range), buf->getBuffer());
+                    receives.push_back({range, buf});
+                    comm.irecv(sourceRank, tag, *buf, requests[requestIndex++], byteCount);
                 }
             }
 
-            if (totalRequests > 0) {
-                MPI_Waitall(totalRequests, requests.data(), MPI_STATUSES_IGNORE);
+            for (const auto& message : sends) {
+                HaloPackedBuffer packed{message.buffer->getBuffer(), message.byteCount};
+                comm.isend(message.rank, message.tag, packed, requests[requestIndex++]);
+            }
+            if (requestIndex > 0) {
+                MPI_Waitall(requestIndex, requests.data(), MPI_STATUSES_IGNORE);
             }
 
+            // Keep the original direction/neighbor order for overlapping additions.
+            // All kernels use the view execution space's default instance.
+            for (const auto& message : receives) {
+                unpackHaloBytes<T, Dim, Op>(makeSubview(view, message.range),
+                                           message.buffer->getBuffer());
+            }
+            if (!receives.empty()) {
+                Kokkos::fence();
+            }
             comm.freeAllBuffers();
         }
 

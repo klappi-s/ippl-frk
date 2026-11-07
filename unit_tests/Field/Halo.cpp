@@ -247,11 +247,23 @@ void expectHaloValue(const ippl::Vector<T, Dim>& actual,
 }
 
 template <unsigned Dim, typename Field, typename Layout>
-void checkRepeatedHaloMessages(Field& field, Layout& layout) {
+void checkRepeatedHaloMessages(Field& field, Layout& layout,
+                               const std::array<bool, Dim>* exchangeDir = nullptr) {
     using Value = typename Field::value_type;
     auto mirror = Kokkos::create_mirror_view(field.getView());
     auto expected = Kokkos::create_mirror(field.getView());
     const auto& neighbors = layout.getNeighbors();
+    auto usesDirection = [&](std::size_t direction) {
+        if (exchangeDir == nullptr) {
+            return true;
+        }
+        for (unsigned d = 0; d < Dim; ++d, direction /= 3) {
+            if (direction % 3 != 2 && !(*exchangeDir)[d]) {
+                return false;
+            }
+        }
+        return true;
+    };
     auto check = [&] {
         Kokkos::deep_copy(mirror, field.getView());
         nestedViewLoop(mirror, 0, [&](auto... indices) {
@@ -265,6 +277,9 @@ void checkRepeatedHaloMessages(Field& field, Layout& layout) {
         Kokkos::deep_copy(expected, ownValue);
         const auto& recvRanges = layout.getNeighborsRecvRange();
         for (std::size_t direction = 0; direction < neighbors.size(); ++direction) {
+            if (!usesDirection(direction)) {
+                continue;
+            }
             for (std::size_t neighbor = 0; neighbor < neighbors[direction].size(); ++neighbor) {
                 const auto& range = recvRanges[direction][neighbor];
                 const Value value = haloRankValue<Value>(neighbors[direction][neighbor], pass);
@@ -273,7 +288,11 @@ void checkRepeatedHaloMessages(Field& field, Layout& layout) {
                                 [&](auto... indices) { expected(indices...) = value; });
             }
         }
-        field.fillHalo();
+        if (exchangeDir == nullptr) {
+            field.fillHalo();
+        } else {
+            field.fillHalo(*exchangeDir);
+        }
         check();
 
         // Accumulation receives add to interior send ranges, including overlaps.
@@ -281,6 +300,9 @@ void checkRepeatedHaloMessages(Field& field, Layout& layout) {
         Kokkos::deep_copy(expected, ownValue);
         const auto& sendRanges = layout.getNeighborsSendRange();
         for (std::size_t direction = 0; direction < neighbors.size(); ++direction) {
+            if (!usesDirection(direction)) {
+                continue;
+            }
             for (std::size_t neighbor = 0; neighbor < neighbors[direction].size(); ++neighbor) {
                 const auto& range = sendRanges[direction][neighbor];
                 const Value value = haloRankValue<Value>(neighbors[direction][neighbor], pass);
@@ -289,7 +311,11 @@ void checkRepeatedHaloMessages(Field& field, Layout& layout) {
                                 [&](auto... indices) { expected(indices...) += value; });
             }
         }
-        field.accumulateHalo();
+        if (exchangeDir == nullptr) {
+            field.accumulateHalo();
+        } else {
+            field.accumulateHalo(*exchangeDir);
+        }
         check();
     }
 }
@@ -311,6 +337,22 @@ TYPED_TEST(HaloTest, RepeatedVectorMessages) {
         typename TestFixture::exec_space>;
     VectorField field(this->mesh, this->layout);
     checkRepeatedHaloMessages<Dim>(field, this->layout);
+}
+
+// Direction masks must preserve excluded ghosts and owned cells across repeated
+// batches. All-false masks exercise zero MPI requests on every suite backend;
+// one-axis masks and all-true masks exercise filtered and overlapping receives.
+TYPED_TEST(HaloTest, RepeatedDirectionalMessages) {
+    constexpr unsigned Dim = TestFixture::dim;
+    std::array<bool, Dim> exchangeDir{};
+    checkRepeatedHaloMessages<Dim>(*this->field, this->layout, &exchangeDir);
+    for (unsigned d = 0; d < Dim; ++d) {
+        exchangeDir.fill(false);
+        exchangeDir[d] = true;
+        checkRepeatedHaloMessages<Dim>(*this->field, this->layout, &exchangeDir);
+    }
+    exchangeDir.fill(true);
+    checkRepeatedHaloMessages<Dim>(*this->field, this->layout, &exchangeDir);
 }
 
 int main(int argc, char* argv[]) {

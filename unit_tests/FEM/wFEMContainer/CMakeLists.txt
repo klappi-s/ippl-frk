@@ -1,6 +1,8 @@
 file(RELATIVE_PATH _relPath "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "Adding unit tests found in ${_relPath}")
 
+add_ippl_test(FEMContainerValueUpdate NUM_PROCS 1 LABELS FEM values)
+add_ippl_test(FEMContainerReduction NUM_PROCS 1 LABELS FEM reduction)
 add_ippl_test(FEMOrderTransfer NUM_PROCS 1 LABELS FEM periodic transfer)
 add_ippl_test(DOFHandler)
 add_ippl_test(FEMContainerHalo)
@@ -30,6 +32,12 @@ add_ippl_test(FEMParticleCoupling SOURCES FEMParticleCoupling.cpp
   $<TARGET_OBJECTS:FEMOracleData1D> NUM_PROCS 1 LABELS FEM particle)
 target_link_libraries(FEMParticleCoupling PRIVATE FEMOraclePackage)
 if(BUILD_TESTING)
+  add_test(NAME FEMContainerValueUpdate_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMContainerValueUpdate> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMContainerValueUpdate_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;values")
+  add_test(NAME FEMContainerReduction_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMContainerReduction> ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(FEMContainerReduction_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;reduction")
   add_test(NAME FEMOrderTransfer_MPI2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:FEMOrderTransfer> ${MPIEXEC_POSTFLAGS})
   set_tests_properties(FEMOrderTransfer_MPI2 PROPERTIES TIMEOUT 120 PROCESSORS 2 LABELS "FEM;periodic;transfer")

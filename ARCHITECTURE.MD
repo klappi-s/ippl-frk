@@ -831,9 +831,19 @@ against source.*
   destruction safety and zero neighbor discoveries across repeated actions.
 - Current value/output reuse APIs:
   `void FEMContainer::assignLinearCombination(T alpha, const FEMContainer& x, T beta, const FEMContainer& y)`
-  (`src/FEM/FEMContainer.h:98`) updates owned values with Field expressions;
-  layouts/ghost widths must match. Either input may alias output; storage/BCs
-  persist, ghosts require refresh. FEM CG `setOperatorInto(OperatorIntoF op)`
+  (`src/FEM/FEMContainer.h:99`) and `void subtractOwnedValue(T value)` (`:104`)
+  each use one owned-value kernel. Layouts/ghost widths must match for combinations;
+  either input may alias output. Both preserve ghosts, storage and BCs; refresh
+  halos before using neighboring values. `FEMContainerOperations.h:120` concatenates
+  entity ranges and follows each View's contiguous dimension without repacking.
+  `innerProduct` (`FEMContainer.h:152`) and `norm(int p)` (`FEMContainer.hpp:368`)
+  use one owned-value reduction/host-result synchronization and one MPI sum each;
+  `FEMContainerOperations.h:72` excludes ghosts and sums all entity DOFs.
+  Reduction grouping changes floating-point rounding. `FEMContainerReduction`
+  checks P1–P5 in 1D–3D, periodic/nonperiodic ownership and wide poisoned ghosts.
+  `FEMContainerValueUpdate.cpp:139,143` checks aliased inputs, untouched ghosts,
+  storage/BC retention and the mean projector; both suites have MPI1/MPI2 entries.
+  FEM CG `setOperatorInto(OperatorIntoF op)`
   (`src/LinearSolvers/PCG.h:294`; `OperatorIntoF=std::function<void(lhs_type&,lhs_type&)>`)
   retains output; legacy `setOperator` clears this callback. PCG keeps its legacy path.
   Calling only `setOperatorInto` on PCG does not configure its operator.
@@ -842,35 +852,61 @@ against source.*
   require independent matching storage, clear owned/ghost output and retain metadata.
   The default uses input BC[0]; CG explicitly uses homogeneous Dirichlet rows.
   One element-row kernel sums inputs then atomically adds once per row, retaining
-  coefficient differences and constrained columns. `DeviceMatrix` is explicitly
-  `LayoutLeft`. Shared `FEMFieldAccess.h:18` helpers use owning `ippl::Tuple`/device
-  `ippl::get`, also serving order transfer. Regrouping changes floating-point order;
-  bitwise agreement with prior kernels is not expected.
-- `src/Field/HaloCells.hpp:158` packs/unpacks directly in pooled communication
-  bytes; existing communicator sends avoid Archive copy kernels and host staging.
-  Vector component representation, directional ranges, fences, receive order and
-  buffer lifetime through `MPI_Waitall` persist. Field execution/memory spaces
-  remain unchanged, including CUDA device buffers.
-- `demos/electrostaticFEM/FEMDiagnosticMoments.h:80,115` provides
+  coefficient differences and constrained columns. The current candidate selects
+  row pointers once (`LagrangeSpace_wFEMContainer.hpp:243`), visits input entity
+  ranges at compile time (`:211`) and decodes element coordinates once. Host-selected
+  difference/Dirichlet specializations (`:1090`) remove uniform column-loop branches.
+  Class-static constexpr DOF bounds (`:192,195`) keep host metadata evaluation
+  outside device methods. Column order is retained; no coefficient arrays, shared staging or extra launches
+  are introduced. `DeviceMatrix` remains `LayoutLeft`; execution/memory spaces and
+  halo operations remain unchanged. Shared `FEMFieldAccess.h:18` helpers provide
+  owning `ippl::Tuple`/device `ippl::get`, also serving order transfer. Atomic scheduling
+  and compiler transformations still prevent a bitwise reproducibility guarantee.
+- `src/Field/HaloCells.hpp:158,168` packs/unpacks pooled communication bytes
+  without Archive copy kernels or host staging. Regular/directional exchanges
+  (`:274,426`) queue all pack kernels, fence once, post nonblocking receives before
+  sends, then wait for both. Unpack kernels retain neighbor order and finish with
+  one fence before pooled buffers are released. Vector wire representation,
+  directional ranges and field execution/memory spaces remain unchanged,
+  including CUDA device buffers. Batching changes synchronization within each
+  field exchange; it does not combine entity messages or introduce cross-field overlap.
+- `demos/electrostaticFEM/FEMDiagnosticMoments.h:86,121` provides
   `initialize(const Space&, const Quadrature&)` and
   `FEMDiagnosticValues evaluate(Field&, const Space&, double wave) const`.
-  Reference gradients/quadrature are cached; one device reduction and three-value
+  Class-static constexpr entity bounds (`:18,21`) avoid host metadata calls inside
+  the device reduction. Reference gradients/quadrature are cached; one device reduction and three-value
   MPI sum replace full-volume diagnostic arrays. Requires periodic ownership and
   interior quadrature. Regressions: `FEMReuse`, `FEMOrderTransfer`,
-  `FEMDiagnosticMoments`, `Halo` (including scalar/Vector reuse). Serial/MPI
-  validation covers 260 CTest entries, including all 3D Poisson oracle shards
+  `FEMDiagnosticMoments`, `Halo` (including scalar/Vector reuse). First-iteration
+  Serial/MPI validation covers 260 CTest entries, including all 3D Poisson oracle shards
   on one/two/four ranks. Nine focused OpenMP CTest entries pass with four threads.
   Focused CUDA/MPI tests and the selected 1D–3D operator/1D–2D solution oracles
   pass across two GH200 nodes. Full GPU 3D Poisson oracle sharding is not claimed.
-- November 6 controlled plain-CG performance comparison: 240 baseline/final
+- Historical first-iteration November 6 plain-CG comparison: 240 baseline/final
   ordinary simulations, P1–P3, 32³/64³ (three repeats, ten steps), 128³ (one
   repeat, three steps), one/two nodes. P3 64³ 1×4 recurring solve improves
   80.00→3.36 s; P3 128³ final 1→8 GPUs improves 38.23→10.29 s. Small domains
   remain latency limited. The fused row kernel regresses about 19% against
   CG-reuse-only at P3 128³ on one GPU; NCU shows instruction-heavy work and
-  low DRAM throughput, not HBM saturation. Next investigations are indexing,
-  per-entity reductions and halo synchronization; no further optimization is
-  implemented. See `../../Reports/2026-11-06_1908_FEM_CG_OPTIMIZATION.md` and
+  low DRAM throughput, not HBM saturation. The second iteration implements
+  entity-specialized row access, fused owned reductions/value updates and shared
+  halo batching above. All 336 main ordinary performance runs and two separate
+  warning-cleanup controls pass validation. P3 128³ recurring solves improve
+  1.57–1.79× across placements; one-to-eight-GPU scaling improves 3.71→4.22×.
+  Small domains remain latency limited. NCU shows fewer dynamic instructions but
+  larger executed code and more no-instruction stalls; instruction-fetch pressure
+  is a hypothesis, not an established cache bottleneck. No further optimization
+  beyond this iteration is implemented.
+  Second-iteration validation: 266 unique Serial/MPI CTest entries, 17 focused
+  OpenMP entries (four threads), 29 CUDA/MPI launches before the warning-only
+  cleanup and four focused launches afterward all pass. The selected GPU coverage
+  includes both stiffness modes, all non-column 3D operator cases, 3D column shard
+  0/16, 1D/2D solution oracles, P1–P5 periodic cases, particle coupling and shared
+  scalar/Vector halos. Full GPU 3D Poisson sharding, pinned/UVM halo storage and
+  sanitizers are not claimed. Reference data and tolerances remain unchanged.
+  Second-iteration report: `../../Reports/2026-11-06_2240_FEM_CG_OPTIMIZATION_2.md`;
+  artifacts: `../performance_runs/2026-11-06_2142_cg_optimization_2/`.
+  See `../../Reports/2026-11-06_1908_FEM_CG_OPTIMIZATION.md` and
   `../performance_runs/2026-11-06_1803_cg_optimization/` for data/provenance.
 - The demo defaults to `timer_recording=summary`; `raw` requires a positive
   `timer_sample_limit` (default1024 samples/timer/rank). Online `timer-summary.csv`

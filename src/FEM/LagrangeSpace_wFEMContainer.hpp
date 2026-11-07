@@ -169,11 +169,12 @@ namespace ippl {
     } // namespace detail
 
 
-    // One work item per element row. Adjacent work items vary i first, matching
-    // the element matrix's LayoutLeft storage. Shared output DOFs need one atomic
-    // addition per completed row rather than one per entry/entity pair.
-    template <typename T, unsigned NumElementDOFs, typename DOFHandlerType,
-              typename ViewTuple, typename ElemIndicesView, typename MatrixType>
+    // One work item per element row. Select its output entity once, then visit
+    // input entities at compile time so the inner products need no entity lookup.
+    // The column order and one atomic addition per unconstrained row are retained.
+    template <typename T, unsigned NumElementDOFs, typename EntityTypes,
+              typename DOFHandlerType, typename ViewTuple, typename ElemIndicesView,
+              typename MatrixType, bool COEFFICIENT_DIFFERENCES, bool DIRICHLET>
     struct LagrangeEvaluateAxRowFunctor {
         DOFHandlerType dofHandler;
         ElemIndicesView elemIndices;
@@ -181,36 +182,101 @@ namespace ippl {
         MatrixType matrix;
         FieldBC bcType;
         int nghost;
-        bool coefficientDifferences;
+
+        using Indices = std::remove_cvref_t<decltype(dofHandler.numElements)>;
+        using Mapping = typename DOFHandlerType::DOFMapping_t;
+        static constexpr unsigned DIM = DOFHandlerType::SpaceTraits::Dim;
+        static constexpr size_t NUM_ENTITIES = std::tuple_size_v<EntityTypes>;
+        // Evaluate host constexpr metadata outside device methods.
+        template <size_t EntityIndex>
+        static constexpr size_t ENTITY_DOF_BEGIN = DOFHandlerType::template getEntityDOFStart<
+            std::tuple_element_t<EntityIndex, EntityTypes>>();
+        template <size_t EntityIndex>
+        static constexpr size_t ENTITY_DOF_END = DOFHandlerType::template getEntityDOFEnd<
+            std::tuple_element_t<EntityIndex, EntityTypes>>();
+
+        // Same predicate as the device handler, with an already-decoded element
+        // position. Avoid repeating its integer divisions for every column.
+        KOKKOS_INLINE_FUNCTION bool isBoundary(const Mapping& map,
+                                               const Indices& elementPosition) const {
+            for (unsigned d = 0; d < DIM; ++d) {
+                if (map.directionMask & (1u << d)) continue;
+                const auto coordinate = elementPosition[d] + map.entityLocalIndex[d];
+                if (coordinate == 0 || coordinate == dofHandler.numElements[d]) return true;
+            }
+            return false;
+        }
+
+        template <size_t EntityIndex = 0>
+        KOKKOS_INLINE_FUNCTION void accumulateColumns(size_t i, const Indices& elementNDIndex,
+                                                       const Indices& elementPosition, T xi,
+                                                       T& contribution) const {
+            if constexpr (EntityIndex < NUM_ENTITIES) {
+                constexpr size_t DOF_BEGIN = ENTITY_DOF_BEGIN<EntityIndex>;
+                constexpr size_t DOF_END = ENTITY_DOF_END<EntityIndex>;
+                const auto& view = ippl::get<EntityIndex>(inputViews);
+                for (size_t j = DOF_BEGIN; j < DOF_END; ++j) {
+                    if constexpr (COEFFICIENT_DIFFERENCES) {
+                        if (j == i) continue;
+                    }
+                    const auto columnMap = dofHandler.getElementDOFMapping(j);
+                    bool constrained = false;
+                    if constexpr (DIRICHLET) constrained = isBoundary(columnMap, elementPosition);
+                    if constexpr (!COEFFICIENT_DIFFERENCES) {
+                        if (constrained) continue;
+                    }
+                    const T xj = constrained ? T(0)
+                        : apply(view, elementNDIndex + columnMap.entityLocalIndex)
+                               [columnMap.entityLocalDOF];
+                    if constexpr (COEFFICIENT_DIFFERENCES)
+                        // Keep K_ij*(0-x_i) for eliminated Dirichlet columns.
+                        contribution += matrix(i, j) * (xj - xi);
+                    else
+                        contribution += matrix(i, j) * xj;
+                }
+                accumulateColumns<EntityIndex + 1>(i, elementNDIndex, elementPosition,
+                                                   xi, contribution);
+            }
+        }
+
+        template <size_t EntityIndex = 0>
+        KOKKOS_INLINE_FUNCTION void selectRow(size_t i, const Mapping& rowMap,
+                                              const Indices& rowIndex, T*& destination,
+                                              const T*& source) const {
+            if constexpr (EntityIndex < NUM_ENTITIES) {
+                constexpr size_t DOF_END = ENTITY_DOF_END<EntityIndex>;
+                if (i < DOF_END) {
+                    destination = &apply(ippl::get<EntityIndex>(outputViews), rowIndex)
+                                        [rowMap.entityLocalDOF];
+                    source = &apply(ippl::get<EntityIndex>(inputViews), rowIndex)
+                                   [rowMap.entityLocalDOF];
+                } else {
+                    selectRow<EntityIndex + 1>(i, rowMap, rowIndex, destination, source);
+                }
+            }
+        }
 
         KOKKOS_INLINE_FUNCTION void operator()(const size_t index) const {
             const size_t i = index % NumElementDOFs;
             const size_t elementIndex = elemIndices(index / NumElementDOFs);
-            const auto elementNDIndex = dofHandler.getLocalElementNDIndex(elementIndex, nghost);
+            const auto elementPosition = dofHandler.getElementNDIndex(elementIndex);
+            const Indices elementNDIndex = elementPosition - dofHandler.localFirst + Indices(nghost);
             const auto rowMap = dofHandler.getElementDOFMapping(i);
-            const bool dirichlet = bcType == CONSTANT_FACE || bcType == ZERO_FACE;
-            if (dirichlet && dofHandler.isDOFOnBoundary(elementIndex, i)) {
-                if (bcType == CONSTANT_FACE) {
-                    const T value = detail::gather_from_views<T>(inputViews, elementNDIndex, rowMap);
-                    detail::scatter_to_views(outputViews, elementNDIndex, rowMap, value);
+            const Indices rowIndex = elementNDIndex + rowMap.entityLocalIndex;
+            T* destination = nullptr;
+            const T* source = nullptr;
+            selectRow(i, rowMap, rowIndex, destination, source);
+            if constexpr (DIRICHLET) {
+                if (isBoundary(rowMap, elementPosition)) {
+                    if (bcType == CONSTANT_FACE) Kokkos::atomic_store(destination, *source);
+                    return;
                 }
-                return;
             }
-
-            const T xi = coefficientDifferences
-                ? detail::gather_from_views<T>(inputViews, elementNDIndex, rowMap) : T(0);
+            T xi = T(0);
+            if constexpr (COEFFICIENT_DIFFERENCES) xi = *source;
             T contribution = T(0);
-            for (size_t j = 0; j < NumElementDOFs; ++j) {
-                if (coefficientDifferences && j == i) continue;
-                const bool constrained = dirichlet && dofHandler.isDOFOnBoundary(elementIndex, j);
-                if (!coefficientDifferences && constrained) continue;
-                const auto columnMap = dofHandler.getElementDOFMapping(j);
-                const T xj = constrained ? T(0)
-                    : detail::gather_from_views<T>(inputViews, elementNDIndex, columnMap);
-                // Retain K_ij*(0-x_i) for eliminated Dirichlet columns.
-                contribution += matrix(i, j) * (coefficientDifferences ? xj - xi : xj);
-            }
-            detail::atomicAddToViews(outputViews, elementNDIndex, rowMap, contribution);
+            accumulateColumns(i, elementNDIndex, elementPosition, xi, contribution);
+            Kokkos::atomic_add(destination, contribution);
         }
     };
 
@@ -1017,14 +1083,25 @@ namespace ippl {
             FieldLHS, typename DOFHandler_t::EntityTypes>(resultField);
         using exec_space = typename decltype(A_K)::execution_space;
         using policy_type = Kokkos::RangePolicy<exec_space, Kokkos::IndexType<size_t>>;
-        using functor_type = LagrangeEvaluateAxRowFunctor<T, numElementDOFs,
-            decltype(dofHandler), decltype(inputViews), decltype(elemIndices), decltype(A_K)>;
         if (elemIndices.extent(0) > std::numeric_limits<size_t>::max() / numElementDOFs)
             throw IpplException("evaluateAxInto", "Element-row work count exceeds size_t.");
-        Kokkos::parallel_for("FEM element rows",
-            policy_type(0, elemIndices.extent(0) * numElementDOFs),
-            functor_type{dofHandler, elemIndices, inputViews, outputViews, A_K,
-                         bcTypes, nghost, coefficientDifferences});
+        const auto policy = policy_type(0, elemIndices.extent(0) * numElementDOFs);
+        // Uniform policies are selected on the host, outside every row/column loop.
+        auto launchRows = [&]<bool COEFFICIENT_DIFFERENCES, bool DIRICHLET>() {
+            using functor_type = LagrangeEvaluateAxRowFunctor<T, numElementDOFs,
+                typename DOFHandler_t::EntityTypes, decltype(dofHandler), decltype(inputViews),
+                decltype(elemIndices), decltype(A_K), COEFFICIENT_DIFFERENCES, DIRICHLET>;
+            Kokkos::parallel_for("FEM element rows", policy,
+                functor_type{dofHandler, elemIndices, inputViews, outputViews, A_K, bcTypes, nghost});
+        };
+        const bool dirichlet = bcTypes == CONSTANT_FACE || bcTypes == ZERO_FACE;
+        if (coefficientDifferences) {
+            if (dirichlet) launchRows.template operator()<true, true>();
+            else launchRows.template operator()<true, false>();
+        } else {
+            if (dirichlet) launchRows.template operator()<false, true>();
+            else launchRows.template operator()<false, false>();
+        }
 
         IpplTimings::stopTimer(outer_loop);
 

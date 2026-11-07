@@ -14,6 +14,12 @@ namespace electrostatic_fem {
             using value_type = FEMDiagnosticValues;
             using Point = ippl::Vector<double, Dim>;
             using Index = ippl::Vector<size_t, Dim>;
+            template <size_t EntityIndex>
+            static constexpr size_t ENTITY_DOF_BEGIN = Handler::template getEntityDOFStart<
+                std::tuple_element_t<EntityIndex, Entities>>();
+            template <size_t EntityIndex>
+            static constexpr size_t ENTITY_DOF_END = Handler::template getEntityDOFEnd<
+                std::tuple_element_t<EntityIndex, Entities>>();
             Handler handler;
             Views views;
             Kokkos::View<Point*> points;
@@ -33,9 +39,8 @@ namespace electrostatic_fem {
             template <size_t I = 0>
             KOKKOS_INLINE_FUNCTION void addEntity(const Index& local, size_t q, Point& electric) const {
                 if constexpr (I < std::tuple_size_v<Entities>) {
-                    using Entity = std::tuple_element_t<I, Entities>;
-                    constexpr size_t DOF_BEGIN = Handler::template getEntityDOFStart<Entity>();
-                    constexpr size_t DOF_END = Handler::template getEntityDOFEnd<Entity>();
+                    constexpr size_t DOF_BEGIN = ENTITY_DOF_BEGIN<I>;
+                    constexpr size_t DOF_END = ENTITY_DOF_END<I>;
                     for (size_t i = DOF_BEGIN; i < DOF_END; ++i) {
                         const auto map = handler.getElementDOFMapping(i);
                         const auto coefficient = ippl::apply(ippl::get<I>(views),

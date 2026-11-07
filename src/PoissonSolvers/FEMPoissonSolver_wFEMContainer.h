@@ -263,7 +263,7 @@ namespace ippl {
                     throw IpplException("FEMPoissonSolver_wFEMContainer::solve",
                                         "Periodic load has nonzero total charge.");
                 auto project = [constant, count](lhs_type& value) {
-                    value -= innerProduct(*constant, value) / count;
+                    value.subtractOwnedValue(innerProduct(*constant, value) / count);
                 };
                 project(rhs);
                 cg_algo_m.setProjector(project);

@@ -415,7 +415,7 @@ namespace ippl {
 
             if (allFacesPeriodic && !projector_m) {
                 T avg = lhs.getVolumeAverage();
-                lhs -= avg;
+                lhs.subtractOwnedValue(avg);
             }
         }
 
