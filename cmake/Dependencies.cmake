@@ -498,7 +498,7 @@ endif()
 # ------------------------------------------------------------------------------
 # Catalyst (libcatalyst SDK and bundled Conduit parser)
 # ------------------------------------------------------------------------------
-if(IPPL_ENABLE_CATALYST)
+if(IPPL_ENABLE_CATALYST OR IPPL_ENABLE_FEL)
   enable_language(C)
 
   if(NOT Catalyst_VERSION)

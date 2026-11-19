@@ -28,3 +28,7 @@ add_subdirectory(region)
 add_subdirectory(random)
 add_subdirectory(serialization)
 add_subdirectory(FEM)
+
+if(IPPL_ENABLE_FEL AND IPPL_ENABLE_OPENPMD)
+  add_subdirectory(fel)
+endif()

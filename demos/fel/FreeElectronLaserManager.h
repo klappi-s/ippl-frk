@@ -23,6 +23,10 @@
 #include "Stream/InSitu/CatalystAdaptor.h"
 #endif
 
+#ifdef IPPL_ENABLE_OPENPMD
+#include "FELCheckpoint.h"
+#endif
+
 // FEL simulation manager.
 //
 // An electromagnetic (FDTD) PIC manager for the Free Electron Laser: it owns the
@@ -59,6 +63,11 @@ public:
 
 protected:
     config m_config;
+    std::filesystem::path restartPath_m;
+    bool writeDiagnosticHeaders_m = true;
+#ifdef IPPL_ENABLE_OPENPMD
+    friend struct FELCheckpoint;
+#endif
 
     size_type totalP_m;
     int nt_m;
@@ -106,6 +115,9 @@ public:
     size_type getTotalP() const { return totalP_m; }
     void setTotalP(size_type totalP_) { totalP_m = totalP_; }
 
+    void setRestartPath(std::filesystem::path path) { restartPath_m = std::move(path); }
+    int remainingSteps() const { return nt_m - it_m; }
+
     int getNt() const { return nt_m; }
     void setNt(int nt_) { nt_m = nt_; }
 
@@ -137,6 +149,12 @@ public:
         this->time_m += this->dt_m;
         this->it_m++;
         this->dump();
+#ifdef IPPL_ENABLE_OPENPMD
+        const unsigned interval = m_config.checkpointInterval;
+        if (interval && (it_m % interval == 0 || it_m == nt_m)) {
+            FELCheckpoint::save(*this);
+        }
+#endif
 
         Inform m("Post-step:");
         m << "Finished time step: " << this->it_m << " time: " << this->time_m << endl;
@@ -322,7 +340,15 @@ public:
 
         m << "dt = " << this->dt_m << " nt = " << this->nt_m << endl;
 
-        initializeParticles();
+#ifdef IPPL_ENABLE_OPENPMD
+        if (!restartPath_m.empty()) {
+            initializeRadiationWindow();
+            FELCheckpoint::restore(*this, restartPath_m);
+        } else
+#endif
+        {
+            initializeParticles();
+        }
 
 #ifdef IPPL_ENABLE_CATALYST
         // New channel-based API
@@ -336,7 +362,7 @@ public:
         cat_viz.Initialize(steerReg);
 #endif
 
-        this->dump();
+        if (restartPath_m.empty()) this->dump();
 
         m << "Done" << endl;
     }
@@ -404,6 +430,7 @@ public:
         dumpRadiation();
         dumpRadiationBanded();
         dumpFELDiagnostics();
+        writeDiagnosticHeaders_m = false;
     }
 
     // Radiated power leaving the downstream end of the domain, transformed back
@@ -449,7 +476,7 @@ public:
             Inform csvout(NULL, fname.str().c_str(), Inform::APPEND);
             csvout.precision(10);
             csvout.setf(std::ios::scientific, std::ios::floatfield);
-            if (std::fabs(this->time_m) < 1e-14) {
+            if (writeDiagnosticHeaders_m) {
                 csvout << "labframe_z, radiated_power_W" << endl;
             }
             csvout << pos[2] * unit_length_in_meters << " " << power_global << endl;
@@ -457,8 +484,17 @@ public:
         ippl::Comm->barrier();
     }
 
-    // Narrow-band radiated power at the FEL resonance, computed the way MITHRA's
-    // powerSample() does.
+    void initializeRadiationWindow() {
+        const auto view = fcontainer_m->getE().getView();
+        const double wavelength = m_config.undulator_period / frame_gamma_m;
+        rp_omega_m = 2.0 * Kokkos::numbers::pi_v<double> / wavelength;
+        rp_Nf_m = std::max(1, static_cast<int>(std::lround(3.0 * wavelength / dt_m)));
+        rp_fdt_m = Kokkos::View<T****>("FEL banded field buffer", rp_Nf_m,
+                                       view.extent(0), view.extent(1), 4);
+        rp_init_m = true;
+    }
+
+    // Narrow-band radiated power at the FEL resonance (MITHRA powerSample).
     void dumpRadiationBanded() {
         auto fc    = this->fcontainer_m;
         auto eview = fc->getE().getView();
@@ -471,13 +507,7 @@ public:
         const int exty    = (int)eview.extent(1);
         const int extz    = (int)eview.extent(2);
 
-        if (!rp_init_m) {
-            const double lambda_rad = this->m_config.undulator_period / frame_gamma_m;
-            rp_omega_m              = 2.0 * M_PI / lambda_rad;  // [1/unit_time], c = 1
-            rp_Nf_m                 = std::max(1, (int)std::lround(3.0 * lambda_rad / this->dt_m));
-            rp_fdt_m  = Kokkos::View<T****>("FEL banded field buffer", rp_Nf_m, extx, exty, 4);
-            rp_init_m = true;
-        }
+        if (!rp_init_m) initializeRadiationWindow();
 
         const int Nf = rp_Nf_m;
         const int m  = ((this->it_m % Nf) + Nf) % Nf;  // ring slot for this step
@@ -556,7 +586,7 @@ public:
             Inform csvout(NULL, fname.str().c_str(), Inform::APPEND);
             csvout.precision(10);
             csvout.setf(std::ios::scientific, std::ios::floatfield);
-            if (std::fabs(this->time_m) < 1e-14) {
+            if (writeDiagnosticHeaders_m) {
                 csvout << "labframe_z, banded_power_W" << endl;
             }
             csvout << pos[2] * unit_length_in_meters << " " << power_global << endl;
@@ -671,7 +701,7 @@ public:
             Inform csvout(NULL, fname.str().c_str(), Inform::APPEND);
             csvout.precision(10);
             csvout.setf(std::ios::scientific, std::ios::floatfield);
-            if (std::fabs(this->time_m) < 1e-14) {
+            if (writeDiagnosticHeaders_m) {
                 csvout << "labframe_z, bunching, max_E, field_energy, num_particles, "
                           "centroid_z, rms_z, rms_perp, mean_gbz"
                        << endl;

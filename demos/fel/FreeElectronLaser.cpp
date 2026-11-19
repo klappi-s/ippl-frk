@@ -38,30 +38,50 @@ using T                = double;
 
 int main(int argc, char* argv[]) {
     ippl::initialize(argc, argv);
-    {
+    int result = 0;
+    try {
         Inform msg("FreeElectronLaser");
 
         static IpplTimings::TimerRef mainTimer = IpplTimings::getTimer("total");
         IpplTimings::startTimer(mainTimer);
 
-        // First positional argument (if any, and not an --option) overrides the
-        // example configuration staged next to the build-tree executable.
-        std::string config_path = IPPL_FEL_DEFAULT_CONFIG;
-        if (argc > 1 && argv[1][0] != '-') {
-            config_path = argv[1];
+        std::filesystem::path restartPath;
+        for (int i = 1; i < argc; ++i) {
+            if (std::string_view(argv[i]) == "--restart") {
+                if (++i == argc || argv[i][0] == '-' || !restartPath.empty())
+                    throw std::runtime_error("--restart requires one checkpoint directory");
+                restartPath = argv[i];
+            }
         }
-        msg << "Reading configuration from " << config_path << endl;
-        config cfg = read_config(config_path.c_str());
-
-        // Create the manager for the FEL application.
+        std::filesystem::path configPath = IPPL_FEL_DEFAULT_CONFIG;
+        if (!restartPath.empty()) {
+#ifdef IPPL_ENABLE_OPENPMD
+            std::error_code error;
+            const auto directory = std::filesystem::canonical(restartPath, error);
+            FELCheckpoint::requireRestart(!error && directory.extension() != ".partial"
+                                              && std::filesystem::is_regular_file(directory / "config.json", error),
+                                          "Incomplete FEL checkpoint: " + restartPath.string());
+            configPath = directory / "config.json";
+#else
+            throw std::runtime_error("FEL checkpoints require IPPL_ENABLE_OPENPMD=ON");
+#endif
+        }
+        if (argc > 1 && argv[1][0] != '-') configPath = argv[1];
+        msg << "Reading configuration from " << configPath.string() << endl;
+        config cfg = read_config(configPath.c_str());
+#ifndef IPPL_ENABLE_OPENPMD
+        if (cfg.checkpointInterval)
+            throw std::runtime_error("FEL checkpoints require IPPL_ENABLE_OPENPMD=ON");
+#endif
         FreeElectronLaserManager<T, Dim> manager(cfg);
+        manager.setRestartPath(restartPath);
 
         // Pre-run: build mesh, fields, particles, FDTD solver; derive dt and nt.
         manager.pre_run();
 
         msg << "Starting iterations ..." << endl;
 
-        manager.run(manager.getNt());
+        manager.run(manager.remainingSteps());
 
 #ifdef IPPL_ENABLE_CATALYST
         manager.cat_viz.Finalize();
@@ -72,8 +92,19 @@ int main(int argc, char* argv[]) {
         IpplTimings::stopTimer(mainTimer);
         IpplTimings::print();
         IpplTimings::print(std::string("timing.dat"));
+#ifdef IPPL_ENABLE_OPENPMD
+    } catch (const FELCheckpoint::InvalidRestart& error) {
+        if (ippl::Comm->rank() == 0) std::cerr << "FEL: " << error.what() << std::endl;
+        result = 1;
+#endif
+    } catch (const IpplException& error) {
+        std::cerr << "FEL: " << error.where() << ": " << error.what() << std::endl;
+        ippl::Comm->abort(1);
+    } catch (const std::exception& error) {
+        std::cerr << "FEL: " << error.what() << std::endl;
+        ippl::Comm->abort(1);
     }
     ippl::finalize();
 
-    return 0;
+    return result;
 }

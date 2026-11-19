@@ -21,10 +21,11 @@ add_custom_command(
 add_custom_target(ippl_fel_config DEPENDS "${IPPL_FEL_CONFIG_BUILD}")
 add_dependencies(FreeElectronLaser ippl_fel_config)
 
-target_link_libraries(FreeElectronLaser PRIVATE IPPL::ippl)
+target_link_libraries(FreeElectronLaser PRIVATE IPPL::ippl catalyst::catalyst)
+target_compile_definitions(FreeElectronLaser PRIVATE IPPL_FEL_DEFAULT_CONFIG="${IPPL_FEL_CONFIG_BUILD}")
 
-if(IPPL_ENABLE_CATALYST)
-  target_link_libraries(FreeElectronLaser PRIVATE catalyst::catalyst)
+if(IPPL_ENABLE_OPENPMD AND NOT "HDF5" IN_LIST IPPL_OPENPMD_BACKENDS)
+  target_compile_definitions(FreeElectronLaser PRIVATE IPPL_FEL_CHECKPOINT_BP5)
 endif()
 
 target_include_directories(FreeElectronLaser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

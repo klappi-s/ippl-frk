@@ -11,7 +11,9 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -21,9 +23,7 @@
 #include "Types/Vector.h"
 
 #include "units.h"
-#ifdef IPP_ENABLE_CATALYST
 #include <catalyst_conduit.hpp>
-#endif
 
 struct config {
     using scalar = double;
@@ -57,13 +57,14 @@ struct config {
     scalar undulator_period;  // Period of the undulator
     scalar undulator_length;  // Length of the undulator
 
+    unsigned checkpointInterval = 0;
+    std::string jobFileContents;
     std::string output_path;                                     // Path to output files
     std::unordered_map<std::string, double> experiment_options;  // Additional experimental options
 };
 
 namespace fel_config_detail {
 
-#ifdef IPPL_ENABLE_CATALYST
     inline conduit_cpp::Node requiredNode(const conduit_cpp::Node& root, const std::string& path) {
         if (!root.has_path(path)) {
             throw std::runtime_error("Missing required configuration value '" + path + "'");
@@ -170,7 +171,6 @@ namespace fel_config_detail {
         }
         return result;
     }
-#endif
 
 }  // namespace fel_config_detail
 
@@ -242,7 +242,6 @@ inline std::string lowercase_singular(std::string str) {
     return str;
 }
 
-#ifdef IPPL_ENABLE_CATALYST
 inline double get_time_multiplier(const conduit_cpp::Node& root) {
     const std::string time_scale  = fel_config_detail::requiredString(root, "mesh/time-scale");
     std::string time_scale_string = lowercase_singular(time_scale);
@@ -309,12 +308,19 @@ inline double get_length_multiplier(const conduit_cpp::Node& root) {
 }
 inline config read_config(const char* filepath) {
     try {
+        std::ifstream file(filepath);
+        if (!file) throw std::runtime_error("Cannot open job file");
+        config ret{};
+        ret.jobFileContents.assign(std::istreambuf_iterator<char>(file), {});
         conduit_cpp::Node root;
-        conduit_node_load(conduit_cpp::c_node(&root), filepath, "json");
+        conduit_node_parse(conduit_cpp::c_node(&root), ret.jobFileContents.c_str(), "json");
+        if (root.has_path("checkpoint/interval")) {
+            ret.checkpointInterval =
+                fel_config_detail::requiredInteger<unsigned>(root, "checkpoint/interval");
+        }
 
         const config::scalar lmult = get_length_multiplier(root);
         const config::scalar tmult = get_time_multiplier(root);
-        config ret{};
 
         ret.extents = fel_config_detail::getVector<config::scalar, 3>(root, "mesh/extents") * lmult
                       / unit_length_in_meters;
@@ -395,10 +401,5 @@ inline config read_config(const char* filepath) {
                                  + "': " + error.what());
     }
 }
-#else
-inline config read_config(const char* filepath) {
-    return {};
-}
-#endif
 
 #endif
