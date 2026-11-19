@@ -15,8 +15,6 @@
 #include "Random/NormalDistribution.h"
 #include "Random/Randn.h"
 
-using view_type = typename ippl::detail::ViewType<ippl::Vector<double, Dim>, 1>::view_type;
-
 // define functions used in sampling particles
 struct CustomDistributionFunctions {
     struct CDF {
@@ -43,22 +41,23 @@ struct CustomDistributionFunctions {
     };
 };
 
-template <typename T, unsigned Dim>
-class LandauDampingManager : public AlpineManager<T, Dim> {
+template <typename T, unsigned Dim, typename... IDProperties>
+class LandauDampingManager : public AlpineManager<T, Dim, IDProperties...> {
 public:
-    using ParticleContainer_t = ParticleContainer<T, Dim>;
+    using ParticleContainer_t = ParticleContainer<T, Dim, IDProperties...>;
+    using view_type = typename ParticleContainer_t::particle_position_type::view_type;
     using FieldContainer_t    = FieldContainer<T, Dim>;
     using FieldSolver_t       = FieldSolver<T, Dim>;
-    using LoadBalancer_t      = LoadBalancer<T, Dim>;
+    using LoadBalancer_t      = LoadBalancer<T, Dim, IDProperties...>;
 
     LandauDampingManager(size_type totalP_, int nt_, Vector_t<int, Dim>& nr_, double lbt_,
                          std::string& solver_, std::string& stepMethod_)
-        : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_) {}
+        : AlpineManager<T, Dim, IDProperties...>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_) {}
 
     LandauDampingManager(size_type totalP_, int nt_, Vector_t<int, Dim>& nr_, double lbt_,
                          std::string& solver_, std::string& stepMethod_,
                          std::vector<std::string> preconditioner_params_)
-        : AlpineManager<T, Dim>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_,
+        : AlpineManager<T, Dim, IDProperties...>(totalP_, nt_, nr_, lbt_, solver_, stepMethod_,
                                 preconditioner_params_) {}
 
     ~LandauDampingManager() {}

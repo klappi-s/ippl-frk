@@ -6,11 +6,13 @@
 #include "Manager/BaseManager.h"
 
 // Define the ParticlesContainer class
-template <typename T, unsigned Dim = 3>
+template <typename T, unsigned Dim = 3, typename... IDProperties>
 class ParticleContainer : public ippl::ParticleBase<
-                              ippl::ParticleSpatialLayout<T, Dim, ippl::UniformCartesian<T, Dim>>> {
+                              ippl::ParticleSpatialLayout<T, Dim, ippl::UniformCartesian<T, Dim>>,
+                              IDProperties...> {
     using Base =
-        ippl::ParticleBase<ippl::ParticleSpatialLayout<T, Dim, ippl::UniformCartesian<T, Dim>>>;
+        ippl::ParticleBase<ippl::ParticleSpatialLayout<T, Dim, ippl::UniformCartesian<T, Dim>>,
+                           IDProperties...>;
 
 public:
     ippl::ParticleAttrib<double> q;           // charge
