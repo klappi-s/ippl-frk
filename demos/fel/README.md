@@ -36,49 +36,79 @@ Output is written to the directory given by `output.path` in the config:
 `radiation_<nranks>.csv` holds the radiated power. The directory is created
 automatically; relative paths are resolved from the process working directory.
 
-## Acknowledgements
-
-The relativistic bunch initialization and the resonance-power diagnostic are directly ported from [MITHRA](https://github.com/aryafallahi/mithra), a full-wave free-electron-laser solver by A. Fallahi (GPL-licensed). It was also used as reference for much of the other parts. 
-
 ## Checkpoint and restart
 
-Build the same executable with `-DIPPL_ENABLE_OPENPMD=ON` and add
-`"checkpoint": {"interval": 100}` to the job JSON. The interval counts
-completed timesteps. A positive value saves every interval and at the final
-step. Omitting the option or using zero disables checkpoints.
+Enable both `-DIPPL_ENABLE_FEL=ON` and `-DIPPL_ENABLE_OPENPMD=ON` when configuring the build. Checkpoints use parallel HDF5 by default, or BP5 in an ADIOS2-only build.
 
-Each completed checkpoint is a directory under `output.path/checkpoints`.
-For example, resume after timestep 100 with two MPI ranks. The job that wrote
-the checkpoint may have used a different number of ranks:
+**Save.** From the repository root, save the [complete example below](#example-job-file) as `job.json`. To enable the same checkpoints in an existing job, set these two top-level entries.
 
-```sh
-mpiexec -n 2 ./FreeElectronLaser --restart ./results/checkpoints/step_100
+```json
+{
+  "output": {"path": "results"},
+  "checkpoint": {"interval": 18}
+}
 ```
 
-Use the FEL option `--info 1` or higher to emit CSV diagnostics.
-The checkpoint includes the job configuration. To extend the end time, change
-the checkpoint interval, or write a separate continuation, supply a job first:
-
 ```sh
-mpiexec -n 2 ./FreeElectronLaser longer.json --restart ./results/checkpoints/step_100
+mpiexec -n 2 ./build/demos/fel/FreeElectronLaser job.json --info 1
 ```
 
-Restart restores the simulation time, particle attributes, FDTD potential
-history and the radiation sample window. Each new rank reads its part of the
-saved mesh, including boundary and ghost planes. When the decomposition changes,
-IPPL redistributes particles by position. The rank that owns the exit plane
-reads the radiation history. This also works with existing version-one checkpoints.
+This writes a checkpoint every 18 completed timesteps and at the final step. An interval of zero or an omitted `checkpoint` entry disables checkpointing.
 
-Keep the mesh and FEL physics fixed. Any MPI rank count supported by the FEL
-z decomposition may resume the run. Particle order and floating-point results
-can vary across decompositions. Diagnostic CSV filenames include the rank count;
-changing it starts a new segment and requires fresh or empty CSVs for that count. Relative paths in the job remain
-relative to the launch directory. CSV output can append where it ended at the
-checkpoint, or start with new headers in an empty output directory. If a run
-continued past the checkpoint, choose a new `output.path` to replay it.
+**Resume.** Pass the entire completed `step_<N>` directory to the same executable. If the first job stopped at step 18, this continues on one MPI rank using the saved configuration.
 
-The directory is published after all ranks close the openPMD output. Existing
-checkpoints are protected. An interrupted write may leave a `.partial`
-directory. A retry uses a fresh temporary directory. Retain the
-whole checkpoint directory, including the particles subdirectory. The default
-backend is parallel HDF5; a BP5-only build uses BP5.
+```sh
+mpiexec -n 1 ./build/demos/fel/FreeElectronLaser --restart results/checkpoints/step_18 --info 1
+```
+
+The checkpoint restores the particles, fields and radiation history. Keep the entire directory when moving it. A directory ending in `.partial` is incomplete. You can change the MPI rank count within the limits of the FEL mesh decomposition.
+
+**Extend or replay.** Copy `results/checkpoints/step_18/config.json` to `continue.json`. To extend the run, increase `mesh.total-time`. To replay an older checkpoint after the original run advanced further, set `output.path` to a fresh directory so later CSV rows and checkpoints are preserved. Keep the mesh and physics settings fixed and pass the edited job file before `--restart`.
+
+```sh
+mpiexec -n 2 ./build/demos/fel/FreeElectronLaser continue.json --restart results/checkpoints/step_18 --info 1
+```
+
+## Acknowledgements
+
+The relativistic bunch initialization and the resonance-power diagnostic are directly ported from [MITHRA](https://github.com/aryafallahi/mithra), a full-wave free-electron-laser solver by A. Fallahi (GPL-licensed). It was also used as reference for much of the other parts.
+
+## Example job file
+
+Save this as `job.json` for a 30-step run. It writes `results/checkpoints/step_18` and `results/checkpoints/step_30` relative to the directory where you launch the executable.
+
+```json
+{
+  "timestep-ratio": 1.0,
+  "mesh": {
+    "length-scale": "micrometers",
+    "time-scale": "picoseconds",
+    "extents": [3200.0, 3200.0, 280.0],
+    "resolution": [10, 10, 300],
+    "total-time": 30000.0,
+    "space-charge": false
+  },
+  "bunch": {
+    "charge": 1.846e8,
+    "mass": 1.846e8,
+    "number-of-particles": 131072,
+    "gamma": 100.41,
+    "position": [0.0, 0.0, 0.0],
+    "sigma-position": [260.0, 260.0, 50.25],
+    "sigma-momentum": [1.0e-8, 1.0e-8, 100.41e-4],
+    "distribution-truncations": [1040.0, 1040.0, 90.0]
+  },
+  "undulator": {
+    "static-undulator": {
+      "undulator-parameter": 1.417,
+      "period": 30000.0,
+      "length": 9e6
+    }
+  },  
+  "output": {
+    "path": "results"
+  },
+  "checkpoint": {
+    "interval": 30
+  }
+}```
